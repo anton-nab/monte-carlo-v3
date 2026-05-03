@@ -1,0 +1,150 @@
+===================================================================
+MONTE CARLO V3 — LINKS & RESOURCES
+===================================================================
+Last updated: 2026-05-04
+Phase: 0 (Foundation) — COMPLETE
+===================================================================
+
+
+-------------------------------------------------------------------
+🚀 PRODUCTION (LIVE)
+-------------------------------------------------------------------
+Frontend (live app):     https://monte-carlo-v3-snowy.vercel.app
+Backend API:             https://monte-carlo-v3-production.up.railway.app
+  - Health check:        https://monte-carlo-v3-production.up.railway.app/health
+  - API version:         https://monte-carlo-v3-production.up.railway.app/api/version
+  - Auto docs (Swagger): https://monte-carlo-v3-production.up.railway.app/docs
+
+
+-------------------------------------------------------------------
+💻 DEVELOPMENT (LOCAL)
+-------------------------------------------------------------------
+Frontend (local):        http://localhost:3000
+Backend (local):         http://localhost:8000
+  - Local docs:          http://localhost:8000/docs
+
+Project folder:          C:\Users\anton\PROJETS\monte-carlo-v3
+  - Backend folder:      C:\Users\anton\PROJETS\monte-carlo-v3\backend
+  - Frontend folder:     C:\Users\anton\PROJETS\monte-carlo-v3\frontend
+
+
+-------------------------------------------------------------------
+📦 SOURCE CODE
+-------------------------------------------------------------------
+GitHub repo (private):   https://github.com/anton-nab/monte-carlo-v3
+  - Issues:              https://github.com/anton-nab/monte-carlo-v3/issues
+  - Settings:            https://github.com/anton-nab/monte-carlo-v3/settings
+
+
+-------------------------------------------------------------------
+☁️ CLOUD DASHBOARDS
+-------------------------------------------------------------------
+Railway (backend host):  https://railway.com/dashboard
+  - Project:             https://railway.com/project/<project-id>
+  - Logs:                Onglet "Deployments" → cliquer sur deploy → "Logs"
+  - Variables:           Onglet "Variables"
+  - Domain settings:     Onglet "Settings" → "Networking"
+
+Vercel (frontend host):  https://vercel.com/dashboard
+  - Project:             https://vercel.com/anton-nab/monte-carlo-v3
+  - Deployments:         https://vercel.com/anton-nab/monte-carlo-v3/deployments
+  - Env variables:       Settings → Environment Variables
+  - Logs:                Cliquer sur deployment → "Function Logs"
+
+GitHub:                  https://github.com/settings (account settings)
+
+
+-------------------------------------------------------------------
+🔌 APIs EXTERNES (à utiliser dans les phases suivantes)
+-------------------------------------------------------------------
+PHASE 1 (Macro):
+  Fred API (Reserve Federale, gratuit, illimite)
+    - Inscription:       https://fredaccount.stlouisfed.org/apikey
+    - Documentation:     https://fred.stlouisfed.org/docs/api/fred/
+    - Series catalogue:  https://fred.stlouisfed.org/categories
+    - Python wrapper:    https://github.com/mortada/fredapi
+
+PHASE 2 (Company):
+  Finnhub (donnees societes, gratuit 60 calls/min)
+    - Inscription:       https://finnhub.io/register
+    - Documentation:     https://finnhub.io/docs/api
+    - Python wrapper:    https://github.com/Finnhub-Stock-API/finnhub-python
+
+  Yahoo Finance (gratuit, sans cle)
+    - Python wrapper:    https://github.com/ranaroussi/yfinance
+
+  SEC Edgar (filings, gratuit)
+    - Documentation:     https://www.sec.gov/edgar/sec-api-documentation
+    - Python wrapper:    https://github.com/jadchaar/sec-api
+
+PHASE 3+ (News & autres):
+  NewsAPI (gratuit 100 calls/jour)
+    - Inscription:       https://newsapi.org/register
+    - Documentation:     https://newsapi.org/docs
+
+
+-------------------------------------------------------------------
+🛠️ STACK TECHNIQUE
+-------------------------------------------------------------------
+Backend:
+  - FastAPI:             https://fastapi.tiangolo.com/
+  - Uvicorn:             https://www.uvicorn.org/
+  - Pydantic:            https://docs.pydantic.dev/
+  - SQLAlchemy:          https://www.sqlalchemy.org/
+
+Frontend:
+  - Next.js:             https://nextjs.org/docs
+  - React:               https://react.dev/
+  - TypeScript:          https://www.typescriptlang.org/docs/
+  - Tailwind CSS:        https://tailwindcss.com/docs
+
+Outils:
+  - Git:                 https://git-scm.com/doc
+  - Node.js:             https://nodejs.org/en/docs
+  - Python 3.13 docs:    https://docs.python.org/3.13/
+
+
+-------------------------------------------------------------------
+📚 DOCUMENTATION DU PROJET (fichiers .md a la racine)
+-------------------------------------------------------------------
+  - README.md                       Description generale
+  - PROJECT_RULES.md                Regles de communication & process
+  - MODERNIZATION_PLAN.md           Vue d'ensemble du plan 5 phases
+  - DETAILED_DEVELOPMENT_PLAN.md    Plan detaille (15k+ mots)
+  - PHASE_0_SETUP.md                Guide setup Phase 0 (deja accomplie)
+  - COST_ANALYSIS.md                Analyse cout (~$0-5/mois en dev)
+  - NEXT_STEPS.md                   Prochaines etapes
+  - CHANGELOG.md                    Historique des versions
+  - SUMMARY.md                      Synthese
+  - OPTIMIZATIONS.md                Idees d'optimisation
+
+
+-------------------------------------------------------------------
+🔧 COMMANDES UTILES
+-------------------------------------------------------------------
+DEMARRER LE PROJET EN LOCAL:
+  Terminal 1 (PowerShell):
+    cd C:\Users\anton\PROJETS\monte-carlo-v3\backend
+    .\venv\Scripts\activate
+    python main.py
+
+  Terminal 2 (cmd.exe — PAS PowerShell pour npm):
+    cd /d C:\Users\anton\PROJETS\monte-carlo-v3\frontend
+    npm run dev
+
+PUSH UNE MODIF:
+    cd C:\Users\anton\PROJETS\monte-carlo-v3
+    git add .
+    git commit -m "description"
+    git push
+
+VOIR LES LOGS BACKEND (Railway):
+    Dashboard Railway → service → Deployments → cliquer le deploy → Logs
+
+VOIR LES LOGS FRONTEND (Vercel):
+    Dashboard Vercel → projet → Deployments → cliquer le deploy → Logs
+
+
+===================================================================
+Garde ce fichier a jour quand tu ajoutes de nouveaux services!
+===================================================================
