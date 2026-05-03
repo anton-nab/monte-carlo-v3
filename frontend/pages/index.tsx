@@ -30,7 +30,8 @@ export default function Home() {
   const checkApiHealth = async () => {
     try {
       // Get API URL from environment (set in Vercel)
-      const apiUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
+      // Strip trailing slash to be tolerant of "https://api.com/" vs "https://api.com"
+      const apiUrl = (process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000').replace(/\/+$/, '');
 
       // Call backend /health endpoint
       const response = await fetch(`${apiUrl}/health`, {
