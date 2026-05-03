@@ -1,0 +1,67 @@
+# ===================================================================
+# ROOT .gitignore — Monte Carlo V3
+# ===================================================================
+# Sub-folders (backend/, frontend/) have their own .gitignore.
+# This file handles project root + things missed by sub-gitignores.
+
+# ===== PYTHON =====
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+*.egg-info/
+.pytest_cache/
+
+# Python virtual environments (anywhere in tree)
+venv/
+env/
+.venv/
+.env/
+ENV/
+
+# ===== NODE / NEXT.JS =====
+node_modules/
+.next/
+out/
+build/
+dist/
+
+# ===== ENVIRONMENT VARIABLES (CRITICAL — never commit secrets) =====
+.env
+.env.local
+.env.*.local
+.env.development.local
+.env.production.local
+!.env.example
+
+# ===== CLAUDE CODE (internal session files, NOT for git) =====
+.claude/
+
+# ===== IDE / EDITORS =====
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.cursor/
+
+# ===== OS =====
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# ===== LOGS / DEBUG =====
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pip-log.txt
+
+# ===== STREAMLIT CACHE (legacy app.py) =====
+.streamlit/
+
+# ===== TEMPORARY / BUILD =====
+*.tmp
+*.bak
+.cache/

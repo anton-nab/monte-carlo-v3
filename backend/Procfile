@@ -1,0 +1,19 @@
+# ===================================================================
+# Railway Deployment Configuration
+# ===================================================================
+# This file tells Railway HOW to run your backend
+#
+# QUOI: Procfile is a deployment manifest
+# POURQUOI: Railway doesn't know how to start FastAPI by default
+#           This tells it: "Run this command to start the server"
+# COMMENT: One line per process type (we only have web)
+
+# Process type: web (HTTP server)
+# Command: uvicorn main:app
+#   - uvicorn = ASGI server
+#   - main = module name (main.py)
+#   - app = FastAPI instance name
+# --host 0.0.0.0 = Listen on all IPs (needed for Railway)
+# --port $PORT = Use Railway's PORT env var (auto-set)
+
+web: uvicorn main:app --host 0.0.0.0 --port $PORT

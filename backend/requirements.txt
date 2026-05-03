@@ -1,0 +1,46 @@
+# ===================================================================
+# PHASE 0: Foundation Dependencies
+# ===================================================================
+# Versions compatibles Python 3.13
+# Utilise >= pour permettre les patchs de securite
+
+# WEB FRAMEWORK
+fastapi>=0.115.0              # API framework (lightweight, async)
+uvicorn>=0.32.0               # ASGI server (run FastAPI)
+
+# HTTP CLIENT
+httpx>=0.27.0                 # Async HTTP requests (for APIs)
+
+# DATABASE
+sqlalchemy>=2.0.36            # ORM (database abstraction)
+psycopg2-binary>=2.9.10       # PostgreSQL driver (wheels Python 3.13)
+
+# DATA SCIENCE (from your existing project)
+numpy>=2.1.0                  # Numerical computing
+pandas>=2.2.3                 # Data manipulation
+scipy>=1.14.0                 # Scientific computing (for Monte Carlo)
+
+# ENVIRONMENT
+python-dotenv>=1.0.1          # Load .env variables
+
+# UTILITIES
+pydantic>=2.10.0              # Data validation
+
+# ===================================================================
+# NOTES
+# ===================================================================
+# Phase 0 = Minimal setup. We'll add more in future phases:
+#
+# Phase 1 (Macro):
+# - fredapi (direct Fred API wrapper)
+#
+# Phase 2 (Company):
+# - finnhub-python (Finnhub API client)
+#
+# Phase 4 (Monitoring):
+# - sentry-sdk (error tracking)
+#
+# Phase 5 (Background jobs):
+# - APScheduler (background task scheduling)
+# - celery (optional, for heavy tasks)
+# ===================================================================
