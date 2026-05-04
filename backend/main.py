@@ -23,6 +23,9 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from datetime import datetime
 
+# Routers
+from api.macro import router as macro_router
+
 # ===========================================================================
 # 1. CRÉER L'APPLICATION FASTAPI
 # ===========================================================================
@@ -30,7 +33,7 @@ from datetime import datetime
 app = FastAPI(
     title="Monte Carlo API",
     description="IBM-Equivalent Financial Analysis Platform",
-    version="0.0.1"
+    version="0.1.0"  # Phase 1: Global Macro Layer
 )
 
 # ===========================================================================
@@ -54,6 +57,14 @@ app.add_middleware(
     allow_methods=["*"],                      # Allow GET, POST, PUT, DELETE, etc.
     allow_headers=["*"],                      # Allow any header
 )
+
+# ===========================================================================
+# 2.5. INCLURE LES ROUTERS (organisation modulaire des endpoints)
+# ===========================================================================
+# Chaque module dans api/ definit un router prefixe.
+# Cela evite que main.py grossisse a chaque nouvelle phase.
+
+app.include_router(macro_router)  # /api/macro/*  (Phase 1)
 
 # ===========================================================================
 # 3. ROUTES (Endpoints API)
