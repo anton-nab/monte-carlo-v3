@@ -2,10 +2,11 @@
  * Macro Dashboard page
  * ====================
  *
- * Phase 1 MVP: 5 indicateurs US (inflation, chomage, Fed Rate, GDP, 10Y yield).
+ * Phase 1: 17 indicateurs sur 4 pays (US/EU/UK/JP) via Fred.
  *
- * Phase 1.1 (a venir): selecteur de pays (US/EU/UK/JP/CN) avec OECD provider.
- * Phase 6 (Bloomberg): multi-fenetres, watchlists, alertes.
+ * Phase 1.5 (a venir): China via World Bank, donnees natives ECB/BoE/BoJ
+ *                     pour les indicateurs ou Fred est en retard.
+ * Phase 6 (Bloomberg): multi-fenetres, watchlists, alertes, dark mode terminal.
  */
 
 import Head from 'next/head';
@@ -13,11 +14,72 @@ import Link from 'next/link';
 
 import { MacroIndicator } from '@/components/MacroIndicator';
 
+interface IndicatorConfig {
+  indicator: string;
+  title: string;
+  decimals: number;
+}
+
+interface CountryConfig {
+  code: string;
+  flag: string;
+  name: string;
+  indicators: IndicatorConfig[];
+}
+
+const COUNTRIES: CountryConfig[] = [
+  {
+    code: 'us',
+    flag: '🇺🇸',
+    name: 'United States',
+    indicators: [
+      { indicator: 'inflation', title: 'Inflation (CPI)', decimals: 2 },
+      { indicator: 'unemployment', title: 'Unemployment', decimals: 1 },
+      { indicator: 'fed_rate', title: 'Fed Funds Rate', decimals: 2 },
+      { indicator: 'gdp', title: 'Real GDP Growth', decimals: 2 },
+      { indicator: 'yield_10y', title: '10Y Treasury Yield', decimals: 3 },
+    ],
+  },
+  {
+    code: 'eu',
+    flag: '🇪🇺',
+    name: 'Eurozone',
+    indicators: [
+      { indicator: 'inflation', title: 'Inflation (HICP)', decimals: 2 },
+      { indicator: 'unemployment', title: 'Unemployment', decimals: 1 },
+      { indicator: 'ecb_rate', title: 'ECB Deposit Rate', decimals: 2 },
+      { indicator: 'gdp', title: 'Real GDP', decimals: 0 },
+      { indicator: 'bund_10y', title: 'Bund 10Y Yield', decimals: 3 },
+    ],
+  },
+  {
+    code: 'gb',
+    flag: '🇬🇧',
+    name: 'United Kingdom',
+    indicators: [
+      { indicator: 'inflation', title: 'Inflation (CPI)', decimals: 2 },
+      { indicator: 'unemployment', title: 'Unemployment', decimals: 1 },
+      { indicator: 'gdp', title: 'Real GDP', decimals: 0 },
+      { indicator: 'gilt_10y', title: 'Gilt 10Y Yield', decimals: 3 },
+    ],
+  },
+  {
+    code: 'jp',
+    flag: '🇯🇵',
+    name: 'Japan',
+    indicators: [
+      { indicator: 'inflation', title: 'Inflation (CPI)', decimals: 2 },
+      { indicator: 'unemployment', title: 'Unemployment', decimals: 1 },
+      { indicator: 'gdp', title: 'Real GDP', decimals: 0 },
+    ],
+  },
+];
+
 export default function Dashboard() {
   return (
     <>
       <Head>
-        <title>Macro Dashboard — Monte Carlo v3</title>
+        <title>Global Macro Dashboard — Monte Carlo v3</title>
       </Head>
 
       <div className="min-h-screen bg-gradient-to-br from-slate-900 via-slate-800 to-slate-900 text-white">
@@ -27,7 +89,7 @@ export default function Dashboard() {
             <div>
               <h1 className="text-2xl font-bold">📊 Global Macro Dashboard</h1>
               <p className="text-sm text-white/60">
-                Live macroeconomic indicators · Phase 1 MVP
+                17 indicators · 4 countries · live data via FRED
               </p>
             </div>
             <Link
@@ -39,72 +101,64 @@ export default function Dashboard() {
           </div>
         </header>
 
-        {/* Content */}
-        <main className="max-w-7xl mx-auto px-6 py-8">
-          {/* Section: USA — Critical indicators */}
-          <section className="mb-12">
+        {/* Quick country navigation */}
+        <nav className="border-b border-white/10 px-6 py-3 bg-slate-900/50">
+          <div className="max-w-7xl mx-auto flex flex-wrap gap-3 text-sm">
+            <span className="text-white/50">Jump to:</span>
+            {COUNTRIES.map((c) => (
+              <a
+                key={c.code}
+                href={`#${c.code}`}
+                className="text-white/80 hover:text-white transition"
+              >
+                {c.flag} {c.name}
+              </a>
+            ))}
+            <span className="text-white/30">·</span>
+            <span className="text-white/40">🇨🇳 China (Phase 1.5)</span>
+          </div>
+        </nav>
+
+        {/* Main content */}
+        <main className="max-w-7xl mx-auto px-6 py-8 space-y-12">
+          {COUNTRIES.map((country) => (
+            <section key={country.code} id={country.code} className="scroll-mt-24">
+              <div className="flex items-baseline gap-3 mb-4">
+                <h2 className="text-xl font-semibold">
+                  {country.flag} {country.name}
+                </h2>
+                <span className="text-sm text-white/50">
+                  {country.indicators.length} indicators
+                </span>
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
+                {country.indicators.map((cfg) => (
+                  <MacroIndicator
+                    key={`${country.code}-${cfg.indicator}`}
+                    country={country.code}
+                    indicator={cfg.indicator}
+                    title={cfg.title}
+                    decimals={cfg.decimals}
+                  />
+                ))}
+              </div>
+            </section>
+          ))}
+
+          {/* China placeholder */}
+          <section id="cn" className="opacity-60 scroll-mt-24">
             <div className="flex items-baseline gap-3 mb-4">
-              <h2 className="text-xl font-semibold">🇺🇸 United States</h2>
-              <span className="text-sm text-white/50">Critical indicators</span>
-            </div>
-
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-              <MacroIndicator
-                country="us"
-                indicator="inflation"
-                title="Inflation (CPI)"
-                decimals={2}
-              />
-              <MacroIndicator
-                country="us"
-                indicator="unemployment"
-                title="Unemployment"
-                decimals={1}
-              />
-              <MacroIndicator
-                country="us"
-                indicator="fed_rate"
-                title="Fed Funds Rate"
-                decimals={2}
-              />
-              <MacroIndicator
-                country="us"
-                indicator="gdp"
-                title="Real GDP Growth"
-                decimals={2}
-              />
-            </div>
-          </section>
-
-          {/* Section: USA — Yields (full-width chart, plus de granularite) */}
-          <section className="mb-12">
-            <div className="flex items-baseline gap-3 mb-4">
-              <h2 className="text-xl font-semibold">📈 Yields</h2>
-              <span className="text-sm text-white/50">Treasury rates (daily)</span>
-            </div>
-
-            <div className="grid grid-cols-1 gap-4">
-              <MacroIndicator
-                country="us"
-                indicator="yield_10y"
-                title="US 10Y Treasury Yield"
-                decimals={3}
-              />
-            </div>
-          </section>
-
-          {/* Placeholder for future countries */}
-          <section className="mb-12 opacity-60">
-            <div className="flex items-baseline gap-3 mb-4">
-              <h2 className="text-xl font-semibold">🌍 Coming next</h2>
-              <span className="text-sm text-white/50">Phase 1.1</span>
+              <h2 className="text-xl font-semibold">🇨🇳 China</h2>
+              <span className="text-sm text-white/50">Phase 1.5</span>
             </div>
             <div className="bg-white/5 border border-white/10 rounded-lg p-6 text-center">
               <p className="text-white/70">
-                🇪🇺 Eurozone · 🇬🇧 UK · 🇯🇵 Japan · 🇨🇳 China
+                China indicators require dedicated provider (World Bank annual data
+                or paid Trading Economics for real-time).
               </p>
               <p className="text-sm text-white/50 mt-2">
-                OECD provider integration in progress (~20 indicators incoming)
+                Coming in Phase 1.5 with World Bank integration.
               </p>
             </div>
           </section>

@@ -88,34 +88,128 @@ REGISTRY: dict[str, dict[str, IndicatorSpec]] = {
     },
 
     # -----------------------------------------------------------------------
-    # EUROZONE — via OECD (Phase 1.5: ajouter ECB direct pour real-time)
-    # Note: les SDMX paths OECD sont fragiles, a tester/ajuster apres setup.
-    # Pour l'instant on declare les indicateurs, l'integration OECD finalisee
-    # dans un commit ulterieur.
+    # EUROZONE
+    # IDs Fred re-distribuant donnees ECB/Eurostat (plus simple que SDMX direct).
+    # Phase 1.5: brancher ECB Statistical Data Warehouse pour donnees natives plus fraiches.
     # -----------------------------------------------------------------------
     "eu": {
-        # TODO Phase 1.1: completer apres validation des paths OECD avec un
-        # premier test live. Format SDMX OECD: voir oecd_provider.py.
-        # Indicateurs cibles: inflation (HICP), unemployment, ECB rate, GDP,
-        # bund_10y (allemand comme proxy zone euro).
+        "inflation": IndicatorSpec(
+            provider="fred",
+            source_id="CP0000EZ19M086NEST",
+            description="Eurozone Harmonised Index of Consumer Prices (HICP)",
+            unit="index",
+            frequency="monthly",
+            importance="critical",
+        ),
+        "unemployment": IndicatorSpec(
+            provider="fred",
+            source_id="LRHUTTTTEZM156S",
+            description="Eurozone Harmonized Unemployment Rate",
+            unit="%",
+            frequency="monthly",
+            importance="critical",
+        ),
+        "ecb_rate": IndicatorSpec(
+            provider="fred",
+            source_id="ECBDFR",
+            description="ECB Deposit Facility Rate",
+            unit="%",
+            frequency="daily",
+            importance="critical",
+        ),
+        "gdp": IndicatorSpec(
+            provider="fred",
+            source_id="CLVMEURSCAB1GQEA19",
+            description="Eurozone Real GDP (chained linked volumes)",
+            unit="EUR M",
+            frequency="quarterly",
+            importance="critical",
+        ),
+        "bund_10y": IndicatorSpec(
+            provider="fred",
+            source_id="IRLTLT01DEM156N",
+            description="Germany 10-Year Government Bond Yield (Eurozone proxy)",
+            unit="%",
+            frequency="monthly",
+            importance="critical",
+        ),
     },
 
     # -----------------------------------------------------------------------
-    # UK — via OECD principalement
+    # UK — IDs Fred re-distribuant donnees ONS/OECD/BoE
+    # Phase 1.5: brancher BoE direct pour Bank Rate (Fred lag ~8 ans)
     # -----------------------------------------------------------------------
     "gb": {
-        # TODO Phase 1.1: integration OECD pour UK
+        "inflation": IndicatorSpec(
+            provider="fred",
+            source_id="GBRCPIALLMINMEI",
+            description="UK Consumer Price Index (all items)",
+            unit="index",
+            frequency="monthly",
+            importance="critical",
+        ),
+        "unemployment": IndicatorSpec(
+            provider="fred",
+            source_id="LRUNTTTTGBQ156S",
+            description="UK Unemployment Rate (quarterly, OECD harmonised)",
+            unit="%",
+            frequency="quarterly",
+            importance="critical",
+        ),
+        "gdp": IndicatorSpec(
+            provider="fred",
+            source_id="NGDPRSAXDCGBQ",
+            description="UK Real GDP (seasonally adjusted, chained linked)",
+            unit="GBP M",
+            frequency="quarterly",
+            importance="critical",
+        ),
+        "gilt_10y": IndicatorSpec(
+            provider="fred",
+            source_id="IRLTLT01GBM156N",
+            description="UK 10-Year Gilt Yield",
+            unit="%",
+            frequency="monthly",
+            importance="critical",
+        ),
+        # TODO Phase 1.5: boe_rate via BoE direct API (Fred series lag depuis 2017)
     },
 
     # -----------------------------------------------------------------------
-    # JAPAN — via OECD
+    # JAPAN — IDs Fred re-distribuant donnees BoJ/Cabinet Office
+    # Phase 1.5: brancher BoJ direct pour Policy Rate et JGB (Fred lag)
     # -----------------------------------------------------------------------
     "jp": {
-        # TODO Phase 1.1: integration OECD pour Japon
+        "inflation": IndicatorSpec(
+            provider="fred",
+            source_id="JPNCPIALLMINMEI",
+            description="Japan CPI (all items) — note: stale data, last update mid-2021",
+            unit="index",
+            frequency="monthly",
+            importance="high",  # high not critical because stale
+        ),
+        "unemployment": IndicatorSpec(
+            provider="fred",
+            source_id="LRHUTTTTJPM156S",
+            description="Japan Harmonized Unemployment Rate",
+            unit="%",
+            frequency="monthly",
+            importance="critical",
+        ),
+        "gdp": IndicatorSpec(
+            provider="fred",
+            source_id="NGDPRSAXDCJPQ",
+            description="Japan Real GDP (seasonally adjusted)",
+            unit="JPY M",
+            frequency="quarterly",
+            importance="critical",
+        ),
+        # TODO Phase 1.5: boj_rate, jgb_10y via BoJ direct API (Fred series lag depuis 2017)
     },
 
     # -----------------------------------------------------------------------
-    # CHINA — OECD a une couverture limitee, World Bank en backup (Phase 1.5)
+    # CHINA — couverture Fred limitee, integration sera via World Bank (annuel)
+    # ou Trading Economics (paid) en Phase 1.5.
     # -----------------------------------------------------------------------
     "cn": {
         # TODO Phase 1.5: World Bank provider pour Chine
