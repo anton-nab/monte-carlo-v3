@@ -1,6 +1,139 @@
 # 📐 Detailed Development Plan - Blocks & Architecture
 
-## Vision Complète du Projet
+> ## ⚠️ ROADMAP V2 (revised 2026-05-04) — supersede les sections datées
+>
+> Ce document a été écrit avant la pivotation vers la vision **Bloomberg-lite global**.
+> Les sections legacy (Phase 1 = US macro only, etc.) restent en bas comme reference
+> historique mais ne reflètent plus la cible. **La source de vérité actuelle est:**
+>
+> - [MODERNIZATION_PLAN.md](./MODERNIZATION_PLAN.md) — vue d'ensemble + roadmap 11 phases
+> - Cette section "ROADMAP V2" ci-dessous — détails par phase
+>
+> ---
+>
+> ## 🆕 Phases ajoutées par rapport au plan d'origine
+>
+> ### Phase 1.5 — Polish v1 (~2-3h)
+> Refresh visuel du dashboard actuel sans ajouter de feature data.
+> - **Palette finance**: deep navy/black background, accents cyan/vert/rouge,
+>   blanc cassé pour le texte (style terminal)
+> - **Typographie monospace pour les chiffres** (`JetBrains Mono` ou `IBM Plex Mono`) —
+>   convention Bloomberg / Trade Republic
+> - **Cards plus denses** (style trading desk vs space-héro)
+> - **Hover effects** + animations sur tick updates (flash vert/rouge)
+> - **Click sur card → modal plein écran** avec chart agrandi
+> - **Period selector** (1M / 6M / 1Y / 5Y / Max) sur le chart agrandi
+> - **Migration Recharts → TradingView lightweight-charts** (gratuit, MIT, pro-grade)
+> - **Barre de recherche header** (placeholder pour P2 — visuel seulement)
+>
+> ### Phase 2 — Instruments universels (refonte du Phase 2 d'origine)
+> Couvre maintenant TOUS les types d'instruments, pas juste les actions US.
+> - **yfinance** comme source primaire (gratuit, global: stocks, ETF, indices, FX,
+>   commodities, crypto via Yahoo)
+> - **OpenFIGI** (Bloomberg open API gratuit) pour mapping ISIN ↔ ticker ↔ nom
+> - **Search universelle**: tape "Apple", "AAPL", "US0378331005" (ISIN), "AI.PA" — toutes
+>   ces formes ramènent au même instrument
+> - **Index local de ~70k tickers** avec fuzzy matching (rapidfuzz Python) pour
+>   suggestions instantanées en autocomplete
+> - **Page `/instrument/{ticker}`**: chart pro (TradingView), prix live, fondamentaux
+>   (P/E, EPS, dividende, market cap), news liées, bouton "Run Monte Carlo"
+> - **Backend**: `services/instruments/` avec `BaseInstrumentProvider`,
+>   `YFinanceProvider`, `instruments_service.py`
+>
+> ### Phase 2.5 — Index/ETF decomposition (NOUVELLE)
+> Voir **n'importe quel indice mondial** ou ETF avec ses composants détaillés.
+> - **25+ indices mondiaux**: S&P 500, Nasdaq 100, Dow 30, Russell 2000, EuroStoxx 50,
+>   STOXX 600, DAX 40, CAC 40, FTSE 100, FTSE MIB, IBEX 35, SMI, AEX, Nikkei 225,
+>   TOPIX, CSI 300, Hang Seng, KOSPI, Nifty 50, Bovespa, TSX 60, ASX 200
+> - **ETFs**: tous ceux dont l'issuer publie ses holdings (iShares, SPDR, Vanguard,
+>   ARK, Global X) — soit ~95% des ETF majeurs
+> - **3 vues par indice**: treemap (heatmap), table triable, donut sectoriel
+> - **Sources gratuites**: Wikipedia (constituents), iShares/SPDR/Vanguard CSVs
+>   officiels, Financial Modeling Prep en backup (250 calls/jour free)
+> - **Page `/index/{symbol}`** — chaque carré du treemap cliquable vers
+>   `/instrument/{ticker}` du composant
+>
+> ### Phase 2.7 — Discovery feed "Today" (NOUVELLE)
+> Page d'accueil du trader: ce qui bouge maintenant.
+> - **Top gainers/losers** (24h, 7j) par marché
+> - **Volume inhabituel** (>3x moyenne 30j)
+> - **52-week highs/lows** breaks
+> - **Buzz Reddit WSB** (mentions count delta) via Reddit API gratuit
+> - **News velocity** via NewsAPI (free 100/jour)
+> - **Insider buys récents** via SEC EDGAR (Form 4)
+> - **Short squeeze candidates** (short interest >20% + momentum)
+> - **ETF flows** quotidiens
+> - **Crypto trending** via CoinGecko free
+> - **Page `/discover`** — cards cliquables vers `/instrument/{ticker}`
+>
+> ### Phase 3.5 — Sentiment (NOUVELLE)
+> Indicateurs de sentiment de marché.
+> - **CNN Fear & Greed Index** (scraping légal des données publiques)
+> - **Crypto Fear & Greed** (alternative.me free API)
+> - **Custom FOMO indicator** combinant volume + buzz social + price action
+> - **Analyst consensus** (Strong Buy/Buy/Hold/Sell ratios) via yfinance
+> - **Insider trading clusters** (multiple insiders buying same stock = signal)
+> - **Short interest** + "days to cover" via Finnhub free
+> - **Page `/sentiment`** + widgets dans `/instrument/{ticker}`
+>
+> ### Phase 6 — Polish Bloomberg final (refonte du Phase 5 d'origine)
+> - **Layout multi-pane** (style Bloomberg Terminal): 4-6 fenêtres redimensionnables
+>   sur l'écran (ex: chart top-left, news top-right, watchlist bottom-left,
+>   simulation bottom-right)
+> - **Watchlists persistantes** (PostgreSQL + auth simple)
+> - **Alertes** (price cross, news event, volume spike) via WebSocket push
+> - **Dark mode terminal** complet (vert/orange sur noir, monospace partout)
+> - **Raccourcis clavier** (style Bloomberg: G GO pour ticker, etc.)
+> - **Multi-screen** (drag chart vers fenêtre séparée)
+>
+> ---
+>
+> ## 📋 Roadmap finale tabulaire
+>
+> | # | Phase | Status | Sortie utilisateur |
+> |---|-------|--------|---------------------|
+> | 0 | Foundation | ✅ Done | Site live |
+> | 1 | Global Macro | ✅ Done | `/dashboard` 4 pays / 17 indicators |
+> | 1.5 | Polish v1 | ⏳ Next | Site stop being "cheap" |
+> | 2 | Instruments universels | 🔜 | Search globale + page instrument |
+> | 2.5 | Index/ETF decomposition | 🔜 | `/index/{symbol}` 25+ indices |
+> | 2.7 | Discovery feed | 🔜 | `/discover` "today" |
+> | 3 | Monte Carlo intégré | 🔜 | Forecast bouton sur chaque instrument |
+> | 3.5 | Sentiment | 🔜 | `/sentiment` + widgets |
+> | 4 | Obligations & yield curves | 🔜 | `/bonds` global |
+> | 5 | Thèses & probabilités | 🔜 | `/research` |
+> | 6 | Polish Bloomberg final | 🔜 | Multi-pane layout terminal |
+>
+> **Estimation totale restante:** ~3-4 mois solo dev pour atteindre Phase 6.
+>
+> ---
+>
+> ## 📦 APIs gratuites mobilisées par phase
+>
+> | API | Phase | Usage |
+> |-----|-------|-------|
+> | FRED | ✅ 1 | Macro US + données internationales redistribuées |
+> | OECD | 1.5+ | Macro internationales natives (donnees fraiches) |
+> | yfinance | 2 | Tous instruments (stocks/ETF/indices/FX/commodities/crypto) |
+> | OpenFIGI | 2 | Mapping ISIN/CUSIP/ticker/nom mondial |
+> | Financial Modeling Prep | 2, 2.5 | Backup search + index data (250/jour) |
+> | Wikipedia | 2.5 | Constituents indices (S&P 500, CAC 40, ...) |
+> | iShares/SPDR/Vanguard CSVs | 2.5 | Holdings ETF officiels |
+> | Reddit API | 2.7, 3.5 | Buzz WSB, mentions count |
+> | NewsAPI | 2.7, 5 | News velocity (100/jour free) |
+> | SEC EDGAR | 2.7, 3.5 | Insider trading, filings |
+> | Finnhub | 2, 3.5 | Fundamentals, short interest, analyst |
+> | CoinGecko | 2.7 | Crypto trending |
+> | alternative.me | 3.5 | Crypto Fear & Greed |
+> | CNN Fear & Greed | 3.5 | Equity F&G (web scraping légal) |
+>
+> ---
+>
+> ## 🔚 Fin de la section ROADMAP V2 — le legacy ci-dessous est conservé pour reference
+
+---
+
+## Vision Complète du Projet (legacy)
 
 Vous allez transformer votre Streamlit local en **plateforme cloud professionnel**, étape par étape.
 

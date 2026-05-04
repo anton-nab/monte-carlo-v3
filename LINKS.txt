@@ -2,7 +2,8 @@
 MONTE CARLO V3 — LINKS & RESOURCES
 ===================================================================
 Last updated: 2026-05-04
-Phase: 0 (Foundation) — COMPLETE
+Phase: 1 (Global Macro) — COMPLETE
+Vision: Bloomberg-lite global terminal (11 phases roadmap)
 ===================================================================
 
 
@@ -10,9 +11,14 @@ Phase: 0 (Foundation) — COMPLETE
 🚀 PRODUCTION (LIVE)
 -------------------------------------------------------------------
 Frontend (live app):     https://monte-carlo-v3-snowy.vercel.app
+  - Home:                https://monte-carlo-v3-snowy.vercel.app
+  - Macro Dashboard:     https://monte-carlo-v3-snowy.vercel.app/dashboard
+
 Backend API:             https://monte-carlo-v3-production.up.railway.app
   - Health check:        https://monte-carlo-v3-production.up.railway.app/health
-  - API version:         https://monte-carlo-v3-production.up.railway.app/api/version
+  - Macro health:        https://monte-carlo-v3-production.up.railway.app/api/macro/health
+  - List indicators:     https://monte-carlo-v3-production.up.railway.app/api/macro/indicators
+  - Sample (US CPI):     https://monte-carlo-v3-production.up.railway.app/api/macro/us/inflation
   - Auto docs (Swagger): https://monte-carlo-v3-production.up.railway.app/docs
 
 
@@ -55,32 +61,79 @@ GitHub:                  https://github.com/settings (account settings)
 
 
 -------------------------------------------------------------------
-🔌 APIs EXTERNES (à utiliser dans les phases suivantes)
+🔌 APIs EXTERNES (par phase)
 -------------------------------------------------------------------
-PHASE 1 (Macro):
-  Fred API (Reserve Federale, gratuit, illimite)
-    - Inscription:       https://fredaccount.stlouisfed.org/apikey
+
+PHASE 1 — Macro (✅ DEPLOYE):
+  FRED (Federal Reserve, gratuit, illimite)
+    - Cle API:           https://fredaccount.stlouisfed.org/apikey
     - Documentation:     https://fred.stlouisfed.org/docs/api/fred/
     - Series catalogue:  https://fred.stlouisfed.org/categories
-    - Python wrapper:    https://github.com/mortada/fredapi
 
-PHASE 2 (Company):
-  Finnhub (donnees societes, gratuit 60 calls/min)
+PHASE 1.5 — Macro internationales natives (a integrer):
+  OECD SDMX-JSON (gratuit, pas de cle)
+    - Documentation:     https://data.oecd.org/api/sdmx-json-documentation/
+    - Endpoint:          https://sdmx.oecd.org/public/rest/data
+  ECB Statistical Data Warehouse (gratuit)
+    - Documentation:     https://data.ecb.europa.eu/help/api/overview
+    - Base URL:          https://data-api.ecb.europa.eu/service
+
+PHASE 2 — Instruments universels:
+  yfinance (Yahoo Finance via Python, gratuit, global)
+    - GitHub:            https://github.com/ranaroussi/yfinance
+    - Couvre: actions, ETF, indices, FX, commodities, crypto mondiaux
+  OpenFIGI (Bloomberg, mapping ISIN/ticker, gratuit)
+    - API doc:           https://www.openfigi.com/api
+    - Sans cle pour 25 req/min, avec cle pour 250 req/min
+  Financial Modeling Prep (free 250 calls/jour)
+    - Inscription:       https://site.financialmodelingprep.com/developer/docs
+  Finnhub (free 60 calls/min)
     - Inscription:       https://finnhub.io/register
     - Documentation:     https://finnhub.io/docs/api
-    - Python wrapper:    https://github.com/Finnhub-Stock-API/finnhub-python
 
-  Yahoo Finance (gratuit, sans cle)
-    - Python wrapper:    https://github.com/ranaroussi/yfinance
+PHASE 2.5 — Index/ETF decomposition:
+  Wikipedia (constituents indices, gratuit, parsing HTML)
+    - Ex S&P 500:        https://en.wikipedia.org/wiki/List_of_S%26P_500_companies
+    - Ex CAC 40:         https://en.wikipedia.org/wiki/CAC_40
+  iShares CSV (holdings ETF iShares, gratuit, quotidien)
+    - Ex EUR50.AS:       https://www.ishares.com/us/products/ (chercher "All Holdings")
+  State Street SPDR (SPY, sectoriels XL*)
+    - URL pattern:       https://www.ssga.com/us/en/individual/library-content/products/fund-data/etfs/us/holdings-daily-us-en-{ticker}.xlsx
+  Vanguard
+    - URL pattern:       https://institutional.vanguard.com/...
 
-  SEC Edgar (filings, gratuit)
+PHASE 2.7 — Discovery feed:
+  Reddit API (gratuit, OAuth requis)
+    - Documentation:     https://www.reddit.com/dev/api
+    - Wrapper Python:    https://github.com/praw-dev/praw
+  NewsAPI (gratuit 100 calls/jour)
+    - Inscription:       https://newsapi.org/register
+  CoinGecko (crypto trending, gratuit, pas de cle pour basics)
+    - Documentation:     https://www.coingecko.com/en/api/documentation
+  ETF.com / ETFAction (flows quotidiens, scraping)
+
+PHASE 3.5 — Sentiment:
+  CNN Fear & Greed Index (gratuit, scraping legal)
+    - URL:               https://production.dataviz.cnn.io/index/fearandgreed/graphdata
+  alternative.me Crypto Fear & Greed (gratuit API)
+    - Endpoint:          https://api.alternative.me/fng/
+  SEC EDGAR (insider trading Form 4, gratuit)
     - Documentation:     https://www.sec.gov/edgar/sec-api-documentation
     - Python wrapper:    https://github.com/jadchaar/sec-api
 
-PHASE 3+ (News & autres):
-  NewsAPI (gratuit 100 calls/jour)
-    - Inscription:       https://newsapi.org/register
-    - Documentation:     https://newsapi.org/docs
+PHASE 5+ — News etendu:
+  NewsAPI (deja liste, voir Phase 2.7)
+  RSS feeds:
+    - Reuters:           https://www.reuters.com/feeds/
+    - FT (limited free): https://www.ft.com/?format=rss
+
+PHASE 5+ optionnels (PAYANTS — uniquement si valide en usage):
+  X / Twitter API
+    - Basic plan:        $100/mois (pour buzz institutions/personnalites)
+    - Doc:               https://developer.x.com/
+  Trading Economics
+    - Basic:             $75/mois (196 pays donnees temps reel)
+    - Doc:               https://tradingeconomics.com/api
 
 
 -------------------------------------------------------------------
