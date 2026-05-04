@@ -168,7 +168,13 @@ export function MacroIndicator({
                 }}
                 labelStyle={{ color: '#fff' }}
                 itemStyle={{ color: lineColor }}
-                formatter={(v: number) => [`${v.toFixed(decimals)} ${data.unit}`, title]}
+                formatter={(v) => {
+                  const num = typeof v === 'number' ? v : Number(v);
+                  return [
+                    Number.isFinite(num) ? `${num.toFixed(decimals)} ${data.unit}` : '—',
+                    title,
+                  ];
+                }}
               />
               <Line
                 type="monotone"
