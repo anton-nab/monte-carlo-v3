@@ -9,6 +9,7 @@
 
 import { useState, useEffect } from 'react';
 import Head from 'next/head';
+import Link from 'next/link';
 
 interface ApiStatus {
   status: 'checking' | 'connected' | 'disconnected';
@@ -147,41 +148,34 @@ export default function Home() {
 
             {/* Navigation Buttons */}
             <div className="flex flex-col md:flex-row gap-4 justify-center mb-12">
-              <button
-                disabled={apiStatus.status !== 'connected'}
-                className={`
-                  px-8 py-4 rounded-lg font-bold text-lg transition
-                  ${apiStatus.status === 'connected'
-                    ? 'bg-green-500 hover:bg-green-600 text-white cursor-pointer'
-                    : 'bg-gray-400 text-gray-200 cursor-not-allowed opacity-50'
-                  }
-                `}
-              >
-                📊 Open Dashboard
-              </button>
+              {apiStatus.status === 'connected' ? (
+                <Link
+                  href="/dashboard"
+                  className="px-8 py-4 rounded-lg font-bold text-lg bg-green-500 hover:bg-green-600 text-white cursor-pointer transition"
+                >
+                  📊 Open Dashboard
+                </Link>
+              ) : (
+                <button
+                  disabled
+                  className="px-8 py-4 rounded-lg font-bold text-lg bg-gray-400 text-gray-200 cursor-not-allowed opacity-50"
+                >
+                  📊 Open Dashboard
+                </button>
+              )}
 
               <button
-                disabled={apiStatus.status !== 'connected'}
-                className={`
-                  px-8 py-4 rounded-lg font-bold text-lg transition
-                  ${apiStatus.status === 'connected'
-                    ? 'bg-purple-500 hover:bg-purple-600 text-white cursor-pointer'
-                    : 'bg-gray-400 text-gray-200 cursor-not-allowed opacity-50'
-                  }
-                `}
+                disabled
+                title="Coming in Phase 3"
+                className="px-8 py-4 rounded-lg font-bold text-lg bg-gray-400 text-gray-200 cursor-not-allowed opacity-50"
               >
                 🎲 Run Simulator
               </button>
 
               <button
-                disabled={apiStatus.status !== 'connected'}
-                className={`
-                  px-8 py-4 rounded-lg font-bold text-lg transition
-                  ${apiStatus.status === 'connected'
-                    ? 'bg-pink-500 hover:bg-pink-600 text-white cursor-pointer'
-                    : 'bg-gray-400 text-gray-200 cursor-not-allowed opacity-50'
-                  }
-                `}
+                disabled
+                title="Coming in Phase 2"
+                className="px-8 py-4 rounded-lg font-bold text-lg bg-gray-400 text-gray-200 cursor-not-allowed opacity-50"
               >
                 🏢 Analyze Company
               </button>

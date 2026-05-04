@@ -3,31 +3,25 @@
  * =============
  *
  * Applied to entire app
+ *
+ * Phase 1: Tailwind CSS active.
+ * Les 3 directives @tailwind ci-dessous injectent:
+ *   - base: reset CSS de Tailwind (Preflight)
+ *   - components: classes de composants reutilisables
+ *   - utilities: classes utilitaires (text-xl, bg-blue-500, p-4, ...)
  */
 
-* {
-  margin: 0;
-  padding: 0;
-  box-sizing: border-box;
-}
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
 
-body {
-  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', 'Oxygen',
-    'Ubuntu', 'Cantarell', 'Fira Sans', 'Droid Sans', 'Helvetica Neue',
-    sans-serif;
-  -webkit-font-smoothing: antialiased;
-  -moz-osx-font-smoothing: grayscale;
-}
+/* Custom global styles (apres les directives Tailwind pour qu'elles puissent override) */
 
-code {
-  font-family: source-code-pro, Menlo, Monaco, Consolas, 'Courier New',
-    monospace;
-}
-
-/* Phase 0: Minimal styling */
 html,
 body,
 #__next {
   width: 100%;
   height: 100%;
 }
+
+/* Phase 6 (Bloomberg-style): scrollbar terminal-style ici plus tard */

@@ -18,11 +18,11 @@
     "isolatedModules": true,
     "noEmit": true,
     "jsx": "preserve",
-    /* Path aliases */
+    /* Path aliases — convention Next.js: les fichiers sont a la racine du projet */
     "baseUrl": ".",
     "paths": {
       "@/*": [
-        "./src/*"
+        "./*"
       ]
     },
     /* Linting */
