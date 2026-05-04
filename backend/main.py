@@ -19,6 +19,13 @@ Comment ça marche:
 5. Frontend affiche le résultat
 """
 
+# Charger les variables d'environnement depuis .env avant tout autre import
+# qui en depend (ex: FredProvider lit FRED_API_KEY).
+# En production (Railway), les variables sont injectees directement dans
+# l'environnement du conteneur — load_dotenv() ne fait rien dans ce cas.
+from dotenv import load_dotenv
+load_dotenv()
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from datetime import datetime
