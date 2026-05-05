@@ -37,6 +37,11 @@
 >   suggestions instantanées en autocomplete
 > - **Page `/instrument/{ticker}`**: chart pro (TradingView), prix live, fondamentaux
 >   (P/E, EPS, dividende, market cap), news liées, bouton "Run Monte Carlo"
+> - **Intraday timeframes** (1m / 5m / 15m / 1H / 4H / 1D / 1W / 1M) sur les
+>   instruments — yfinance supporte intraday via `period=1d, interval=5m`.
+>   Period selector affiche: intraday courts puis 1M, 6M, 1Y, 5Y, Max comme actuellement.
+> - **Lien "View on TradingView"** sur chaque chart instrument (URL pattern:
+>   `https://www.tradingview.com/chart/?symbol=NASDAQ:AAPL`)
 > - **Backend**: `services/instruments/` avec `BaseInstrumentProvider`,
 >   `YFinanceProvider`, `instruments_service.py`
 >
@@ -65,6 +70,26 @@
 > - **ETF flows** quotidiens
 > - **Crypto trending** via CoinGecko free
 > - **Page `/discover`** — cards cliquables vers `/instrument/{ticker}`
+>
+> ### Phase 3.7 — Indicateurs techniques (NOUVELLE)
+> Overlays techniques sur les charts d'instruments — demande utilisateur explicite
+> Phase 1.5 ("EMA, MACD, Stochastics... directement sur la courbe").
+> - **Priorite 1** (les 3 nommes par l'utilisateur):
+>   - **EMA** (Exponential Moving Average) — overlay sur le chart principal
+>   - **MACD** (Moving Average Convergence Divergence) — panel separe en bas
+>   - **Stochastic Oscillator** — panel separe en bas
+> - **Priorite 2** (standards complementaires):
+>   - **RSI** (Relative Strength Index)
+>   - **Bollinger Bands** (overlay)
+>   - **VWAP** (Volume Weighted Average Price)
+>   - **SMA** (Simple Moving Average) — overlay
+> - **Implementation**:
+>   - Calculs server-side dans `services/analytics/` (pandas-ta ou talib-py)
+>   - Cacheable, partage entre users
+>   - Frontend: ajoute `Line series` ou panel via lightweight-charts
+>   - Toggle on/off via UI (checkboxes ou panneau lateral)
+> - **Pages impactees**: `/instrument/{ticker}` (Phase 2), `/index/{symbol}` (Phase 2.5),
+>   futurs charts d'obligations (Phase 4)
 >
 > ### Phase 3.5 — Sentiment (NOUVELLE)
 > Indicateurs de sentiment de marché.
@@ -100,6 +125,7 @@
 > | 2.7 | Discovery feed | 🔜 | `/discover` "today" |
 > | 3 | Monte Carlo intégré | 🔜 | Forecast bouton sur chaque instrument |
 > | 3.5 | Sentiment | 🔜 | `/sentiment` + widgets |
+> | 3.7 | **Indicateurs techniques (EMA/MACD/Stoch/RSI/...)** | 🔜 | Overlays sur charts instruments |
 > | 4 | Obligations & yield curves | 🔜 | `/bonds` global |
 > | 5 | Thèses & probabilités | 🔜 | `/research` |
 > | 6 | Polish Bloomberg final | 🔜 | Multi-pane layout terminal |

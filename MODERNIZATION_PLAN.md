@@ -37,6 +37,7 @@ Built for: a single user / small team who wants institutional-grade analysis wit
 | 2.7 | Discovery feed ("Today" / trending stocks-ETFs-bonds) | 🔜 | 1-2 sem | `/discover` — what's moving live |
 | 3 | Monte Carlo intégré (4 modèles existants sur n'importe quel instrument) | 🔜 | 2 sem | Forecast / VaR / scenarios button on instrument page |
 | 3.5 | Sentiment (Fear & Greed, FOMO, analyst consensus, insider, short interest) | 🔜 | 1-2 sem | `/sentiment` + widgets dans page instrument |
+| **3.7** | **Indicateurs techniques (EMA/MACD/Stochastic/RSI/Bollinger)** | 🔜 | 1-2 sem | Overlays toggle-ables sur tous les charts d'instruments |
 | 4 | Obligations & yield curves globales | 🔜 | 2 sem | `/bonds` (souverains, corporate, courbes par pays) |
 | 5 | Thèses & probabilités (CMS éditorial + analytics) | 🔜 | 2 sem | `/research` (recession proba, default proba, custom theses) |
 | 6 | Polish Bloomberg final (multi-fenêtres, watchlists, alertes, dark terminal) | 🔜 | 2 sem | Layout multi-pane "trading desk" |
