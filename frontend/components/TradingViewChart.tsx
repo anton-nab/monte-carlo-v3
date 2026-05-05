@@ -38,6 +38,13 @@ interface TradingViewChartProps {
   fill?: boolean;
   /** Show price scale on right (default true for full-size, false for sparklines) */
   showAxes?: boolean;
+  /**
+   * Plage de dates initialement visibles. Si fournie, le chart cadre dessus
+   * mais TOUTES les donnees restent dans le chart — l'utilisateur peut
+   * scroller/zoomer pour voir avant ou apres.
+   * Si non fournie, le chart fitContent() (toutes les donnees visibles).
+   */
+  visibleRange?: { from: string; to: string };
 }
 
 export function TradingViewChart({
@@ -46,6 +53,7 @@ export function TradingViewChart({
   color = '#26a69a',
   fill = true,
   showAxes = true,
+  visibleRange,
 }: TradingViewChartProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const chartRef = useRef<IChartApi | null>(null);
@@ -139,8 +147,19 @@ export function TradingViewChart({
       }));
 
     seriesRef.current.setData(formatted);
-    chartRef.current.timeScale().fitContent();
-  }, [data]);
+
+    // Si une plage est demandee, on l'applique APRES setData. Toutes les
+    // donnees restent chargees -> l'utilisateur peut scroller/zoomer librement
+    // pour voir avant la plage initiale.
+    if (visibleRange && formatted.length > 0) {
+      chartRef.current.timeScale().setVisibleRange({
+        from: visibleRange.from as Time,
+        to: visibleRange.to as Time,
+      });
+    } else {
+      chartRef.current.timeScale().fitContent();
+    }
+  }, [data, visibleRange]);
 
   return <div ref={containerRef} style={{ width: '100%', height }} />;
 }
