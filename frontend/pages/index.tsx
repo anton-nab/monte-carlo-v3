@@ -1,218 +1,246 @@
 /**
- * HOME PAGE - Frontend for Phase 0
- * ================================
+ * Home / landing page — Phase 1.5 redesign.
  *
- * QUOI: Landing page showing API status
- * POURQUOI: User should see if backend is connected
- * COMMENT: Check /health endpoint on load
+ * Style trading desk: header global avec search bar, status backend en haut,
+ * quick links vers les modules disponibles + roadmap visible.
  */
 
-import { useState, useEffect } from 'react';
+import { useEffect, useState } from 'react';
 import Head from 'next/head';
 import Link from 'next/link';
 
-interface ApiStatus {
+import { Header } from '@/components/Header';
+import { apiFetch, ApiError } from '@/lib/api';
+
+interface ApiHealth {
   status: 'checking' | 'connected' | 'disconnected';
   message: string;
   version?: string;
 }
 
+interface PhaseInfo {
+  num: string;
+  name: string;
+  status: 'done' | 'next' | 'planned';
+  href?: string;
+  description: string;
+}
+
+const PHASES: PhaseInfo[] = [
+  { num: '0', name: 'Foundation', status: 'done', description: 'Cloud deployment, Vercel + Railway' },
+  { num: '1', name: 'Global Macro', status: 'done', href: '/dashboard', description: '17 indicators × 4 countries via FRED' },
+  { num: '1.5', name: 'Polish v1', status: 'next', description: 'Terminal palette, monospace, click-to-expand (current)' },
+  { num: '2', name: 'Instruments', status: 'planned', description: 'yfinance, search by ticker/name/ISIN, fundamentals' },
+  { num: '2.5', name: 'Index/ETF decomposition', status: 'planned', description: '25+ indices: S&P, CAC, DAX, Nikkei… + ETFs' },
+  { num: '2.7', name: 'Discovery feed', status: 'planned', description: 'Trending stocks/ETFs/bonds, "what\'s hot today"' },
+  { num: '3', name: 'Monte Carlo intégré', status: 'planned', description: 'GBM/Heston/Merton/GARCH on any instrument' },
+  { num: '3.5', name: 'Sentiment', status: 'planned', description: 'Fear & Greed, FOMO, analyst, insider, short interest' },
+  { num: '4', name: 'Bonds & yield curves', status: 'planned', description: 'Sovereign + corporate bonds globally' },
+  { num: '5', name: 'Theses & probabilities', status: 'planned', description: 'Editorial CMS, recession proba, backtests' },
+  { num: '6', name: 'Bloomberg polish', status: 'planned', description: 'Multi-pane layout, watchlists, alerts, dark terminal' },
+];
+
 export default function Home() {
-  const [apiStatus, setApiStatus] = useState<ApiStatus>({
+  const [health, setHealth] = useState<ApiHealth>({
     status: 'checking',
-    message: 'Checking API connection...'
+    message: 'Checking API connection…',
   });
 
-  // Check API health on component mount
   useEffect(() => {
-    checkApiHealth();
+    let cancelled = false;
+    apiFetch<{ status: string; version: string }>('/health')
+      .then((data) => {
+        if (cancelled) return;
+        setHealth({
+          status: 'connected',
+          message: 'Online',
+          version: data.version,
+        });
+      })
+      .catch((err) => {
+        if (cancelled) return;
+        setHealth({
+          status: 'disconnected',
+          message: err instanceof ApiError ? `API ${err.status}` : 'Cannot reach API',
+        });
+      });
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
-  const checkApiHealth = async () => {
-    try {
-      // Get API URL from environment (set in Vercel)
-      // Strip trailing slash to be tolerant of "https://api.com/" vs "https://api.com"
-      const apiUrl = (process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000').replace(/\/+$/, '');
-
-      // Call backend /health endpoint
-      const response = await fetch(`${apiUrl}/health`, {
-        method: 'GET',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-      });
-
-      if (response.ok) {
-        const data = await response.json();
-        setApiStatus({
-          status: 'connected',
-          message: '✅ API Connected',
-          version: data.version
-        });
-      } else {
-        setApiStatus({
-          status: 'disconnected',
-          message: '❌ API Error (Status: ' + response.status + ')'
-        });
-      }
-    } catch (error) {
-      setApiStatus({
-        status: 'disconnected',
-        message: '❌ Cannot reach API. Check if backend is running.'
-      });
-      console.error('API Health Check Error:', error);
-    }
-  };
+  const statusColor =
+    health.status === 'connected'
+      ? 'bg-bull text-terminal-bg'
+      : health.status === 'checking'
+      ? 'bg-warn text-terminal-bg'
+      : 'bg-bear text-white';
 
   return (
     <>
       <Head>
-        <title>Monte Carlo v3 - Financial Analysis Platform</title>
-        <meta name="description" content="IBM-Equivalent Financial Analysis Platform" />
-        <meta name="viewport" content="width=device-width, initial-scale=1" />
+        <title>Monte Carlo v3 — Bloomberg-lite global terminal</title>
       </Head>
 
-      <div className="min-h-screen bg-gradient-to-br from-blue-600 via-purple-600 to-pink-600">
-        {/* Main Content */}
-        <div className="container mx-auto px-4 py-16">
-          <div className="text-center text-white">
-            {/* Header */}
-            <h1 className="text-6xl font-bold mb-4 drop-shadow-lg">
-              📈 Monte Carlo Simulator
-            </h1>
-            <p className="text-2xl mb-2 drop-shadow-md">v3 - Foundation Phase</p>
-            <p className="text-lg mb-12 drop-shadow-md opacity-90">
-              IBM-Equivalent Financial Analysis Platform
-            </p>
+      <Header />
 
-            {/* API Status Card */}
-            <div className="mb-12">
-              <div className={`
-                inline-block px-8 py-6 rounded-lg backdrop-blur-md
-                ${apiStatus.status === 'connected'
-                  ? 'bg-green-400/20 border-2 border-green-300'
-                  : apiStatus.status === 'checking'
-                  ? 'bg-yellow-400/20 border-2 border-yellow-300'
-                  : 'bg-red-400/20 border-2 border-red-300'
-                }
-              `}>
-                <p className="text-xl font-semibold mb-2">Backend Status</p>
-                <p className={`
-                  text-2xl font-bold
-                  ${apiStatus.status === 'connected'
-                    ? 'text-green-200'
-                    : apiStatus.status === 'checking'
-                    ? 'text-yellow-200'
-                    : 'text-red-200'
-                  }
-                `}>
-                  {apiStatus.message}
-                </p>
-                {apiStatus.version && (
-                  <p className="text-sm mt-2 opacity-75">
-                    API Version: {apiStatus.version}
-                  </p>
-                )}
-              </div>
-            </div>
-
-            {/* Project Info */}
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-12">
-              {/* Box 1 */}
-              <div className="bg-white/10 backdrop-blur-md rounded-lg p-6 hover:bg-white/20 transition">
-                <div className="text-4xl mb-4">📊</div>
-                <h3 className="text-xl font-bold mb-2">Macro Dashboard</h3>
-                <p className="text-sm opacity-90">
-                  30+ economic indicators, real-time data, macro analysis
-                </p>
-              </div>
-
-              {/* Box 2 */}
-              <div className="bg-white/10 backdrop-blur-md rounded-lg p-6 hover:bg-white/20 transition">
-                <div className="text-4xl mb-4">🏢</div>
-                <h3 className="text-xl font-bold mb-2">Company Analysis</h3>
-                <p className="text-sm opacity-90">
-                  Fundamentals, health scoring, crisis detection, SEC filings
-                </p>
-              </div>
-
-              {/* Box 3 */}
-              <div className="bg-white/10 backdrop-blur-md rounded-lg p-6 hover:bg-white/20 transition">
-                <div className="text-4xl mb-4">🎲</div>
-                <h3 className="text-xl font-bold mb-2">Monte Carlo</h3>
-                <p className="text-sm opacity-90">
-                  4 stochastic models, backtesting, portfolio optimization
-                </p>
-              </div>
-            </div>
-
-            {/* Navigation Buttons */}
-            <div className="flex flex-col md:flex-row gap-4 justify-center mb-12">
-              {apiStatus.status === 'connected' ? (
-                <Link
-                  href="/dashboard"
-                  className="px-8 py-4 rounded-lg font-bold text-lg bg-green-500 hover:bg-green-600 text-white cursor-pointer transition"
-                >
-                  📊 Open Dashboard
-                </Link>
-              ) : (
-                <button
-                  disabled
-                  className="px-8 py-4 rounded-lg font-bold text-lg bg-gray-400 text-gray-200 cursor-not-allowed opacity-50"
-                >
-                  📊 Open Dashboard
-                </button>
-              )}
-
-              <button
-                disabled
-                title="Coming in Phase 3"
-                className="px-8 py-4 rounded-lg font-bold text-lg bg-gray-400 text-gray-200 cursor-not-allowed opacity-50"
-              >
-                🎲 Run Simulator
-              </button>
-
-              <button
-                disabled
-                title="Coming in Phase 2"
-                className="px-8 py-4 rounded-lg font-bold text-lg bg-gray-400 text-gray-200 cursor-not-allowed opacity-50"
-              >
-                🏢 Analyze Company
-              </button>
-            </div>
-
-            {/* Project Status */}
-            <div className="bg-white/10 backdrop-blur-md rounded-lg p-6 text-left max-w-2xl mx-auto">
-              <h3 className="text-2xl font-bold mb-4">🚀 Phase 0: Foundation</h3>
-              <ul className="space-y-2 text-sm">
-                <li className="flex items-center">
-                  <span className="text-2xl mr-3">✅</span>
-                  <span>Backend API running (FastAPI)</span>
-                </li>
-                <li className="flex items-center">
-                  <span className="text-2xl mr-3">✅</span>
-                  <span>Frontend deployed (Next.js)</span>
-                </li>
-                <li className="flex items-center">
-                  <span className="text-2xl mr-3">✅</span>
-                  <span>API health check working</span>
-                </li>
-                <li className="flex items-center">
-                  <span className="text-2xl mr-3">⏳</span>
-                  <span>Phase 1: Macro Dashboard (Next)</span>
-                </li>
-              </ul>
-            </div>
-
-            {/* Footer */}
-            <div className="mt-16 text-sm opacity-75">
-              <p>Monte Carlo v3 - IBM-Equivalent Financial Analysis Platform</p>
-              <p>Built with Python (FastAPI), React (Next.js), and Cloud Infrastructure</p>
-              <p>Phase: Foundation (0/5) | Status: Active Development</p>
-            </div>
+      <main className="max-w-7xl mx-auto px-4 py-8">
+        {/* Hero */}
+        <section className="mb-10">
+          <div className="flex items-baseline gap-3 mb-2">
+            <h1 className="text-3xl font-bold text-terminal-text">Monte Carlo v3</h1>
+            <span className="text-2xs uppercase tracking-wider text-terminal-textDim num">
+              Phase 1.5 / 11
+            </span>
           </div>
-        </div>
-      </div>
+          <p className="text-terminal-textMuted">
+            Bloomberg-lite global terminal — macro, instruments, simulations, sentiment, all in one place.
+          </p>
+
+          {/* API status pill */}
+          <div className="mt-4 inline-flex items-center gap-2 text-xs">
+            <span className="text-terminal-textDim uppercase tracking-wider">API:</span>
+            <span className={`px-2 py-0.5 rounded text-2xs font-semibold uppercase ${statusColor} num`}>
+              ● {health.message}
+            </span>
+            {health.version && (
+              <span className="text-terminal-textDim num">v{health.version}</span>
+            )}
+          </div>
+        </section>
+
+        {/* Quick links — modules disponibles */}
+        <section className="mb-10">
+          <h2 className="text-xs uppercase tracking-wider text-terminal-textDim mb-3">
+            Available modules
+          </h2>
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+            <ModuleCard
+              href="/dashboard"
+              emoji="📊"
+              title="Macro Dashboard"
+              description="17 indicators × 4 countries"
+              enabled
+            />
+            <ModuleCard
+              href="#"
+              emoji="🔥"
+              title="Discover"
+              description="Trending stocks, ETFs, bonds"
+              badge="Phase 2.7"
+              enabled={false}
+            />
+            <ModuleCard
+              href="#"
+              emoji="📈"
+              title="Instruments"
+              description="Stocks, ETFs, bonds, FX, crypto"
+              badge="Phase 2"
+              enabled={false}
+            />
+          </div>
+        </section>
+
+        {/* Roadmap */}
+        <section>
+          <h2 className="text-xs uppercase tracking-wider text-terminal-textDim mb-3">
+            Roadmap
+          </h2>
+          <div className="card-terminal divide-y divide-terminal-border">
+            {PHASES.map((p) => (
+              <div
+                key={p.num}
+                className="px-4 py-3 flex items-center gap-4 hover:bg-terminal-surfaceHi transition"
+              >
+                <span className="num text-terminal-textDim text-sm w-12 shrink-0">P{p.num}</span>
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center gap-2">
+                    {p.href && p.status === 'done' ? (
+                      <Link href={p.href} className="text-terminal-text hover:text-terminal-cyan font-medium">
+                        {p.name}
+                      </Link>
+                    ) : (
+                      <span className="text-terminal-text font-medium">{p.name}</span>
+                    )}
+                    <PhaseBadge status={p.status} />
+                  </div>
+                  <p className="text-xs text-terminal-textMuted mt-0.5">{p.description}</p>
+                </div>
+              </div>
+            ))}
+          </div>
+        </section>
+      </main>
+
+      <footer className="border-t border-terminal-border mt-12 px-4 py-4 text-center text-2xs text-terminal-textDim num">
+        Monte Carlo v3 · Built with FastAPI + Next.js · Free-tier APIs (FRED, OECD, yfinance, OpenFIGI…)
+      </footer>
     </>
+  );
+}
+
+interface ModuleCardProps {
+  href: string;
+  emoji: string;
+  title: string;
+  description: string;
+  enabled: boolean;
+  badge?: string;
+}
+
+function ModuleCard({ href, emoji, title, description, enabled, badge }: ModuleCardProps) {
+  if (!enabled) {
+    return (
+      <div className="card-terminal p-4 opacity-60 cursor-not-allowed">
+        <div className="flex items-start justify-between mb-2">
+          <span className="text-2xl">{emoji}</span>
+          {badge && (
+            <span className="text-2xs uppercase tracking-wider text-terminal-textDim border border-terminal-border rounded px-1.5 py-0.5 num">
+              {badge}
+            </span>
+          )}
+        </div>
+        <h3 className="font-medium text-terminal-text">{title}</h3>
+        <p className="text-xs text-terminal-textMuted mt-1">{description}</p>
+      </div>
+    );
+  }
+
+  return (
+    <Link
+      href={href}
+      className="card-terminal p-4 cursor-pointer block group"
+    >
+      <div className="flex items-start justify-between mb-2">
+        <span className="text-2xl">{emoji}</span>
+        <span className="text-bull text-2xs uppercase tracking-wider num">● Live</span>
+      </div>
+      <h3 className="font-medium text-terminal-text group-hover:text-terminal-cyan transition">
+        {title} →
+      </h3>
+      <p className="text-xs text-terminal-textMuted mt-1">{description}</p>
+    </Link>
+  );
+}
+
+function PhaseBadge({ status }: { status: PhaseInfo['status'] }) {
+  if (status === 'done') {
+    return (
+      <span className="text-2xs uppercase tracking-wider px-1.5 py-0.5 rounded bg-bull-bg text-bull border border-bull-border num">
+        ✓ Done
+      </span>
+    );
+  }
+  if (status === 'next') {
+    return (
+      <span className="text-2xs uppercase tracking-wider px-1.5 py-0.5 rounded bg-terminal-cyan/15 text-terminal-cyan border border-terminal-cyan/40 num">
+        ◆ In progress
+      </span>
+    );
+  }
+  return (
+    <span className="text-2xs uppercase tracking-wider px-1.5 py-0.5 rounded text-terminal-textDim border border-terminal-border num">
+      Planned
+    </span>
   );
 }

@@ -1,17 +1,16 @@
 /**
- * Macro Dashboard page
- * ====================
+ * Macro Dashboard page — Phase 1.5 redesign.
  *
- * Phase 1: 17 indicateurs sur 4 pays (US/EU/UK/JP) via Fred.
- *
- * Phase 1.5 (a venir): China via World Bank, donnees natives ECB/BoE/BoJ
- *                     pour les indicateurs ou Fred est en retard.
- * Phase 6 (Bloomberg): multi-fenetres, watchlists, alertes, dark mode terminal.
+ * Layout trading desk:
+ * - Header global avec search bar (placeholder)
+ * - Sticky country nav avec ancres
+ * - Sections par pays avec grids denses
+ * - Cards cliquables -> modal plein-ecran
  */
 
 import Head from 'next/head';
-import Link from 'next/link';
 
+import { Header } from '@/components/Header';
 import { MacroIndicator } from '@/components/MacroIndicator';
 
 interface IndicatorConfig {
@@ -82,92 +81,88 @@ export default function Dashboard() {
         <title>Global Macro Dashboard — Monte Carlo v3</title>
       </Head>
 
-      <div className="min-h-screen bg-gradient-to-br from-slate-900 via-slate-800 to-slate-900 text-white">
-        {/* Header */}
-        <header className="border-b border-white/10 px-6 py-4 sticky top-0 backdrop-blur-md bg-slate-900/80 z-10">
-          <div className="max-w-7xl mx-auto flex items-center justify-between">
-            <div>
-              <h1 className="text-2xl font-bold">📊 Global Macro Dashboard</h1>
-              <p className="text-sm text-white/60">
-                17 indicators · 4 countries · live data via FRED
-              </p>
-            </div>
-            <Link
-              href="/"
-              className="text-sm px-4 py-2 rounded-md bg-white/10 hover:bg-white/20 transition border border-white/20"
+      <Header />
+
+      {/* Country nav */}
+      <nav className="border-b border-terminal-border bg-terminal-surface px-4 py-2 sticky top-14 z-10">
+        <div className="max-w-7xl mx-auto flex flex-wrap items-center gap-3 text-xs">
+          <span className="text-terminal-textDim uppercase tracking-wider">Jump to:</span>
+          {COUNTRIES.map((c) => (
+            <a
+              key={c.code}
+              href={`#${c.code}`}
+              className="text-terminal-textMuted hover:text-terminal-cyan transition num"
             >
-              ← Home
-            </Link>
-          </div>
-        </header>
-
-        {/* Quick country navigation */}
-        <nav className="border-b border-white/10 px-6 py-3 bg-slate-900/50">
-          <div className="max-w-7xl mx-auto flex flex-wrap gap-3 text-sm">
-            <span className="text-white/50">Jump to:</span>
-            {COUNTRIES.map((c) => (
-              <a
-                key={c.code}
-                href={`#${c.code}`}
-                className="text-white/80 hover:text-white transition"
-              >
-                {c.flag} {c.name}
-              </a>
-            ))}
-            <span className="text-white/30">·</span>
-            <span className="text-white/40">🇨🇳 China (Phase 1.5)</span>
-          </div>
-        </nav>
-
-        {/* Main content */}
-        <main className="max-w-7xl mx-auto px-6 py-8 space-y-12">
-          {COUNTRIES.map((country) => (
-            <section key={country.code} id={country.code} className="scroll-mt-24">
-              <div className="flex items-baseline gap-3 mb-4">
-                <h2 className="text-xl font-semibold">
-                  {country.flag} {country.name}
-                </h2>
-                <span className="text-sm text-white/50">
-                  {country.indicators.length} indicators
-                </span>
-              </div>
-
-              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
-                {country.indicators.map((cfg) => (
-                  <MacroIndicator
-                    key={`${country.code}-${cfg.indicator}`}
-                    country={country.code}
-                    indicator={cfg.indicator}
-                    title={cfg.title}
-                    decimals={cfg.decimals}
-                  />
-                ))}
-              </div>
-            </section>
+              {c.flag} {c.code.toUpperCase()}
+            </a>
           ))}
+          <span className="text-terminal-textDim">·</span>
+          <span className="text-terminal-textDim num">🇨🇳 CN (P1.5)</span>
+          <span className="ml-auto text-terminal-textDim num">
+            17 indicators · 4 countries · live FRED
+          </span>
+        </div>
+      </nav>
 
-          {/* China placeholder */}
-          <section id="cn" className="opacity-60 scroll-mt-24">
-            <div className="flex items-baseline gap-3 mb-4">
-              <h2 className="text-xl font-semibold">🇨🇳 China</h2>
-              <span className="text-sm text-white/50">Phase 1.5</span>
+      <main className="max-w-7xl mx-auto px-4 py-6 space-y-8">
+        {/* Page title */}
+        <div>
+          <h1 className="text-xl font-semibold text-terminal-text">
+            <span className="text-terminal-cyan">📊</span> Global Macro Dashboard
+          </h1>
+          <p className="text-xs text-terminal-textMuted mt-1">
+            Click any indicator card to expand · period selectors available in detail view
+          </p>
+        </div>
+
+        {/* Country sections */}
+        {COUNTRIES.map((country) => (
+          <section key={country.code} id={country.code} className="scroll-mt-28">
+            <div className="flex items-baseline gap-3 mb-3 border-b border-terminal-border pb-2">
+              <h2 className="text-base font-semibold text-terminal-text">
+                {country.flag} {country.name}
+              </h2>
+              <span className="text-2xs text-terminal-textDim uppercase tracking-wider num">
+                {country.indicators.length} indicators
+              </span>
             </div>
-            <div className="bg-white/5 border border-white/10 rounded-lg p-6 text-center">
-              <p className="text-white/70">
-                China indicators require dedicated provider (World Bank annual data
-                or paid Trading Economics for real-time).
-              </p>
-              <p className="text-sm text-white/50 mt-2">
-                Coming in Phase 1.5 with World Bank integration.
-              </p>
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3">
+              {country.indicators.map((cfg) => (
+                <MacroIndicator
+                  key={`${country.code}-${cfg.indicator}`}
+                  country={country.code}
+                  indicator={cfg.indicator}
+                  title={cfg.title}
+                  decimals={cfg.decimals}
+                />
+              ))}
             </div>
           </section>
-        </main>
+        ))}
 
-        <footer className="border-t border-white/10 mt-12 px-6 py-6 text-center text-sm text-white/40">
-          Monte Carlo v3 · Data: Federal Reserve (FRED) · Phase 1 of 6
-        </footer>
-      </div>
+        {/* China placeholder */}
+        <section id="cn" className="scroll-mt-28 opacity-60">
+          <div className="flex items-baseline gap-3 mb-3 border-b border-terminal-border pb-2">
+            <h2 className="text-base font-semibold text-terminal-text">🇨🇳 China</h2>
+            <span className="text-2xs text-terminal-textDim uppercase tracking-wider num">
+              Phase 1.5
+            </span>
+          </div>
+          <div className="card-terminal p-4 text-center">
+            <p className="text-sm text-terminal-textMuted">
+              China indicators require dedicated provider (World Bank annual or paid Trading Economics).
+            </p>
+            <p className="text-2xs text-terminal-textDim mt-1 num">
+              Coming with World Bank integration in Phase 1.5+
+            </p>
+          </div>
+        </section>
+      </main>
+
+      <footer className="border-t border-terminal-border mt-12 px-4 py-4 text-center text-2xs text-terminal-textDim num">
+        Monte Carlo v3 · Data: FRED · Phase 1.5 of 11 · Bloomberg-lite global terminal
+      </footer>
     </>
   );
 }

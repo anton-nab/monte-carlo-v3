@@ -1,27 +1,63 @@
 /**
- * Global Styles
- * =============
+ * Global Styles — Phase 1.5 (Polish v1)
+ * =====================================
  *
- * Applied to entire app
- *
- * Phase 1: Tailwind CSS active.
- * Les 3 directives @tailwind ci-dessous injectent:
- *   - base: reset CSS de Tailwind (Preflight)
- *   - components: classes de composants reutilisables
- *   - utilities: classes utilitaires (text-xl, bg-blue-500, p-4, ...)
+ * Terminal aesthetic: deep navy background, Inter sans + JetBrains Mono.
+ * Tailwind classes do most of the work; this file just sets the base.
  */
 
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
 
-/* Custom global styles (apres les directives Tailwind pour qu'elles puissent override) */
+@layer base {
+  html,
+  body,
+  #__next {
+    width: 100%;
+    height: 100%;
+  }
 
-html,
-body,
-#__next {
-  width: 100%;
-  height: 100%;
+  body {
+    @apply bg-terminal-bg text-terminal-text antialiased;
+  }
+
+  /* Numbers should always be monospace and tabular for clean column alignment */
+  .num,
+  .tabular {
+    font-family: var(--font-jetbrains), 'JetBrains Mono', monospace;
+    font-variant-numeric: tabular-nums;
+    letter-spacing: -0.01em;
+  }
+
+  /* Smoother scrollbar (terminal style) */
+  ::-webkit-scrollbar {
+    width: 10px;
+    height: 10px;
+  }
+
+  ::-webkit-scrollbar-track {
+    background: #0a0e1a;
+  }
+
+  ::-webkit-scrollbar-thumb {
+    background: #2a3040;
+    border-radius: 5px;
+  }
+
+  ::-webkit-scrollbar-thumb:hover {
+    background: #3a4050;
+  }
 }
 
-/* Phase 6 (Bloomberg-style): scrollbar terminal-style ici plus tard */
+@layer components {
+  /* Reusable card style for the trading desk feel */
+  .card-terminal {
+    @apply bg-terminal-surface border border-terminal-border rounded-md;
+    @apply transition-colors duration-150;
+  }
+
+  .card-terminal:hover {
+    @apply bg-terminal-surfaceHi border-terminal-cyanDim;
+  }
+}

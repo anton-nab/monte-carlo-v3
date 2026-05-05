@@ -1,38 +1,28 @@
 /**
- * MacroIndicator component
- * ========================
+ * MacroIndicator — Phase 1.5 redesign.
  *
- * Carte d'indicateur macro reutilisable. Une carte = un indicateur.
- * Affiche: titre, valeur courante, % de changement, mini-chart (sparkline).
- *
- * Phase 1 MVP. Phase 6 (Bloomberg-style): support multi-axes, EMAs, periodes.
+ * Carte d'indicateur style trading desk:
+ * - Palette terminal (deep navy, accents cyan/bull/bear)
+ * - Tous les chiffres en monospace tabular
+ * - Sparkline TradingView lightweight-charts (pas Recharts)
+ * - Click sur card -> ouvre modal plein-ecran avec chart agrandi + period selector
+ * - Hover effect (border cyan)
+ * - Loading skeleton et error state propres
  */
 
 import { useEffect, useState } from 'react';
-import {
-  ResponsiveContainer,
-  LineChart,
-  Line,
-  XAxis,
-  YAxis,
-  Tooltip,
-  CartesianGrid,
-} from 'recharts';
 
 import { apiFetch, ApiError } from '@/lib/api';
 import type { MacroIndicator as MacroIndicatorData } from '@/types/macro';
 
+import { TradingViewChart } from './TradingViewChart';
+import { IndicatorModal } from './IndicatorModal';
+
 interface MacroIndicatorProps {
-  /** Code pays: 'us', 'eu', 'gb', 'jp', 'cn' */
   country: string;
-  /** Nom logique: 'inflation', 'unemployment', 'fed_rate', ... */
   indicator: string;
-  /** Titre affiche (ex: "Inflation (CPI)") */
   title: string;
-  /** Decimales d'affichage de la valeur courante */
   decimals?: number;
-  /** Format compact (juste valeur + sparkline, pas de chart detaille) */
-  compact?: boolean;
 }
 
 export function MacroIndicator({
@@ -40,15 +30,14 @@ export function MacroIndicator({
   indicator,
   title,
   decimals = 2,
-  compact = false,
 }: MacroIndicatorProps) {
   const [data, setData] = useState<MacroIndicatorData | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [modalOpen, setModalOpen] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
-
     const fetchData = async () => {
       try {
         const result = await apiFetch<MacroIndicatorData>(
@@ -60,11 +49,7 @@ export function MacroIndicator({
         }
       } catch (err) {
         if (cancelled) return;
-        if (err instanceof ApiError) {
-          setError(`API error ${err.status}`);
-        } else {
-          setError('Failed to load');
-        }
+        setError(err instanceof ApiError ? `API ${err.status}` : 'Load failed');
       } finally {
         if (!cancelled) setLoading(false);
       }
@@ -81,10 +66,11 @@ export function MacroIndicator({
   // ----- LOADING -----
   if (loading) {
     return (
-      <div className="bg-white/10 backdrop-blur-md rounded-lg p-6 animate-pulse">
-        <div className="h-4 bg-white/20 rounded w-1/3 mb-4"></div>
-        <div className="h-8 bg-white/20 rounded w-1/2 mb-2"></div>
-        <div className="h-32 bg-white/10 rounded mt-4"></div>
+      <div className="card-terminal p-4 animate-pulse">
+        <div className="h-3 bg-terminal-border rounded w-1/3 mb-3"></div>
+        <div className="h-7 bg-terminal-border rounded w-1/2 mb-2"></div>
+        <div className="h-3 bg-terminal-border rounded w-1/4 mb-4"></div>
+        <div className="h-20 bg-terminal-border/40 rounded"></div>
       </div>
     );
   }
@@ -92,108 +78,85 @@ export function MacroIndicator({
   // ----- ERROR -----
   if (error || !data) {
     return (
-      <div className="bg-red-900/40 border border-red-500/50 rounded-lg p-6">
-        <h3 className="text-lg font-semibold text-red-200">{title}</h3>
-        <p className="text-sm text-red-300 mt-2">{error || 'No data'}</p>
+      <div className="card-terminal border-bear-border bg-bear-bg p-4">
+        <div className="flex items-start justify-between mb-2">
+          <h3 className="text-sm font-medium text-terminal-text">{title}</h3>
+          <span className="text-2xs uppercase tracking-wider text-bear">Error</span>
+        </div>
+        <p className="text-xs text-terminal-textMuted num">{error || 'No data'}</p>
       </div>
     );
   }
 
   // ----- LOADED -----
   const isPositive = (data.change_pct ?? 0) >= 0;
-  const trendColor = isPositive ? 'text-emerald-400' : 'text-rose-400';
+  const lineColor = isPositive ? '#26a69a' : '#ef5350';
+  const trendColorClass = isPositive ? 'text-bull' : 'text-bear';
   const trendArrow = isPositive ? '▲' : '▼';
-  const lineColor = isPositive ? '#34d399' : '#fb7185';
-
-  // Recharts data format
-  const chartData = data.series.map((p) => ({
-    date: p.date,
-    value: p.value,
-  }));
+  const lastDate = data.series[data.series.length - 1]?.date || '—';
 
   return (
-    <div className="bg-white/10 backdrop-blur-md rounded-lg p-6 border border-white/10 hover:border-white/30 transition">
-      {/* Header */}
-      <div className="flex justify-between items-start mb-4">
-        <div>
-          <h3 className="text-lg font-semibold text-white">{title}</h3>
-          <p className="text-xs text-white/60 uppercase tracking-wider mt-1">
-            {data.country} · {data.frequency} · via {data.source}
-          </p>
-        </div>
-        <span className="text-xs text-white/50">{data.source_id}</span>
-      </div>
-
-      {/* Valeur + variation */}
-      <div className="flex items-baseline gap-3 mb-4">
-        <span className="text-3xl font-bold text-white">
-          {data.current_value !== null
-            ? data.current_value.toFixed(decimals)
-            : '—'}
-          <span className="text-lg font-normal text-white/70 ml-1">
-            {data.unit}
+    <>
+      <button
+        onClick={() => setModalOpen(true)}
+        className="card-terminal p-4 text-left w-full group cursor-pointer focus:outline-none focus:ring-1 focus:ring-terminal-cyan"
+      >
+        {/* Header */}
+        <div className="flex items-start justify-between mb-2">
+          <div className="min-w-0">
+            <h3 className="text-sm font-medium text-terminal-text truncate">{title}</h3>
+            <p className="text-2xs text-terminal-textDim uppercase tracking-wider mt-0.5 num">
+              {data.country.toUpperCase()} · {data.frequency} · {data.source}
+            </p>
+          </div>
+          <span className="text-2xs text-terminal-textDim num shrink-0 ml-2">
+            {data.source_id}
           </span>
-        </span>
-        {data.change_pct !== null && (
-          <span className={`text-sm font-semibold ${trendColor}`}>
-            {trendArrow} {Math.abs(data.change_pct).toFixed(2)}%
-          </span>
-        )}
-      </div>
-
-      {/* Chart */}
-      {!compact && chartData.length > 0 && (
-        <div className="h-40 -mx-2">
-          <ResponsiveContainer width="100%" height="100%">
-            <LineChart data={chartData}>
-              <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.1)" />
-              <XAxis
-                dataKey="date"
-                tick={{ fontSize: 10, fill: 'rgba(255,255,255,0.6)' }}
-                tickFormatter={(d: string) => d.slice(0, 7)}  // YYYY-MM
-                interval="preserveStartEnd"
-                minTickGap={40}
-              />
-              <YAxis
-                tick={{ fontSize: 10, fill: 'rgba(255,255,255,0.6)' }}
-                domain={['auto', 'auto']}
-                width={40}
-              />
-              <Tooltip
-                contentStyle={{
-                  background: 'rgba(15,23,42,0.95)',
-                  border: '1px solid rgba(255,255,255,0.2)',
-                  borderRadius: 6,
-                  fontSize: 12,
-                }}
-                labelStyle={{ color: '#fff' }}
-                itemStyle={{ color: lineColor }}
-                formatter={(v) => {
-                  const num = typeof v === 'number' ? v : Number(v);
-                  return [
-                    Number.isFinite(num) ? `${num.toFixed(decimals)} ${data.unit}` : '—',
-                    title,
-                  ];
-                }}
-              />
-              <Line
-                type="monotone"
-                dataKey="value"
-                stroke={lineColor}
-                strokeWidth={2}
-                dot={false}
-                animationDuration={500}
-              />
-            </LineChart>
-          </ResponsiveContainer>
         </div>
+
+        {/* Value + change */}
+        <div className="flex items-baseline gap-2 mb-3">
+          <span className="num text-2xl font-semibold text-terminal-text">
+            {data.current_value !== null ? data.current_value.toFixed(decimals) : '—'}
+          </span>
+          <span className="num text-xs text-terminal-textMuted">{data.unit}</span>
+          {data.change_pct !== null && (
+            <span className={`num text-sm font-medium ml-auto ${trendColorClass}`}>
+              {trendArrow} {Math.abs(data.change_pct).toFixed(2)}%
+            </span>
+          )}
+        </div>
+
+        {/* Sparkline (sans axes pour la densite) */}
+        <div className="-mx-1">
+          <TradingViewChart
+            data={data.series}
+            height={80}
+            color={lineColor}
+            fill
+            showAxes={false}
+          />
+        </div>
+
+        {/* Footer */}
+        <div className="flex items-center justify-between text-2xs text-terminal-textDim mt-2 num">
+          <span>{data.series.length} obs</span>
+          <span>last {lastDate}</span>
+          <span className="opacity-0 group-hover:opacity-100 transition text-terminal-cyan">
+            click to expand →
+          </span>
+        </div>
+      </button>
+
+      {/* Detail modal */}
+      {modalOpen && (
+        <IndicatorModal
+          data={data}
+          title={title}
+          decimals={decimals}
+          onClose={() => setModalOpen(false)}
+        />
       )}
-
-      {/* Footer */}
-      <div className="text-xs text-white/40 mt-3">
-        {data.series.length} observations · last:{' '}
-        {data.series[data.series.length - 1]?.date || 'n/a'}
-      </div>
-    </div>
+    </>
   );
 }
