@@ -199,7 +199,7 @@ async def root():
             "redoc": "/redoc (ReDoc UI)"
         },
         "phase": "0 - Foundation",
-        "status": "🟢 Running",
+        "status": "[OK] Running",
         "next_phase": "1 - Macro Dashboard"
     }
 
@@ -214,15 +214,15 @@ async def root():
 @app.on_event("startup")
 async def startup_event():
     """Called when API starts"""
-    print("🚀 API Startup - Monte Carlo v3")
-    print("📡 All systems operational")
+    print("[*] API Startup - Monte Carlo v3")
+    print("[*] All systems operational")
 
 
 @app.on_event("shutdown")
 async def shutdown_event():
     """Called when API shuts down"""
-    print("🛑 API Shutdown")
-    print("All connections closed")
+    print("[*] API Shutdown")
+    print("[*] All connections closed")
 
 
 # ===========================================================================
@@ -236,8 +236,8 @@ if __name__ == "__main__":
     print("=" * 60)
     print("Monte Carlo Backend - Phase 0")
     print("=" * 60)
-    print("🚀 Starting server on http://0.0.0.0:8000")
-    print("📖 Documentation at http://localhost:8000/docs")
+    print("[*] Starting server on http://0.0.0.0:8000")
+    print("[*] Documentation at http://localhost:8000/docs")
     print("=" * 60)
 
     uvicorn.run(
