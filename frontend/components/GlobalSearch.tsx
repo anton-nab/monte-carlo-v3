@@ -18,6 +18,8 @@ interface Suggestion {
   type?: string;
 }
 
+const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
+
 export function GlobalSearch() {
   const router = useRouter();
   const [query, setQuery] = useState('');
@@ -42,7 +44,7 @@ export function GlobalSearch() {
     debounceTimer.current = setTimeout(async () => {
       try {
         const res = await fetch(
-          `/api/search/autocomplete?q=${encodeURIComponent(query)}&limit=10`
+          `${API_URL}/api/search/autocomplete?q=${encodeURIComponent(query)}&limit=10`
         );
         if (res.ok) {
           const data = await res.json();

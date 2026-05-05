@@ -5,7 +5,6 @@
  * - Real-time quote (price, change, volume)
  * - Interactive chart with period selector
  * - Company fundamentals (P/E, PB, ROE, market cap, etc.)
- * - Technical indicators (Phase 3.7)
  */
 
 import { useRouter } from 'next/router';
@@ -15,29 +14,42 @@ import { TradingViewChart } from '../../components/TradingViewChart';
 interface QuoteData {
   ticker: string;
   price: number;
-  currency: string;
   change: number;
-  change_percent: number;
+  change_pct: number;
   volume: number;
-  market_cap: number;
+  timestamp: string;
 }
 
 interface FundamentalsData {
   ticker: string;
+  name?: string;
+  sector?: string;
+  industry?: string;
+  market_cap?: number;
   pe_ratio?: number;
   pb_ratio?: number;
   roe?: number;
   dividend_yield?: number;
-  market_cap?: number;
   debt_to_equity?: number;
-  company_name?: string;
-  sector?: string;
-  industry?: string;
+  eps?: number;
+  beta?: number;
+}
+
+interface HistoricalPoint {
+  date: string;
+  open: number;
+  high: number;
+  low: number;
+  close: number;
+  volume: number;
+}
+
+interface ChartDataPoint {
+  date: string;
+  value: number;
 }
 
 const CHART_PERIODS = [
-  { label: '1D', value: '1d' },
-  { label: '5D', value: '5d' },
   { label: '1M', value: '1mo' },
   { label: '3M', value: '3mo' },
   { label: '6M', value: '6mo' },
@@ -46,63 +58,78 @@ const CHART_PERIODS = [
   { label: 'Max', value: 'max' },
 ];
 
+const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
+
 export default function InstrumentPage() {
   const router = useRouter();
   const { ticker } = router.query;
   const [quote, setQuote] = useState<QuoteData | null>(null);
   const [fundamentals, setFundamentals] = useState<FundamentalsData | null>(null);
+  const [chartData, setChartData] = useState<ChartDataPoint[]>([]);
   const [selectedPeriod, setSelectedPeriod] = useState('1y');
-  const [isLoadingQuote, setIsLoadingQuote] = useState(false);
-  const [isLoadingFundamentals, setIsLoadingFundamentals] = useState(false);
+  const [isLoadingChart, setIsLoadingChart] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  // Fetch quote on mount and ticker change
+  // Fetch quote + fundamentals on ticker change
   useEffect(() => {
     if (!ticker) return;
 
     const fetchQuote = async () => {
-      setIsLoadingQuote(true);
-      setError(null);
       try {
-        const res = await fetch(
-          `/api/instruments/quote/${ticker}`
-        );
-        if (res.ok) {
-          setQuote(await res.json());
-        } else {
-          setError(`Failed to load quote for ${ticker}`);
-        }
+        const res = await fetch(`${API_URL}/api/instruments/quote/${ticker}`);
+        if (res.ok) setQuote(await res.json());
       } catch (err) {
         console.error('Quote fetch error:', err);
-        setError('Failed to load quote');
-      } finally {
-        setIsLoadingQuote(false);
       }
     };
 
     const fetchFundamentals = async () => {
-      setIsLoadingFundamentals(true);
       try {
-        const res = await fetch(
-          `/api/instruments/fundamentals/${ticker}`
-        );
-        if (res.ok) {
-          setFundamentals(await res.json());
-        }
+        const res = await fetch(`${API_URL}/api/instruments/fundamentals/${ticker}`);
+        if (res.ok) setFundamentals(await res.json());
       } catch (err) {
         console.error('Fundamentals fetch error:', err);
-      } finally {
-        setIsLoadingFundamentals(false);
       }
     };
 
     fetchQuote();
     fetchFundamentals();
 
-    // Refresh quote every 30s
     const interval = setInterval(fetchQuote, 30000);
     return () => clearInterval(interval);
   }, [ticker]);
+
+  // Fetch chart data when ticker or period changes
+  useEffect(() => {
+    if (!ticker) return;
+
+    const fetchChart = async () => {
+      setIsLoadingChart(true);
+      setError(null);
+      try {
+        const res = await fetch(
+          `${API_URL}/api/instruments/chart/${ticker}?period=${selectedPeriod}&interval=1d`
+        );
+        if (res.ok) {
+          const data = await res.json();
+          const points: ChartDataPoint[] = (data.data || []).map((p: HistoricalPoint) => ({
+            date: p.date.split('T')[0],
+            value: p.close,
+          }));
+          setChartData(points);
+        } else {
+          setError(`Failed to load chart data`);
+        }
+      } catch (err) {
+        console.error('Chart fetch error:', err);
+        setError('Failed to load chart');
+      } finally {
+        setIsLoadingChart(false);
+      }
+    };
+
+    fetchChart();
+  }, [ticker, selectedPeriod]);
 
   if (!ticker) {
     return (
@@ -115,6 +142,7 @@ export default function InstrumentPage() {
   const isPositive = quote && quote.change >= 0;
   const changeColor = isPositive ? 'text-green-500' : 'text-red-500';
   const changeBgColor = isPositive ? 'bg-green-500/10' : 'bg-red-500/10';
+  const lineColor = isPositive ? '#26a69a' : '#ef5350';
 
   return (
     <div className="min-h-screen bg-terminal-bg text-terminal-text">
@@ -126,9 +154,10 @@ export default function InstrumentPage() {
               <h1 className="text-3xl font-bold num text-terminal-cyan">
                 {String(ticker).toUpperCase()}
               </h1>
-              {fundamentals?.company_name && (
+              {fundamentals?.name && (
                 <p className="text-terminal-textMuted text-sm mt-1">
-                  {fundamentals.company_name}
+                  {fundamentals.name}
+                  {fundamentals.sector && ` · ${fundamentals.sector}`}
                 </p>
               )}
             </div>
@@ -138,7 +167,7 @@ export default function InstrumentPage() {
                   ${quote.price.toFixed(2)}
                 </div>
                 <div className={`text-sm font-semibold num ${changeColor}`}>
-                  {isPositive ? '+' : ''}{quote.change.toFixed(2)} ({quote.change_percent.toFixed(2)}%)
+                  {isPositive ? '+' : ''}{quote.change.toFixed(2)} ({quote.change_pct.toFixed(2)}%)
                 </div>
               </div>
             )}
@@ -146,18 +175,18 @@ export default function InstrumentPage() {
 
           {/* Additional Info */}
           {quote && (
-            <div className="grid grid-cols-4 gap-4 text-sm">
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
               <div>
                 <div className="text-terminal-textMuted text-xs">Volume</div>
                 <div className="font-semibold num">
                   {(quote.volume / 1000000).toFixed(1)}M
                 </div>
               </div>
-              {quote.market_cap && (
+              {fundamentals?.market_cap && (
                 <div>
                   <div className="text-terminal-textMuted text-xs">Market Cap</div>
                   <div className="font-semibold num">
-                    ${(quote.market_cap / 1000000000).toFixed(1)}B
+                    ${(fundamentals.market_cap / 1000000000).toFixed(1)}B
                   </div>
                 </div>
               )}
@@ -185,7 +214,7 @@ export default function InstrumentPage() {
       {/* Main Content */}
       <div className="max-w-7xl mx-auto px-4 py-6">
         {error && (
-          <div className="bg-red-500/10 border border-red-500/30 rounded px-4 py-3 mb-6 text-red-500">
+          <div className="bg-red-500/10 border border-red-500/30 rounded px-4 py-3 mb-6 text-red-500 text-sm">
             {error}
           </div>
         )}
@@ -210,11 +239,24 @@ export default function InstrumentPage() {
               ))}
             </div>
           </div>
-          <div className="h-96 bg-terminal-bg rounded">
-            <TradingViewChart
-              ticker={String(ticker).toUpperCase()}
-              period={selectedPeriod}
-            />
+          <div className="bg-terminal-bg rounded p-2">
+            {isLoadingChart ? (
+              <div className="h-96 flex items-center justify-center text-terminal-textMuted">
+                Loading chart...
+              </div>
+            ) : chartData.length > 0 ? (
+              <TradingViewChart
+                data={chartData}
+                height={400}
+                color={lineColor}
+                fill={true}
+                showAxes={true}
+              />
+            ) : (
+              <div className="h-96 flex items-center justify-center text-terminal-textMuted">
+                No chart data available
+              </div>
+            )}
           </div>
         </div>
 
@@ -223,7 +265,7 @@ export default function InstrumentPage() {
           <div className="bg-terminal-surface border border-terminal-border rounded p-4">
             <h2 className="text-lg font-semibold mb-4">Fundamentals</h2>
             <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
-              {fundamentals.pe_ratio && (
+              {fundamentals.pe_ratio !== undefined && fundamentals.pe_ratio !== null && (
                 <div>
                   <div className="text-terminal-textMuted text-xs">P/E Ratio</div>
                   <div className="text-lg font-semibold num text-terminal-cyan">
@@ -231,7 +273,7 @@ export default function InstrumentPage() {
                   </div>
                 </div>
               )}
-              {fundamentals.pb_ratio && (
+              {fundamentals.pb_ratio !== undefined && fundamentals.pb_ratio !== null && (
                 <div>
                   <div className="text-terminal-textMuted text-xs">P/B Ratio</div>
                   <div className="text-lg font-semibold num text-terminal-cyan">
@@ -239,7 +281,7 @@ export default function InstrumentPage() {
                   </div>
                 </div>
               )}
-              {fundamentals.roe && (
+              {fundamentals.roe !== undefined && fundamentals.roe !== null && (
                 <div>
                   <div className="text-terminal-textMuted text-xs">ROE</div>
                   <div className="text-lg font-semibold num text-terminal-cyan">
@@ -247,7 +289,23 @@ export default function InstrumentPage() {
                   </div>
                 </div>
               )}
-              {fundamentals.dividend_yield && (
+              {fundamentals.eps !== undefined && fundamentals.eps !== null && (
+                <div>
+                  <div className="text-terminal-textMuted text-xs">EPS</div>
+                  <div className="text-lg font-semibold num text-terminal-cyan">
+                    ${fundamentals.eps.toFixed(2)}
+                  </div>
+                </div>
+              )}
+              {fundamentals.beta !== undefined && fundamentals.beta !== null && (
+                <div>
+                  <div className="text-terminal-textMuted text-xs">Beta</div>
+                  <div className="text-lg font-semibold num text-terminal-cyan">
+                    {fundamentals.beta.toFixed(2)}
+                  </div>
+                </div>
+              )}
+              {fundamentals.dividend_yield !== undefined && fundamentals.dividend_yield !== null && (
                 <div>
                   <div className="text-terminal-textMuted text-xs">Dividend Yield</div>
                   <div className="text-lg font-semibold num text-terminal-cyan">
@@ -255,7 +313,7 @@ export default function InstrumentPage() {
                   </div>
                 </div>
               )}
-              {fundamentals.debt_to_equity && (
+              {fundamentals.debt_to_equity !== undefined && fundamentals.debt_to_equity !== null && (
                 <div>
                   <div className="text-terminal-textMuted text-xs">Debt/Equity</div>
                   <div className="text-lg font-semibold num text-terminal-cyan">
@@ -263,22 +321,15 @@ export default function InstrumentPage() {
                   </div>
                 </div>
               )}
-              {fundamentals.sector && (
+              {fundamentals.industry && (
                 <div>
-                  <div className="text-terminal-textMuted text-xs">Sector</div>
-                  <div className="text-lg font-semibold text-terminal-cyan">
-                    {fundamentals.sector}
+                  <div className="text-terminal-textMuted text-xs">Industry</div>
+                  <div className="text-sm font-semibold text-terminal-cyan">
+                    {fundamentals.industry}
                   </div>
                 </div>
               )}
             </div>
-          </div>
-        )}
-
-        {/* Loading States */}
-        {(isLoadingQuote || isLoadingFundamentals) && (
-          <div className="text-center py-4 text-terminal-textMuted">
-            Loading data...
           </div>
         )}
       </div>
