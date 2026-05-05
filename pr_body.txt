@@ -1,0 +1,56 @@
+﻿## Summary
+
+Complete Phase 1.5 polish addressing user feedback from Phase 1 testing.
+
+### Changes
+
+**Visual & UX:**
+- Terminal aesthetic (deep navy palette, cyan accents, monospace numerics)
+- TradingView lightweight-charts integration (replacing Recharts)
+- Click-to-expand indicator modals with period selectors
+- Full-screen modal with stats panel and period controls
+
+**Chart Interactions (user-requested):**
+- Scrollable/pannable chart history — period selector cadres initial view without filtering data
+- User can scroll left to explore data before the selected window
+- External data source links ('View on FRED' button in modal header)
+
+**Roadmap Updates:**
+- Added Phase 3.7 (Technical Indicators: EMA/MACD/Stochastic priority 1)
+- Specified intraday timeframes for Phase 2 (Daily/H4/H1 for instruments)
+- Roadmap now complete: 12 phases + sub-phases
+
+### Files Modified
+
+**Frontend:**
+- components/Header.tsx
+- components/MacroIndicator.tsx
+- components/IndicatorModal.tsx
+- components/TradingViewChart.tsx
+- pages/_app.tsx
+- pages/dashboard.tsx
+- pages/index.tsx
+- tailwind.config.js
+- styles/globals.css
+- tsconfig.json
+
+**Documentation:**
+- MODERNIZATION_PLAN.md
+- DETAILED_DEVELOPMENT_PLAN.md
+- vision_revised.md (memory)
+
+### Test Plan
+
+- Frontend builds without TypeScript errors (npm run build)
+- Vercel preview deployment succeeds
+- API status pill shows green (backend connected)
+- Dashboard loads 17 indicators
+- Click card opens IndicatorModal
+- Period selector cadres chart without filtering
+- User can scroll/pan chart to explore history
+- View on FRED external link works
+- Terminal color scheme visible
+- Monospace numerics align properly
+- Responsive layout works
+
+Ready for merge to main and production deployment.
