@@ -26,6 +26,10 @@ python-dotenv>=1.0.1          # Load .env variables
 # UTILITIES
 pydantic>=2.10.0              # Data validation
 
+# PHASE 2: Instruments & Data Fetching
+yfinance>=0.2.36              # Yahoo Finance data (stocks, ETFs, crypto, forex)
+rapidfuzz>=3.6.0              # Fuzzy string matching for search
+
 # ===================================================================
 # NOTES
 # ===================================================================

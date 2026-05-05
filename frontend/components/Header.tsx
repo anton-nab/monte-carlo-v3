@@ -1,13 +1,12 @@
 /**
  * Header — global navigation bar.
  *
- * Phase 1.5: barre de recherche est un PLACEHOLDER (visuel seulement,
- * non-fonctionnelle). L'integration reelle (OpenFIGI + autocomplete) arrive
- * en Phase 2 quand on aura la couche instruments.
+ * Phase 2: Global search is now functional with autocomplete.
  */
 
 import Link from 'next/link';
 import { useRouter } from 'next/router';
+import { GlobalSearch } from './GlobalSearch';
 
 interface NavItem {
   href: string;
@@ -21,7 +20,7 @@ const NAV_ITEMS: NavItem[] = [
   { href: '/', label: 'Home', emoji: '⌂', enabled: true },
   { href: '/dashboard', label: 'Macro', emoji: '📊', enabled: true },
   { href: '/discover', label: 'Discover', emoji: '🔥', enabled: false, badge: 'P2.7' },
-  { href: '/instrument', label: 'Instruments', emoji: '📈', enabled: false, badge: 'P2' },
+  { href: '/instrument', label: 'Instruments', emoji: '📈', enabled: true },
   { href: '/sentiment', label: 'Sentiment', emoji: '🌡️', enabled: false, badge: 'P3.5' },
   { href: '/bonds', label: 'Bonds', emoji: '🏦', enabled: false, badge: 'P4' },
 ];
@@ -41,20 +40,8 @@ export function Header() {
           <span>Monte Carlo v3</span>
         </Link>
 
-        {/* Search bar (placeholder) */}
-        <div className="flex-1 max-w-xl">
-          <div className="relative">
-            <input
-              type="text"
-              disabled
-              placeholder="Search ticker, name, ISIN…  (Phase 2)"
-              className="w-full bg-terminal-bg border border-terminal-border rounded px-3 py-1.5 text-sm text-terminal-textMuted placeholder:text-terminal-textDim cursor-not-allowed focus:outline-none num"
-            />
-            <kbd className="absolute right-2 top-1/2 -translate-y-1/2 text-2xs text-terminal-textDim border border-terminal-border rounded px-1 py-0.5 num">
-              ⌘K
-            </kbd>
-          </div>
-        </div>
+        {/* Search bar */}
+        <GlobalSearch />
 
         {/* Nav links */}
         <nav className="hidden md:flex items-center gap-1 text-sm">
