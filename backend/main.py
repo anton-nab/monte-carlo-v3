@@ -182,6 +182,36 @@ async def test_echo(data: dict):
 # 4. ROOT ENDPOINT (Landing Page Info)
 # ===========================================================================
 
+@app.get("/api/debug/fmp")
+async def debug_fmp():
+    """
+    Diagnostic: test FMP API connectivity and key validity.
+    Hit this endpoint to check if FMP is working.
+    """
+    import os
+    from services.fmp_provider import get_fmp_provider
+    fmp_key = os.getenv("FMP_API_KEY", "")
+    result = {
+        "fmp_key_set": bool(fmp_key),
+        "fmp_key_preview": (fmp_key[:6] + "..." + fmp_key[-4:]) if len(fmp_key) > 10 else ("SET" if fmp_key else "MISSING"),
+        "tests": {}
+    }
+    fmp = get_fmp_provider()
+    # Test DJI (smallest, 30 stocks — fastest to verify)
+    try:
+        dji = await fmp.get_index_constituents("DJI")
+        result["tests"]["DJI"] = {"status": "ok", "count": len(dji), "sample": dji[0] if dji else None}
+    except Exception as e:
+        result["tests"]["DJI"] = {"status": "error", "detail": str(e)}
+    # Test SP500
+    try:
+        sp = await fmp.get_index_constituents("SP500")
+        result["tests"]["SP500"] = {"status": "ok", "count": len(sp), "sample": sp[0] if sp else None}
+    except Exception as e:
+        result["tests"]["SP500"] = {"status": "error", "detail": str(e)}
+    return result
+
+
 @app.get("/")
 async def root():
     """
@@ -216,8 +246,14 @@ async def root():
 @app.on_event("startup")
 async def startup_event():
     """Called when API starts"""
+    import os
     print("[*] API Startup - Monte Carlo v3")
     print("[*] All systems operational")
+    # Diagnostic: show which API keys are configured
+    fmp_key = os.getenv("FMP_API_KEY", "")
+    fred_key = os.getenv("FRED_API_KEY", "")
+    print(f"[*] FMP_API_KEY : {'SET (' + fmp_key[:6] + '...)' if fmp_key else 'NOT SET — FMP will fall back to hardcoded data!'}")
+    print(f"[*] FRED_API_KEY: {'SET (' + fred_key[:6] + '...)' if fred_key else 'NOT SET'}")
 
 
 @app.on_event("shutdown")
