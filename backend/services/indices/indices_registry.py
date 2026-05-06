@@ -1,109 +1,391 @@
 """
 Registry of supported global indices.
 
-Each entry defines:
-  - Metadata (name, region, currency)
-  - Yahoo Finance ticker for index-level price
-  - Wikipedia source for constituent scraping
-  - Column names within the Wikipedia table
+All European/Asian indices use hardcoded lists with proper Yahoo Finance
+ticker suffixes (.DE, .L, .PA, etc.) because Wikipedia pages for these
+indices use local tickers without exchange suffixes, making them unusable
+for yfinance price lookups.
 
-Sources:
-  - Wikipedia (primary, free, good coverage)
-  - Hardcoded fallback for indices with unstable Wikipedia pages
+US indices (SP500, NDX) use Wikipedia scraping since US tickers need no suffix.
 """
 
 from typing import Optional, List, Dict, Any
 
-# ---------------------------------------------------------------------------
-# Hardcoded fallbacks (for indices whose Wikipedia tables break often)
-# ---------------------------------------------------------------------------
-
+# ─────────────────────────────────────────────────────────────────────────────
+# US — Dow Jones Industrial Average (30 stocks, rarely changes)
+# ─────────────────────────────────────────────────────────────────────────────
 DOW30 = [
-    {"ticker": "AAPL",  "name": "Apple",                    "sector": "Information Technology"},
-    {"ticker": "AMGN",  "name": "Amgen",                    "sector": "Health Care"},
-    {"ticker": "AMZN",  "name": "Amazon",                   "sector": "Consumer Discretionary"},
-    {"ticker": "AXP",   "name": "American Express",         "sector": "Financials"},
-    {"ticker": "BA",    "name": "Boeing",                   "sector": "Industrials"},
-    {"ticker": "CAT",   "name": "Caterpillar",              "sector": "Industrials"},
-    {"ticker": "CRM",   "name": "Salesforce",               "sector": "Information Technology"},
-    {"ticker": "CSCO",  "name": "Cisco Systems",            "sector": "Information Technology"},
-    {"ticker": "CVX",   "name": "Chevron",                  "sector": "Energy"},
-    {"ticker": "DIS",   "name": "Walt Disney",              "sector": "Communication Services"},
-    {"ticker": "DOW",   "name": "Dow Inc.",                 "sector": "Materials"},
-    {"ticker": "GS",    "name": "Goldman Sachs",            "sector": "Financials"},
-    {"ticker": "HD",    "name": "Home Depot",               "sector": "Consumer Discretionary"},
-    {"ticker": "HON",   "name": "Honeywell",                "sector": "Industrials"},
-    {"ticker": "IBM",   "name": "IBM",                      "sector": "Information Technology"},
-    {"ticker": "JNJ",   "name": "Johnson & Johnson",        "sector": "Health Care"},
-    {"ticker": "JPM",   "name": "JPMorgan Chase",           "sector": "Financials"},
-    {"ticker": "KO",    "name": "Coca-Cola",                "sector": "Consumer Staples"},
-    {"ticker": "MCD",   "name": "McDonald's",               "sector": "Consumer Discretionary"},
-    {"ticker": "MMM",   "name": "3M",                       "sector": "Industrials"},
-    {"ticker": "MRK",   "name": "Merck",                    "sector": "Health Care"},
-    {"ticker": "MSFT",  "name": "Microsoft",                "sector": "Information Technology"},
-    {"ticker": "NKE",   "name": "Nike",                     "sector": "Consumer Discretionary"},
-    {"ticker": "NVDA",  "name": "NVIDIA",                   "sector": "Information Technology"},
-    {"ticker": "PG",    "name": "Procter & Gamble",         "sector": "Consumer Staples"},
-    {"ticker": "SHW",   "name": "Sherwin-Williams",         "sector": "Materials"},
-    {"ticker": "TRV",   "name": "Travelers Companies",      "sector": "Financials"},
-    {"ticker": "UNH",   "name": "UnitedHealth Group",       "sector": "Health Care"},
-    {"ticker": "V",     "name": "Visa",                     "sector": "Financials"},
-    {"ticker": "VZ",    "name": "Verizon",                  "sector": "Communication Services"},
-    {"ticker": "WMT",   "name": "Walmart",                  "sector": "Consumer Staples"},
+    {"ticker": "AAPL",  "name": "Apple",                 "sector": "Information Technology"},
+    {"ticker": "AMGN",  "name": "Amgen",                 "sector": "Health Care"},
+    {"ticker": "AMZN",  "name": "Amazon",                "sector": "Consumer Discretionary"},
+    {"ticker": "AXP",   "name": "American Express",      "sector": "Financials"},
+    {"ticker": "BA",    "name": "Boeing",                "sector": "Industrials"},
+    {"ticker": "CAT",   "name": "Caterpillar",           "sector": "Industrials"},
+    {"ticker": "CRM",   "name": "Salesforce",            "sector": "Information Technology"},
+    {"ticker": "CSCO",  "name": "Cisco Systems",         "sector": "Information Technology"},
+    {"ticker": "CVX",   "name": "Chevron",               "sector": "Energy"},
+    {"ticker": "DIS",   "name": "Walt Disney",           "sector": "Communication Services"},
+    {"ticker": "DOW",   "name": "Dow Inc.",              "sector": "Materials"},
+    {"ticker": "GS",    "name": "Goldman Sachs",         "sector": "Financials"},
+    {"ticker": "HD",    "name": "Home Depot",            "sector": "Consumer Discretionary"},
+    {"ticker": "HON",   "name": "Honeywell",             "sector": "Industrials"},
+    {"ticker": "IBM",   "name": "IBM",                   "sector": "Information Technology"},
+    {"ticker": "JNJ",   "name": "Johnson & Johnson",     "sector": "Health Care"},
+    {"ticker": "JPM",   "name": "JPMorgan Chase",        "sector": "Financials"},
+    {"ticker": "KO",    "name": "Coca-Cola",             "sector": "Consumer Staples"},
+    {"ticker": "MCD",   "name": "McDonald's",            "sector": "Consumer Discretionary"},
+    {"ticker": "MMM",   "name": "3M",                    "sector": "Industrials"},
+    {"ticker": "MRK",   "name": "Merck",                 "sector": "Health Care"},
+    {"ticker": "MSFT",  "name": "Microsoft",             "sector": "Information Technology"},
+    {"ticker": "NKE",   "name": "Nike",                  "sector": "Consumer Discretionary"},
+    {"ticker": "NVDA",  "name": "NVIDIA",                "sector": "Information Technology"},
+    {"ticker": "PG",    "name": "Procter & Gamble",      "sector": "Consumer Staples"},
+    {"ticker": "SHW",   "name": "Sherwin-Williams",      "sector": "Materials"},
+    {"ticker": "TRV",   "name": "Travelers Companies",   "sector": "Financials"},
+    {"ticker": "UNH",   "name": "UnitedHealth Group",    "sector": "Health Care"},
+    {"ticker": "V",     "name": "Visa",                  "sector": "Financials"},
+    {"ticker": "VZ",    "name": "Verizon",               "sector": "Communication Services"},
+    {"ticker": "WMT",   "name": "Walmart",               "sector": "Consumer Staples"},
 ]
 
+# ─────────────────────────────────────────────────────────────────────────────
+# US — Nasdaq 100 (top 100 non-financial Nasdaq companies)
+# ─────────────────────────────────────────────────────────────────────────────
+NDX100 = [
+    # Information Technology
+    {"ticker": "MSFT",  "name": "Microsoft",             "sector": "Information Technology"},
+    {"ticker": "AAPL",  "name": "Apple",                 "sector": "Information Technology"},
+    {"ticker": "NVDA",  "name": "NVIDIA",                "sector": "Information Technology"},
+    {"ticker": "AVGO",  "name": "Broadcom",              "sector": "Information Technology"},
+    {"ticker": "CSCO",  "name": "Cisco Systems",         "sector": "Information Technology"},
+    {"ticker": "QCOM",  "name": "Qualcomm",              "sector": "Information Technology"},
+    {"ticker": "AMAT",  "name": "Applied Materials",     "sector": "Information Technology"},
+    {"ticker": "TXN",   "name": "Texas Instruments",     "sector": "Information Technology"},
+    {"ticker": "ADI",   "name": "Analog Devices",        "sector": "Information Technology"},
+    {"ticker": "INTC",  "name": "Intel",                 "sector": "Information Technology"},
+    {"ticker": "MU",    "name": "Micron Technology",     "sector": "Information Technology"},
+    {"ticker": "KLAC",  "name": "KLA Corp",              "sector": "Information Technology"},
+    {"ticker": "LRCX",  "name": "Lam Research",          "sector": "Information Technology"},
+    {"ticker": "MRVL",  "name": "Marvell Technology",    "sector": "Information Technology"},
+    {"ticker": "NXPI",  "name": "NXP Semiconductors",   "sector": "Information Technology"},
+    {"ticker": "MCHP",  "name": "Microchip Technology",  "sector": "Information Technology"},
+    {"ticker": "ON",    "name": "ON Semiconductor",      "sector": "Information Technology"},
+    {"ticker": "SMCI",  "name": "Super Micro Computer",  "sector": "Information Technology"},
+    {"ticker": "GFS",   "name": "GlobalFoundries",       "sector": "Information Technology"},
+    # Software & Cloud
+    {"ticker": "ADBE",  "name": "Adobe",                 "sector": "Information Technology"},
+    {"ticker": "INTU",  "name": "Intuit",                "sector": "Information Technology"},
+    {"ticker": "PANW",  "name": "Palo Alto Networks",    "sector": "Information Technology"},
+    {"ticker": "FTNT",  "name": "Fortinet",              "sector": "Information Technology"},
+    {"ticker": "CRWD",  "name": "CrowdStrike",           "sector": "Information Technology"},
+    {"ticker": "ZS",    "name": "Zscaler",               "sector": "Information Technology"},
+    {"ticker": "DDOG",  "name": "Datadog",               "sector": "Information Technology"},
+    {"ticker": "ADSK",  "name": "Autodesk",              "sector": "Information Technology"},
+    {"ticker": "SNPS",  "name": "Synopsys",              "sector": "Information Technology"},
+    {"ticker": "CDNS",  "name": "Cadence Design",        "sector": "Information Technology"},
+    {"ticker": "ANSS",  "name": "Ansys",                 "sector": "Information Technology"},
+    {"ticker": "CSGP",  "name": "CoStar Group",          "sector": "Information Technology"},
+    {"ticker": "MDB",   "name": "MongoDB",               "sector": "Information Technology"},
+    {"ticker": "WDAY",  "name": "Workday",               "sector": "Information Technology"},
+    {"ticker": "TEAM",  "name": "Atlassian",             "sector": "Information Technology"},
+    # Communication Services
+    {"ticker": "META",  "name": "Meta Platforms",        "sector": "Communication Services"},
+    {"ticker": "GOOGL", "name": "Alphabet (Class A)",    "sector": "Communication Services"},
+    {"ticker": "GOOG",  "name": "Alphabet (Class C)",    "sector": "Communication Services"},
+    {"ticker": "NFLX",  "name": "Netflix",               "sector": "Communication Services"},
+    {"ticker": "TMUS",  "name": "T-Mobile US",           "sector": "Communication Services"},
+    {"ticker": "CMCSA", "name": "Comcast",               "sector": "Communication Services"},
+    {"ticker": "EA",    "name": "Electronic Arts",       "sector": "Communication Services"},
+    {"ticker": "TTWO",  "name": "Take-Two Interactive",  "sector": "Communication Services"},
+    {"ticker": "WBD",   "name": "Warner Bros. Discovery","sector": "Communication Services"},
+    # Consumer Discretionary
+    {"ticker": "AMZN",  "name": "Amazon",                "sector": "Consumer Discretionary"},
+    {"ticker": "TSLA",  "name": "Tesla",                 "sector": "Consumer Discretionary"},
+    {"ticker": "BKNG",  "name": "Booking Holdings",      "sector": "Consumer Discretionary"},
+    {"ticker": "MAR",   "name": "Marriott",              "sector": "Consumer Discretionary"},
+    {"ticker": "ABNB",  "name": "Airbnb",                "sector": "Consumer Discretionary"},
+    {"ticker": "EBAY",  "name": "eBay",                  "sector": "Consumer Discretionary"},
+    {"ticker": "MELI",  "name": "MercadoLibre",          "sector": "Consumer Discretionary"},
+    {"ticker": "LULU",  "name": "Lululemon",             "sector": "Consumer Discretionary"},
+    {"ticker": "DLTR",  "name": "Dollar Tree",           "sector": "Consumer Discretionary"},
+    {"ticker": "CPRT",  "name": "Copart",                "sector": "Consumer Discretionary"},
+    {"ticker": "ODFL",  "name": "Old Dominion Freight",  "sector": "Industrials"},
+    {"ticker": "ORLY",  "name": "O'Reilly Automotive",   "sector": "Consumer Discretionary"},
+    {"ticker": "PCAR",  "name": "PACCAR",                "sector": "Industrials"},
+    # Health Care / Biotech
+    {"ticker": "AMGN",  "name": "Amgen",                 "sector": "Health Care"},
+    {"ticker": "VRTX",  "name": "Vertex Pharmaceuticals","sector": "Health Care"},
+    {"ticker": "REGN",  "name": "Regeneron",             "sector": "Health Care"},
+    {"ticker": "GILD",  "name": "Gilead Sciences",       "sector": "Health Care"},
+    {"ticker": "BIIB",  "name": "Biogen",                "sector": "Health Care"},
+    {"ticker": "MRNA",  "name": "Moderna",               "sector": "Health Care"},
+    {"ticker": "ILMN",  "name": "Illumina",              "sector": "Health Care"},
+    {"ticker": "IDXX",  "name": "IDEXX Laboratories",    "sector": "Health Care"},
+    {"ticker": "DXCM",  "name": "Dexcom",                "sector": "Health Care"},
+    {"ticker": "ISRG",  "name": "Intuitive Surgical",    "sector": "Health Care"},
+    {"ticker": "AZN",   "name": "AstraZeneca",           "sector": "Health Care"},
+    # Consumer Staples
+    {"ticker": "COST",  "name": "Costco",                "sector": "Consumer Staples"},
+    {"ticker": "MDLZ",  "name": "Mondelez",              "sector": "Consumer Staples"},
+    {"ticker": "KHC",   "name": "Kraft Heinz",           "sector": "Consumer Staples"},
+    {"ticker": "KDP",   "name": "Keurig Dr Pepper",      "sector": "Consumer Staples"},
+    {"ticker": "MNST",  "name": "Monster Beverage",      "sector": "Consumer Staples"},
+    {"ticker": "SBUX",  "name": "Starbucks",             "sector": "Consumer Staples"},
+    {"ticker": "PEP",   "name": "PepsiCo",               "sector": "Consumer Staples"},
+    # Industrials & Utilities
+    {"ticker": "HON",   "name": "Honeywell",             "sector": "Industrials"},
+    {"ticker": "FAST",  "name": "Fastenal",              "sector": "Industrials"},
+    {"ticker": "CTAS",  "name": "Cintas",                "sector": "Industrials"},
+    {"ticker": "CSX",   "name": "CSX",                   "sector": "Industrials"},
+    {"ticker": "AEP",   "name": "American Electric Power","sector": "Utilities"},
+    {"ticker": "EXC",   "name": "Exelon",                "sector": "Utilities"},
+    {"ticker": "XEL",   "name": "Xcel Energy",           "sector": "Utilities"},
+    {"ticker": "CEG",   "name": "Constellation Energy",  "sector": "Utilities"},
+    # Financials
+    {"ticker": "PYPL",  "name": "PayPal",                "sector": "Financials"},
+    {"ticker": "VRSK",  "name": "Verisk Analytics",      "sector": "Financials"},
+    # Energy
+    {"ticker": "BKR",   "name": "Baker Hughes",          "sector": "Energy"},
+    {"ticker": "FANG",  "name": "Diamondback Energy",    "sector": "Energy"},
+    # Other
+    {"ticker": "PDD",   "name": "PDD Holdings",          "sector": "Consumer Discretionary"},
+    {"ticker": "CTSH",  "name": "Cognizant Technology",  "sector": "Information Technology"},
+    {"ticker": "CCEP",  "name": "Coca-Cola Europacific",  "sector": "Consumer Staples"},
+    {"ticker": "GEHC",  "name": "GE HealthCare",         "sector": "Health Care"},
+    {"ticker": "ASML",  "name": "ASML Holding",          "sector": "Information Technology"},
+]
+
+# ─────────────────────────────────────────────────────────────────────────────
+# France — CAC 40
+# ─────────────────────────────────────────────────────────────────────────────
 CAC40 = [
-    {"ticker": "AI.PA",   "name": "Air Liquide",          "sector": "Materials"},
-    {"ticker": "AIR.PA",  "name": "Airbus",               "sector": "Industrials"},
-    {"ticker": "ALO.PA",  "name": "Alstom",               "sector": "Industrials"},
-    {"ticker": "MT.AS",   "name": "ArcelorMittal",        "sector": "Materials"},
-    {"ticker": "ATO.PA",  "name": "Atos",                 "sector": "Information Technology"},
-    {"ticker": "CS.PA",   "name": "AXA",                  "sector": "Financials"},
-    {"ticker": "BNP.PA",  "name": "BNP Paribas",          "sector": "Financials"},
-    {"ticker": "EN.PA",   "name": "Bouygues",             "sector": "Industrials"},
-    {"ticker": "CAP.PA",  "name": "Capgemini",            "sector": "Information Technology"},
-    {"ticker": "CA.PA",   "name": "Carrefour",            "sector": "Consumer Staples"},
-    {"ticker": "ACA.PA",  "name": "Crédit Agricole",      "sector": "Financials"},
-    {"ticker": "BN.PA",   "name": "Danone",               "sector": "Consumer Staples"},
-    {"ticker": "DSY.PA",  "name": "Dassault Systèmes",    "sector": "Information Technology"},
-    {"ticker": "ENGI.PA", "name": "Engie",                "sector": "Utilities"},
-    {"ticker": "EL.PA",   "name": "EssilorLuxottica",     "sector": "Health Care"},
-    {"ticker": "RMS.PA",  "name": "Hermès",               "sector": "Consumer Discretionary"},
-    {"ticker": "KER.PA",  "name": "Kering",               "sector": "Consumer Discretionary"},
-    {"ticker": "OR.PA",   "name": "L'Oréal",              "sector": "Consumer Staples"},
-    {"ticker": "LR.PA",   "name": "Legrand",              "sector": "Industrials"},
-    {"ticker": "LVMH.PA", "name": "LVMH",                 "sector": "Consumer Discretionary"},
-    {"ticker": "MC.PA",   "name": "LVMH (MC)",            "sector": "Consumer Discretionary"},
-    {"ticker": "ML.PA",   "name": "Michelin",             "sector": "Consumer Discretionary"},
-    {"ticker": "ORA.PA",  "name": "Orange",               "sector": "Communication Services"},
-    {"ticker": "RI.PA",   "name": "Pernod Ricard",        "sector": "Consumer Staples"},
-    {"ticker": "PUB.PA",  "name": "Publicis",             "sector": "Communication Services"},
-    {"ticker": "RNO.PA",  "name": "Renault",              "sector": "Consumer Discretionary"},
-    {"ticker": "SAF.PA",  "name": "Safran",               "sector": "Industrials"},
-    {"ticker": "SGO.PA",  "name": "Saint-Gobain",         "sector": "Materials"},
-    {"ticker": "SAN.PA",  "name": "Sanofi",               "sector": "Health Care"},
-    {"ticker": "SU.PA",   "name": "Schneider Electric",   "sector": "Industrials"},
-    {"ticker": "GLE.PA",  "name": "Société Générale",     "sector": "Financials"},
-    {"ticker": "STLAM.MI","name": "Stellantis",           "sector": "Consumer Discretionary"},
-    {"ticker": "STM.PA",  "name": "STMicroelectronics",   "sector": "Information Technology"},
-    {"ticker": "TEP.PA",  "name": "Teleperformance",      "sector": "Industrials"},
-    {"ticker": "HO.PA",   "name": "Thales",               "sector": "Industrials"},
-    {"ticker": "TTE.PA",  "name": "TotalEnergies",        "sector": "Energy"},
-    {"ticker": "URW.AS",  "name": "Unibail-Rodamco",      "sector": "Real Estate"},
-    {"ticker": "VIE.PA",  "name": "Veolia",               "sector": "Utilities"},
-    {"ticker": "DG.PA",   "name": "Vinci",                "sector": "Industrials"},
-    {"ticker": "WLN.PA",  "name": "Worldline",            "sector": "Information Technology"},
+    {"ticker": "AI.PA",    "name": "Air Liquide",         "sector": "Materials"},
+    {"ticker": "AIR.PA",   "name": "Airbus",              "sector": "Industrials"},
+    {"ticker": "ALO.PA",   "name": "Alstom",              "sector": "Industrials"},
+    {"ticker": "CS.PA",    "name": "AXA",                 "sector": "Financials"},
+    {"ticker": "BNP.PA",   "name": "BNP Paribas",         "sector": "Financials"},
+    {"ticker": "EN.PA",    "name": "Bouygues",            "sector": "Industrials"},
+    {"ticker": "CAP.PA",   "name": "Capgemini",           "sector": "Information Technology"},
+    {"ticker": "CA.PA",    "name": "Carrefour",           "sector": "Consumer Staples"},
+    {"ticker": "ACA.PA",   "name": "Crédit Agricole",     "sector": "Financials"},
+    {"ticker": "BN.PA",    "name": "Danone",              "sector": "Consumer Staples"},
+    {"ticker": "DSY.PA",   "name": "Dassault Systèmes",   "sector": "Information Technology"},
+    {"ticker": "ENGI.PA",  "name": "Engie",               "sector": "Utilities"},
+    {"ticker": "EL.PA",    "name": "EssilorLuxottica",    "sector": "Health Care"},
+    {"ticker": "RMS.PA",   "name": "Hermès",              "sector": "Consumer Discretionary"},
+    {"ticker": "KER.PA",   "name": "Kering",              "sector": "Consumer Discretionary"},
+    {"ticker": "OR.PA",    "name": "L'Oréal",             "sector": "Consumer Staples"},
+    {"ticker": "LR.PA",    "name": "Legrand",             "sector": "Industrials"},
+    {"ticker": "MC.PA",    "name": "LVMH",                "sector": "Consumer Discretionary"},
+    {"ticker": "ML.PA",    "name": "Michelin",            "sector": "Consumer Discretionary"},
+    {"ticker": "ORA.PA",   "name": "Orange",              "sector": "Communication Services"},
+    {"ticker": "RI.PA",    "name": "Pernod Ricard",       "sector": "Consumer Staples"},
+    {"ticker": "PUB.PA",   "name": "Publicis Groupe",     "sector": "Communication Services"},
+    {"ticker": "RNO.PA",   "name": "Renault",             "sector": "Consumer Discretionary"},
+    {"ticker": "SAF.PA",   "name": "Safran",              "sector": "Industrials"},
+    {"ticker": "SGO.PA",   "name": "Saint-Gobain",        "sector": "Materials"},
+    {"ticker": "SAN.PA",   "name": "Sanofi",              "sector": "Health Care"},
+    {"ticker": "SU.PA",    "name": "Schneider Electric",  "sector": "Industrials"},
+    {"ticker": "GLE.PA",   "name": "Société Générale",    "sector": "Financials"},
+    {"ticker": "STM.PA",   "name": "STMicroelectronics",  "sector": "Information Technology"},
+    {"ticker": "TEP.PA",   "name": "Teleperformance",     "sector": "Industrials"},
+    {"ticker": "HO.PA",    "name": "Thales",              "sector": "Industrials"},
+    {"ticker": "TTE.PA",   "name": "TotalEnergies",       "sector": "Energy"},
+    {"ticker": "VIE.PA",   "name": "Veolia",              "sector": "Utilities"},
+    {"ticker": "DG.PA",    "name": "Vinci",               "sector": "Industrials"},
+    {"ticker": "WLN.PA",   "name": "Worldline",           "sector": "Information Technology"},
+    {"ticker": "URW.AS",   "name": "Unibail-Rodamco",     "sector": "Real Estate"},
+    {"ticker": "MT.AS",    "name": "ArcelorMittal",       "sector": "Materials"},
+    {"ticker": "AF.PA",    "name": "Air France-KLM",      "sector": "Industrials"},
+    {"ticker": "SEB.PA",   "name": "SEB",                 "sector": "Consumer Discretionary"},
+    {"ticker": "ERF.PA",   "name": "Eurofins Scientific", "sector": "Health Care"},
 ]
 
-# ---------------------------------------------------------------------------
+# ─────────────────────────────────────────────────────────────────────────────
+# Germany — DAX 40 (suffixes .DE required for yfinance)
+# ─────────────────────────────────────────────────────────────────────────────
+DAX40 = [
+    {"ticker": "ADS.DE",   "name": "Adidas",              "sector": "Consumer Discretionary"},
+    {"ticker": "AIR.DE",   "name": "Airbus",              "sector": "Industrials"},
+    {"ticker": "ALV.DE",   "name": "Allianz",             "sector": "Financials"},
+    {"ticker": "BAS.DE",   "name": "BASF",                "sector": "Materials"},
+    {"ticker": "BAYN.DE",  "name": "Bayer",               "sector": "Health Care"},
+    {"ticker": "BEI.DE",   "name": "Beiersdorf",          "sector": "Consumer Staples"},
+    {"ticker": "BMW.DE",   "name": "BMW",                 "sector": "Consumer Discretionary"},
+    {"ticker": "BNR.DE",   "name": "Brenntag",            "sector": "Materials"},
+    {"ticker": "CBK.DE",   "name": "Commerzbank",         "sector": "Financials"},
+    {"ticker": "CON.DE",   "name": "Continental",         "sector": "Consumer Discretionary"},
+    {"ticker": "DB1.DE",   "name": "Deutsche Börse",      "sector": "Financials"},
+    {"ticker": "DBK.DE",   "name": "Deutsche Bank",       "sector": "Financials"},
+    {"ticker": "DHL.DE",   "name": "DHL Group",           "sector": "Industrials"},
+    {"ticker": "DTE.DE",   "name": "Deutsche Telekom",    "sector": "Communication Services"},
+    {"ticker": "DTG.DE",   "name": "Daimler Truck",       "sector": "Industrials"},
+    {"ticker": "ENR.DE",   "name": "Siemens Energy",      "sector": "Utilities"},
+    {"ticker": "EOAN.DE",  "name": "E.ON",                "sector": "Utilities"},
+    {"ticker": "FRE.DE",   "name": "Fresenius",           "sector": "Health Care"},
+    {"ticker": "FME.DE",   "name": "Fresenius Medical Care","sector": "Health Care"},
+    {"ticker": "HEI.DE",   "name": "Heidelberg Materials","sector": "Materials"},
+    {"ticker": "HEN3.DE",  "name": "Henkel",              "sector": "Consumer Staples"},
+    {"ticker": "IFX.DE",   "name": "Infineon Technologies","sector": "Information Technology"},
+    {"ticker": "MBG.DE",   "name": "Mercedes-Benz",       "sector": "Consumer Discretionary"},
+    {"ticker": "MRK.DE",   "name": "Merck KGaA",          "sector": "Health Care"},
+    {"ticker": "MTX.DE",   "name": "MTU Aero Engines",    "sector": "Industrials"},
+    {"ticker": "MUV2.DE",  "name": "Munich Re",           "sector": "Financials"},
+    {"ticker": "PAH3.DE",  "name": "Porsche Automobil",   "sector": "Consumer Discretionary"},
+    {"ticker": "P911.DE",  "name": "Porsche AG",          "sector": "Consumer Discretionary"},
+    {"ticker": "QIA.DE",   "name": "QIAGEN",              "sector": "Health Care"},
+    {"ticker": "RHM.DE",   "name": "Rheinmetall",         "sector": "Industrials"},
+    {"ticker": "RWE.DE",   "name": "RWE",                 "sector": "Utilities"},
+    {"ticker": "SAP.DE",   "name": "SAP",                 "sector": "Information Technology"},
+    {"ticker": "SRT3.DE",  "name": "Sartorius",           "sector": "Health Care"},
+    {"ticker": "SIE.DE",   "name": "Siemens",             "sector": "Industrials"},
+    {"ticker": "SHL.DE",   "name": "Siemens Healthineers","sector": "Health Care"},
+    {"ticker": "SY1.DE",   "name": "Symrise",             "sector": "Materials"},
+    {"ticker": "VNA.DE",   "name": "Vonovia",             "sector": "Real Estate"},
+    {"ticker": "VOW3.DE",  "name": "Volkswagen",          "sector": "Consumer Discretionary"},
+    {"ticker": "ZAL.DE",   "name": "Zalando",             "sector": "Consumer Discretionary"},
+    {"ticker": "1COV.DE",  "name": "Covestro",            "sector": "Materials"},
+]
+
+# ─────────────────────────────────────────────────────────────────────────────
+# UK — FTSE 100 top constituents (suffix .L required for yfinance)
+# ─────────────────────────────────────────────────────────────────────────────
+FTSE100 = [
+    {"ticker": "AZN.L",   "name": "AstraZeneca",          "sector": "Health Care"},
+    {"ticker": "SHEL.L",  "name": "Shell",                "sector": "Energy"},
+    {"ticker": "HSBA.L",  "name": "HSBC",                 "sector": "Financials"},
+    {"ticker": "ULVR.L",  "name": "Unilever",             "sector": "Consumer Staples"},
+    {"ticker": "RIO.L",   "name": "Rio Tinto",            "sector": "Materials"},
+    {"ticker": "BP.L",    "name": "BP",                   "sector": "Energy"},
+    {"ticker": "GSK.L",   "name": "GSK",                  "sector": "Health Care"},
+    {"ticker": "DGE.L",   "name": "Diageo",               "sector": "Consumer Staples"},
+    {"ticker": "BA.L",    "name": "BAE Systems",          "sector": "Industrials"},
+    {"ticker": "BATS.L",  "name": "British American Tobacco","sector": "Consumer Staples"},
+    {"ticker": "REL.L",   "name": "RELX",                 "sector": "Industrials"},
+    {"ticker": "LSEG.L",  "name": "London Stock Exchange","sector": "Financials"},
+    {"ticker": "NG.L",    "name": "National Grid",        "sector": "Utilities"},
+    {"ticker": "LLOY.L",  "name": "Lloyds Banking Group", "sector": "Financials"},
+    {"ticker": "BARC.L",  "name": "Barclays",             "sector": "Financials"},
+    {"ticker": "RR.L",    "name": "Rolls-Royce",          "sector": "Industrials"},
+    {"ticker": "PRU.L",   "name": "Prudential",           "sector": "Financials"},
+    {"ticker": "AAL.L",   "name": "Anglo American",       "sector": "Materials"},
+    {"ticker": "STAN.L",  "name": "Standard Chartered",   "sector": "Financials"},
+    {"ticker": "VOD.L",   "name": "Vodafone",             "sector": "Communication Services"},
+    {"ticker": "EXPN.L",  "name": "Experian",             "sector": "Industrials"},
+    {"ticker": "IMB.L",   "name": "Imperial Brands",      "sector": "Consumer Staples"},
+    {"ticker": "TSCO.L",  "name": "Tesco",                "sector": "Consumer Staples"},
+    {"ticker": "NWG.L",   "name": "NatWest Group",        "sector": "Financials"},
+    {"ticker": "GLEN.L",  "name": "Glencore",             "sector": "Materials"},
+    {"ticker": "CRH.L",   "name": "CRH",                  "sector": "Materials"},
+    {"ticker": "CPG.L",   "name": "Compass Group",        "sector": "Consumer Discretionary"},
+    {"ticker": "WPP.L",   "name": "WPP",                  "sector": "Communication Services"},
+    {"ticker": "IHG.L",   "name": "InterContinental Hotels","sector": "Consumer Discretionary"},
+    {"ticker": "SSE.L",   "name": "SSE",                  "sector": "Utilities"},
+    {"ticker": "SVT.L",   "name": "Severn Trent",         "sector": "Utilities"},
+    {"ticker": "UU.L",    "name": "United Utilities",     "sector": "Utilities"},
+    {"ticker": "PSON.L",  "name": "Pearson",              "sector": "Communication Services"},
+    {"ticker": "SDR.L",   "name": "Schroders",            "sector": "Financials"},
+    {"ticker": "SGRO.L",  "name": "Segro",                "sector": "Real Estate"},
+    {"ticker": "LAND.L",  "name": "Land Securities",      "sector": "Real Estate"},
+    {"ticker": "MNDI.L",  "name": "Mondi",                "sector": "Materials"},
+    {"ticker": "JD.L",    "name": "JD Sports",            "sector": "Consumer Discretionary"},
+    {"ticker": "BRBY.L",  "name": "Burberry",             "sector": "Consumer Discretionary"},
+    {"ticker": "FRES.L",  "name": "Fresnillo",            "sector": "Materials"},
+    {"ticker": "III.L",   "name": "3i Group",             "sector": "Financials"},
+    {"ticker": "ITRK.L",  "name": "Intertek Group",       "sector": "Industrials"},
+    {"ticker": "KGF.L",   "name": "Kingfisher",           "sector": "Consumer Discretionary"},
+    {"ticker": "AV.L",    "name": "Aviva",                "sector": "Financials"},
+    {"ticker": "BNZL.L",  "name": "Bunzl",               "sector": "Industrials"},
+    {"ticker": "WTB.L",   "name": "Whitbread",            "sector": "Consumer Discretionary"},
+    {"ticker": "FLTR.L",  "name": "Flutter Entertainment","sector": "Consumer Discretionary"},
+    {"ticker": "AUTO.L",  "name": "Auto Trader Group",    "sector": "Communication Services"},
+    {"ticker": "HIK.L",   "name": "Hikma Pharmaceuticals","sector": "Health Care"},
+    {"ticker": "SMDS.L",  "name": "DS Smith",             "sector": "Materials"},
+    {"ticker": "MNG.L",   "name": "M&G",                  "sector": "Financials"},
+    {"ticker": "INF.L",   "name": "Informa",              "sector": "Communication Services"},
+    {"ticker": "SGE.L",   "name": "Sage Group",           "sector": "Information Technology"},
+    {"ticker": "BT-A.L",  "name": "BT Group",             "sector": "Communication Services"},
+    {"ticker": "MKS.L",   "name": "Marks & Spencer",      "sector": "Consumer Discretionary"},
+    {"ticker": "SBRY.L",  "name": "J Sainsbury",          "sector": "Consumer Staples"},
+    {"ticker": "HLN.L",   "name": "Haleon",               "sector": "Health Care"},
+    {"ticker": "OCDO.L",  "name": "Ocado Group",          "sector": "Consumer Staples"},
+    {"ticker": "HWDN.L",  "name": "Howden Joinery",       "sector": "Industrials"},
+    {"ticker": "ENT.L",   "name": "Entain",               "sector": "Consumer Discretionary"},
+    {"ticker": "BKG.L",   "name": "Berkeley Group",       "sector": "Real Estate"},
+]
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Eurozone — EURO STOXX 50
+# ─────────────────────────────────────────────────────────────────────────────
+EUROSTOXX50 = [
+    # France
+    {"ticker": "AIR.PA",   "name": "Airbus",              "sector": "Industrials"},
+    {"ticker": "MC.PA",    "name": "LVMH",                "sector": "Consumer Discretionary"},
+    {"ticker": "SAN.PA",   "name": "Sanofi",              "sector": "Health Care"},
+    {"ticker": "TTE.PA",   "name": "TotalEnergies",       "sector": "Energy"},
+    {"ticker": "SU.PA",    "name": "Schneider Electric",  "sector": "Industrials"},
+    {"ticker": "OR.PA",    "name": "L'Oréal",             "sector": "Consumer Staples"},
+    {"ticker": "BNP.PA",   "name": "BNP Paribas",         "sector": "Financials"},
+    {"ticker": "CS.PA",    "name": "AXA",                 "sector": "Financials"},
+    {"ticker": "SAF.PA",   "name": "Safran",              "sector": "Industrials"},
+    {"ticker": "DSY.PA",   "name": "Dassault Systèmes",   "sector": "Information Technology"},
+    # Germany
+    {"ticker": "SAP.DE",   "name": "SAP",                 "sector": "Information Technology"},
+    {"ticker": "SIE.DE",   "name": "Siemens",             "sector": "Industrials"},
+    {"ticker": "ALV.DE",   "name": "Allianz",             "sector": "Financials"},
+    {"ticker": "MUV2.DE",  "name": "Munich Re",           "sector": "Financials"},
+    {"ticker": "BMW.DE",   "name": "BMW",                 "sector": "Consumer Discretionary"},
+    {"ticker": "MBG.DE",   "name": "Mercedes-Benz",       "sector": "Consumer Discretionary"},
+    {"ticker": "BAYN.DE",  "name": "Bayer",               "sector": "Health Care"},
+    {"ticker": "DBK.DE",   "name": "Deutsche Bank",       "sector": "Financials"},
+    {"ticker": "RWE.DE",   "name": "RWE",                 "sector": "Utilities"},
+    {"ticker": "DTE.DE",   "name": "Deutsche Telekom",    "sector": "Communication Services"},
+    # Netherlands
+    {"ticker": "ASML.AS",  "name": "ASML Holding",        "sector": "Information Technology"},
+    {"ticker": "INGA.AS",  "name": "ING Group",           "sector": "Financials"},
+    {"ticker": "PHIA.AS",  "name": "Philips",             "sector": "Health Care"},
+    {"ticker": "MT.AS",    "name": "ArcelorMittal",       "sector": "Materials"},
+    # Spain
+    {"ticker": "IBE.MC",   "name": "Iberdrola",           "sector": "Utilities"},
+    {"ticker": "SAN.MC",   "name": "Banco Santander",     "sector": "Financials"},
+    {"ticker": "BBVA.MC",  "name": "BBVA",                "sector": "Financials"},
+    {"ticker": "TEF.MC",   "name": "Telefónica",          "sector": "Communication Services"},
+    # Italy
+    {"ticker": "ENI.MI",   "name": "Eni",                 "sector": "Energy"},
+    {"ticker": "ENEL.MI",  "name": "Enel",                "sector": "Utilities"},
+    {"ticker": "ISP.MI",   "name": "Intesa Sanpaolo",     "sector": "Financials"},
+    {"ticker": "UCG.MI",   "name": "UniCredit",           "sector": "Financials"},
+    {"ticker": "STM.MI",   "name": "STMicroelectronics",  "sector": "Information Technology"},
+    # Other
+    {"ticker": "NOKIA.HE", "name": "Nokia",               "sector": "Information Technology"},
+    {"ticker": "CRH.L",    "name": "CRH",                 "sector": "Materials"},
+    {"ticker": "AIR.PA",   "name": "Airbus (2nd class)",  "sector": "Industrials"},
+    {"ticker": "AD.AS",    "name": "Ahold Delhaize",      "sector": "Consumer Staples"},
+    {"ticker": "FLTR.L",   "name": "Flutter Entertainment","sector": "Consumer Discretionary"},
+    {"ticker": "RACE.MI",  "name": "Ferrari",             "sector": "Consumer Discretionary"},
+    {"ticker": "PRX.AS",   "name": "Prosus",              "sector": "Communication Services"},
+    {"ticker": "HEI.DE",   "name": "Heidelberg Materials","sector": "Materials"},
+    {"ticker": "STLAM.MI", "name": "Stellantis",          "sector": "Consumer Discretionary"},
+    {"ticker": "RI.PA",    "name": "Pernod Ricard",       "sector": "Consumer Staples"},
+    {"ticker": "VOW3.DE",  "name": "Volkswagen",          "sector": "Consumer Discretionary"},
+    {"ticker": "ADS.DE",   "name": "Adidas",              "sector": "Consumer Discretionary"},
+    {"ticker": "IFX.DE",   "name": "Infineon",            "sector": "Information Technology"},
+    {"ticker": "KER.PA",   "name": "Kering",              "sector": "Consumer Discretionary"},
+    {"ticker": "EL.PA",    "name": "EssilorLuxottica",    "sector": "Health Care"},
+    {"ticker": "RMS.PA",   "name": "Hermès",              "sector": "Consumer Discretionary"},
+    {"ticker": "ENGI.PA",  "name": "Engie",               "sector": "Utilities"},
+    {"ticker": "DG.PA",    "name": "Vinci",               "sector": "Industrials"},
+]
+
+
+# ─────────────────────────────────────────────────────────────────────────────
 # Main registry
-# ---------------------------------------------------------------------------
+# ─────────────────────────────────────────────────────────────────────────────
 
 INDICES_REGISTRY: Dict[str, Dict[str, Any]] = {
-    # ── United States ───────────────────────────────────────────────────────
     "SP500": {
         "name": "S&P 500",
-        "description": "500 largest US-listed companies by float-adjusted market cap",
+        "description": "500 largest US companies by float-adjusted market cap",
         "region": "United States",
         "exchange": "NYSE / NASDAQ",
         "yf_ticker": "^GSPC",
@@ -126,14 +408,8 @@ INDICES_REGISTRY: Dict[str, Dict[str, Any]] = {
         "yf_ticker": "^NDX",
         "currency": "USD",
         "flag": "🇺🇸",
-        "source": "wikipedia",
-        "wikipedia": {
-            "url": "https://en.wikipedia.org/wiki/Nasdaq-100",
-            "table_index": 4,
-            "ticker_col": "Ticker",
-            "name_col": "Company",
-            "sector_col": "GICS Sector",
-        },
+        "source": "hardcoded",
+        "hardcoded": NDX100,
     },
     "DJI": {
         "name": "Dow Jones Industrial Average",
@@ -154,9 +430,8 @@ INDICES_REGISTRY: Dict[str, Dict[str, Any]] = {
         "yf_ticker": "^RUT",
         "currency": "USD",
         "flag": "🇺🇸",
-        "source": "none",  # Too many constituents, no Wikipedia table
+        "source": "none",
     },
-    # ── Europe ───────────────────────────────────────────────────────────────
     "CAC40": {
         "name": "CAC 40",
         "description": "40 largest French companies on Euronext Paris",
@@ -176,31 +451,19 @@ INDICES_REGISTRY: Dict[str, Dict[str, Any]] = {
         "yf_ticker": "^GDAXI",
         "currency": "EUR",
         "flag": "🇩🇪",
-        "source": "wikipedia",
-        "wikipedia": {
-            "url": "https://en.wikipedia.org/wiki/DAX",
-            "table_index": 3,
-            "ticker_col": "Ticker",
-            "name_col": "Company",
-            "sector_col": "Prime Standard Sector",
-        },
+        "source": "hardcoded",
+        "hardcoded": DAX40,
     },
     "FTSE100": {
         "name": "FTSE 100",
-        "description": "100 largest companies listed on the London Stock Exchange",
+        "description": "100 largest companies on the London Stock Exchange",
         "region": "United Kingdom",
         "exchange": "London Stock Exchange",
         "yf_ticker": "^FTSE",
         "currency": "GBP",
         "flag": "🇬🇧",
-        "source": "wikipedia",
-        "wikipedia": {
-            "url": "https://en.wikipedia.org/wiki/FTSE_100_Index",
-            "table_index": 4,
-            "ticker_col": "Ticker",
-            "name_col": "Company",
-            "sector_col": "FTSE ICB Sector[25]",
-        },
+        "source": "hardcoded",
+        "hardcoded": FTSE100,
     },
     "EUROSTOXX50": {
         "name": "EURO STOXX 50",
@@ -210,14 +473,8 @@ INDICES_REGISTRY: Dict[str, Dict[str, Any]] = {
         "yf_ticker": "^STOXX50E",
         "currency": "EUR",
         "flag": "🇪🇺",
-        "source": "wikipedia",
-        "wikipedia": {
-            "url": "https://en.wikipedia.org/wiki/EURO_STOXX_50",
-            "table_index": 3,
-            "ticker_col": "Ticker",
-            "name_col": "Company",
-            "sector_col": "Sector",
-        },
+        "source": "hardcoded",
+        "hardcoded": EUROSTOXX50,
     },
     "SMI": {
         "name": "SMI (Swiss Market Index)",
@@ -227,14 +484,7 @@ INDICES_REGISTRY: Dict[str, Dict[str, Any]] = {
         "yf_ticker": "^SSMI",
         "currency": "CHF",
         "flag": "🇨🇭",
-        "source": "wikipedia",
-        "wikipedia": {
-            "url": "https://en.wikipedia.org/wiki/Swiss_Market_Index",
-            "table_index": 1,
-            "ticker_col": "Ticker",
-            "name_col": "Company",
-            "sector_col": "Sector",
-        },
+        "source": "none",
     },
     "IBEX35": {
         "name": "IBEX 35",
@@ -244,16 +494,8 @@ INDICES_REGISTRY: Dict[str, Dict[str, Any]] = {
         "yf_ticker": "^IBEX",
         "currency": "EUR",
         "flag": "🇪🇸",
-        "source": "wikipedia",
-        "wikipedia": {
-            "url": "https://en.wikipedia.org/wiki/IBEX_35",
-            "table_index": 2,
-            "ticker_col": "Ticker",
-            "name_col": "Company",
-            "sector_col": "Sector",
-        },
+        "source": "none",
     },
-    # ── Asia-Pacific ─────────────────────────────────────────────────────────
     "NIKKEI225": {
         "name": "Nikkei 225",
         "description": "225 largest Japanese companies on Tokyo Stock Exchange",
@@ -262,7 +504,7 @@ INDICES_REGISTRY: Dict[str, Dict[str, Any]] = {
         "yf_ticker": "^N225",
         "currency": "JPY",
         "flag": "🇯🇵",
-        "source": "none",  # Complex ticker format (4-digit + .T), no clean Wikipedia table
+        "source": "none",
     },
     "HSI": {
         "name": "Hang Seng Index",
@@ -294,7 +536,6 @@ INDICES_REGISTRY: Dict[str, Dict[str, Any]] = {
         "flag": "🇦🇺",
         "source": "none",
     },
-    # ── Americas (non-US) ────────────────────────────────────────────────────
     "TSX60": {
         "name": "S&P/TSX 60",
         "description": "60 largest Canadian companies",
@@ -307,7 +548,7 @@ INDICES_REGISTRY: Dict[str, Dict[str, Any]] = {
     },
     "BOVESPA": {
         "name": "Bovespa (Ibovespa)",
-        "description": "~87 most liquid stocks on B3 (Brazilian exchange)",
+        "description": "~87 most liquid stocks on B3",
         "region": "Brazil",
         "exchange": "B3",
         "yf_ticker": "^BVSP",
@@ -318,14 +559,9 @@ INDICES_REGISTRY: Dict[str, Dict[str, Any]] = {
 }
 
 
-def get_index(symbol: str) -> Optional[Dict[str, Any]]:
-    """Return index config or None."""
+def get_index(symbol: str) -> Dict[str, Any]:
     return INDICES_REGISTRY.get(symbol.upper())
 
 
 def list_all() -> List[Dict[str, Any]]:
-    """Return all indices as a list (with symbol injected)."""
-    return [
-        {**v, "symbol": k}
-        for k, v in INDICES_REGISTRY.items()
-    ]
+    return [{"symbol": k, **v} for k, v in INDICES_REGISTRY.items()]

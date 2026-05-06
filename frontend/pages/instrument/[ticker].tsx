@@ -23,6 +23,7 @@ interface QuoteData {
 
 interface FundamentalsData {
   ticker: string;
+  type?: string;   // 'equity' | 'etf' | 'mutual_fund' | 'index' | 'crypto' | 'forex'
   name?: string;
   sector?: string;
   industry?: string;
@@ -34,6 +35,21 @@ interface FundamentalsData {
   debt_to_equity?: number;
   eps?: number;
   beta?: number;
+}
+
+interface NewsItem {
+  title: string;
+  summary: string;
+  publisher: string;
+  url: string;
+  published_at: string;
+  thumbnail: string | null;
+}
+
+interface EtfHolding {
+  ticker: string;
+  name: string;
+  weight_pct: number;
 }
 
 interface HistoricalPoint {
@@ -79,6 +95,9 @@ export default function InstrumentPage() {
   const [chartType, setChartType] = useState<ChartType>('area');
   const [isLoadingChart, setIsLoadingChart] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [news, setNews] = useState<NewsItem[]>([]);
+  const [etfHoldings, setEtfHoldings] = useState<EtfHolding[]>([]);
+  const [isLoadingNews, setIsLoadingNews] = useState(false);
 
   useEffect(() => {
     if (!ticker) return;
@@ -101,8 +120,34 @@ export default function InstrumentPage() {
       }
     };
 
+    const fetchNews = async () => {
+      setIsLoadingNews(true);
+      try {
+        const res = await fetch(`${API_URL}/api/instruments/news/${ticker}`);
+        if (res.ok) setNews(await res.json());
+      } catch (err) {
+        console.error('News fetch error:', err);
+      } finally {
+        setIsLoadingNews(false);
+      }
+    };
+
+    const fetchEtfHoldings = async () => {
+      try {
+        const res = await fetch(`${API_URL}/api/instruments/etf-holdings/${ticker}`);
+        if (res.ok) {
+          const data = await res.json();
+          if (Array.isArray(data) && data.length > 0) setEtfHoldings(data);
+        }
+      } catch (err) {
+        console.error('ETF holdings fetch error:', err);
+      }
+    };
+
     fetchQuote();
     fetchFundamentals();
+    fetchNews();
+    fetchEtfHoldings();
 
     const interval = setInterval(fetchQuote, 30000);
     return () => clearInterval(interval);
@@ -405,7 +450,125 @@ export default function InstrumentPage() {
             </div>
           </div>
         )}
+        {/* ETF Holdings — shown only when holdings are available */}
+        {etfHoldings.length > 0 && (
+          <div className="bg-terminal-surface border border-terminal-border rounded p-4 mt-6">
+            <h2 className="text-lg font-semibold mb-4">
+              Top Holdings
+              <span className="ml-2 text-xs text-terminal-textMuted font-normal">
+                ({etfHoldings.length} positions)
+              </span>
+            </h2>
+            <div className="space-y-2">
+              {etfHoldings.slice(0, 15).map((h, i) => {
+                const barWidth = Math.min(100, (h.weight_pct / (etfHoldings[0]?.weight_pct || 1)) * 100);
+                return (
+                  <div key={h.ticker || i} className="group">
+                    <div className="flex items-center justify-between mb-1">
+                      <div className="flex items-center gap-3">
+                        <span className="text-xs text-terminal-textDim num w-5 text-right">{i + 1}</span>
+                        <a
+                          href={`/instrument/${h.ticker}`}
+                          className="font-mono font-bold text-terminal-cyan hover:underline text-sm"
+                        >
+                          {h.ticker}
+                        </a>
+                        <span className="text-xs text-terminal-textMuted truncate max-w-[200px]">
+                          {h.name}
+                        </span>
+                      </div>
+                      <span className="text-sm font-semibold num text-terminal-text">
+                        {h.weight_pct.toFixed(2)}%
+                      </span>
+                    </div>
+                    <div className="h-1 bg-terminal-border rounded-full overflow-hidden ml-8">
+                      <div
+                        className="h-full rounded-full bg-terminal-cyan/60 transition-all"
+                        style={{ width: `${barWidth}%` }}
+                      />
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+            {etfHoldings.length > 15 && (
+              <p className="text-xs text-terminal-textDim mt-3">
+                Showing top 15 of {etfHoldings.length} holdings
+              </p>
+            )}
+          </div>
+        )}
+
+        {/* News Section */}
+        <div className="bg-terminal-surface border border-terminal-border rounded p-4 mt-6">
+          <h2 className="text-lg font-semibold mb-4">Latest News</h2>
+          {isLoadingNews && (
+            <p className="text-terminal-textMuted text-sm animate-pulse">Loading news…</p>
+          )}
+          {!isLoadingNews && news.length === 0 && (
+            <p className="text-terminal-textDim text-sm">No news available for {String(ticker).toUpperCase()}</p>
+          )}
+          {!isLoadingNews && news.length > 0 && (
+            <div className="space-y-4">
+              {news.map((item, i) => (
+                <a
+                  key={i}
+                  href={item.url}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="flex gap-3 group hover:bg-terminal-surfaceHi rounded p-2 -mx-2 transition"
+                >
+                  {item.thumbnail && (
+                    <img
+                      src={item.thumbnail}
+                      alt=""
+                      className="w-16 h-12 object-cover rounded shrink-0 opacity-80 group-hover:opacity-100"
+                    />
+                  )}
+                  <div className="flex-1 min-w-0">
+                    <p className="text-sm font-semibold text-terminal-text group-hover:text-terminal-cyan transition leading-tight line-clamp-2">
+                      {item.title}
+                    </p>
+                    {item.summary && (
+                      <p className="text-xs text-terminal-textMuted mt-1 line-clamp-1">
+                        {item.summary}
+                      </p>
+                    )}
+                    <div className="flex items-center gap-2 mt-1">
+                      <span className="text-2xs text-terminal-textDim">{item.publisher}</span>
+                      {item.published_at && (
+                        <>
+                          <span className="text-terminal-textDim">·</span>
+                          <span className="text-2xs text-terminal-textDim num">
+                            {formatNewsDate(item.published_at)}
+                          </span>
+                        </>
+                      )}
+                    </div>
+                  </div>
+                </a>
+              ))}
+            </div>
+          )}
+        </div>
       </div>
     </div>
   );
+}
+
+function formatNewsDate(dateStr: string): string {
+  try {
+    const d = new Date(dateStr);
+    if (isNaN(d.getTime())) return dateStr;
+    const now = new Date();
+    const diffMs = now.getTime() - d.getTime();
+    const diffH = Math.floor(diffMs / 3600000);
+    if (diffH < 1) return `${Math.floor(diffMs / 60000)}m ago`;
+    if (diffH < 24) return `${diffH}h ago`;
+    const diffD = Math.floor(diffH / 24);
+    if (diffD < 7) return `${diffD}d ago`;
+    return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+  } catch {
+    return '';
+  }
 }

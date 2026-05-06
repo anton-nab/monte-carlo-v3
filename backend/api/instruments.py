@@ -105,3 +105,31 @@ async def get_price(ticker: str):
         return {"ticker": ticker, "price": price}
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
+
+
+@router.get("/news/{ticker}")
+async def get_news(ticker: str):
+    """Get latest news for a ticker.
+
+    Returns up to 15 news items from Yahoo Finance.
+    Example: GET /api/instruments/news/AAPL
+    """
+    try:
+        result = await provider.get_news(ticker.upper())
+        return result
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@router.get("/etf-holdings/{ticker}")
+async def get_etf_holdings(ticker: str):
+    """Get ETF top holdings.
+
+    Returns top holdings with weight % for ETFs (SPY, QQQ, VTI, etc.)
+    Example: GET /api/instruments/etf-holdings/SPY
+    """
+    try:
+        result = await provider.get_etf_holdings(ticker.upper())
+        return result
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
