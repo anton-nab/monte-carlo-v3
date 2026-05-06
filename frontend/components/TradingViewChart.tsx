@@ -1,12 +1,9 @@
 /**
  * TradingViewChart — wrapper React pour lightweight-charts.
  *
- * QUOI: Composant qui transforme une serie temporelle en graphique pro,
- *       style TradingView (utilise par Coinbase, Binance, etc.).
- * POURQUOI: Recharts c'est OK pour des sparklines basiques, mais pour le
- *           "look terminal" on a besoin de quelque chose de plus dense
- *           et performant. lightweight-charts pese ~50KB et gere des
- *           millions de points sans broncher.
+ * Supports:
+ * - Line/area chart (single value per point)
+ * - Candlestick chart (OHLC per point)
  *
  * Doc lib: https://tradingview.github.io/lightweight-charts/
  */
@@ -20,8 +17,10 @@ import {
   LineData,
   Time,
   AreaData,
+  CandlestickData,
   AreaSeries,
   LineSeries,
+  CandlestickSeries,
 } from 'lightweight-charts';
 
 interface DataPoint {
@@ -29,37 +28,55 @@ interface DataPoint {
   value: number;
 }
 
+interface OHLCPoint {
+  date: string;
+  open: number;
+  high: number;
+  low: number;
+  close: number;
+}
+
+export type ChartType = 'line' | 'area' | 'candle';
+
 interface TradingViewChartProps {
-  data: DataPoint[];
-  height?: number;
-  /** Color of the line (hex). Auto-derives from trend if not passed. */
-  color?: string;
-  /** Show area fill below the line (visual emphasis) */
+  /** Line/area data — used when chartType is 'line' or 'area' */
+  data?: DataPoint[];
+  /** OHLC data — used when chartType is 'candle' */
+  ohlcData?: OHLCPoint[];
+  /** Chart type — defaults to 'area' (or 'line' if fill=false). */
+  chartType?: ChartType;
+  /** Legacy prop: if true => area, false => line. Ignored if chartType is set. */
   fill?: boolean;
-  /** Show price scale on right (default true for full-size, false for sparklines) */
+  height?: number;
+  /** Color of the line (hex). For candles, ignored. */
+  color?: string;
+  /** Show price scale on right (default true) */
   showAxes?: boolean;
   /**
    * Plage de dates initialement visibles. Si fournie, le chart cadre dessus
-   * mais TOUTES les donnees restent dans le chart — l'utilisateur peut
-   * scroller/zoomer pour voir avant ou apres.
-   * Si non fournie, le chart fitContent() (toutes les donnees visibles).
+   * mais TOUTES les donnees restent dans le chart.
    */
   visibleRange?: { from: string; to: string };
 }
 
 export function TradingViewChart({
   data,
+  ohlcData,
+  chartType,
+  fill,
   height = 240,
   color = '#26a69a',
-  fill = true,
   showAxes = true,
   visibleRange,
 }: TradingViewChartProps) {
+  // Resolve chartType from explicit prop or legacy fill prop
+  const resolvedChartType: ChartType =
+    chartType ?? (fill === false ? 'line' : 'area');
   const containerRef = useRef<HTMLDivElement>(null);
   const chartRef = useRef<IChartApi | null>(null);
-  const seriesRef = useRef<ISeriesApi<'Area' | 'Line'> | null>(null);
+  const seriesRef = useRef<ISeriesApi<'Area' | 'Line' | 'Candlestick'> | null>(null);
 
-  // Init chart once
+  // Init chart on mount and when chartType/color changes
   useEffect(() => {
     if (!containerRef.current) return;
 
@@ -87,7 +104,7 @@ export function TradingViewChart({
         secondsVisible: false,
       },
       crosshair: {
-        mode: 1, // Magnet to data
+        mode: 1,
         vertLine: { color: '#00d9ff', width: 1, style: 2 },
         horzLine: { color: '#00d9ff', width: 1, style: 2 },
       },
@@ -95,12 +112,21 @@ export function TradingViewChart({
       handleScale: showAxes,
     });
 
-    if (fill) {
-      // lightweight-charts v5 API: addSeries(SeriesDefinition, options)
+    if (resolvedChartType === 'candle') {
+      const series = chart.addSeries(CandlestickSeries, {
+        upColor: '#26a69a',
+        downColor: '#ef5350',
+        borderUpColor: '#26a69a',
+        borderDownColor: '#ef5350',
+        wickUpColor: '#26a69a',
+        wickDownColor: '#ef5350',
+      });
+      seriesRef.current = series;
+    } else if (resolvedChartType === 'area') {
       const series = chart.addSeries(AreaSeries, {
         lineColor: color,
-        topColor: `${color}55`,    // 33% opacity
-        bottomColor: `${color}05`, // ~2% opacity
+        topColor: `${color}55`,
+        bottomColor: `${color}05`,
         lineWidth: 2,
         priceLineVisible: false,
         lastValueVisible: showAxes,
@@ -118,7 +144,6 @@ export function TradingViewChart({
 
     chartRef.current = chart;
 
-    // Resize listener
     const handleResize = () => {
       if (containerRef.current && chartRef.current) {
         chartRef.current.applyOptions({ width: containerRef.current.clientWidth });
@@ -133,25 +158,33 @@ export function TradingViewChart({
       seriesRef.current = null;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [height, color, fill, showAxes]);
+  }, [height, color, showAxes, resolvedChartType]);
 
   // Update data when it changes
   useEffect(() => {
     if (!seriesRef.current || !chartRef.current) return;
 
-    const formatted: (LineData | AreaData)[] = data
-      .filter((p) => Number.isFinite(p.value))
-      .map((p) => ({
+    if (resolvedChartType === 'candle' && ohlcData) {
+      const formatted: CandlestickData[] = ohlcData.map((p) => ({
         time: p.date as Time,
-        value: p.value,
+        open: p.open,
+        high: p.high,
+        low: p.low,
+        close: p.close,
       }));
+      (seriesRef.current as ISeriesApi<'Candlestick'>).setData(formatted);
+    } else if (data) {
+      const formatted: (LineData | AreaData)[] = data
+        .filter((p) => Number.isFinite(p.value))
+        .map((p) => ({
+          time: p.date as Time,
+          value: p.value,
+        }));
+      (seriesRef.current as ISeriesApi<'Line' | 'Area'>).setData(formatted);
+    }
 
-    seriesRef.current.setData(formatted);
-
-    // Si une plage est demandee, on l'applique APRES setData. Toutes les
-    // donnees restent chargees -> l'utilisateur peut scroller/zoomer librement
-    // pour voir avant la plage initiale.
-    if (visibleRange && formatted.length > 0) {
+    // Apply visible range if provided
+    if (visibleRange) {
       chartRef.current.timeScale().setVisibleRange({
         from: visibleRange.from as Time,
         to: visibleRange.to as Time,
@@ -159,7 +192,7 @@ export function TradingViewChart({
     } else {
       chartRef.current.timeScale().fitContent();
     }
-  }, [data, visibleRange]);
+  }, [data, ohlcData, resolvedChartType, visibleRange]);
 
   return <div ref={containerRef} style={{ width: '100%', height }} />;
 }
