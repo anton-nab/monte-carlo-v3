@@ -1,11 +1,13 @@
 from fastapi import APIRouter, HTTPException, Query
 from services.instruments import YFinanceProvider, InstrumentsService
+from services.fmp_provider import get_fmp_provider
 
 router = APIRouter(prefix="/api/instruments", tags=["instruments"])
 
 # Initialize services
 provider = YFinanceProvider()
 service = InstrumentsService(provider)
+_fmp = get_fmp_provider()
 
 
 @router.get("/snapshot/{ticker}")
@@ -125,11 +127,23 @@ async def get_news(ticker: str):
 async def get_etf_holdings(ticker: str):
     """Get ETF top holdings.
 
+    Tries FMP API first (reliable, 24h cache), falls back to yfinance.
     Returns top holdings with weight % for ETFs (SPY, QQQ, VTI, etc.)
+
     Example: GET /api/instruments/etf-holdings/SPY
     """
+    t = ticker.upper()
     try:
-        result = await provider.get_etf_holdings(ticker.upper())
+        # Primary: FMP API (accurate, free tier, 24h cache)
+        result = await _fmp.get_etf_holdings(t)
+        if result:
+            return result
+    except Exception as exc:
+        print(f"FMP ETF holdings failed for {t}: {exc}")
+
+    # Fallback: yfinance
+    try:
+        result = await provider.get_etf_holdings(t)
         return result
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))

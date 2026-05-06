@@ -1,12 +1,12 @@
 """
 Registry of supported global indices.
 
-All European/Asian indices use hardcoded lists with proper Yahoo Finance
-ticker suffixes (.DE, .L, .PA, etc.) because Wikipedia pages for these
-indices use local tickers without exchange suffixes, making them unusable
-for yfinance price lookups.
-
-US indices (SP500, NDX) use Wikipedia scraping since US tickers need no suffix.
+Source strategy per index:
+  - US (SP500, NDX, DJI) → FMP API (primary) with hardcoded/Wikipedia fallback.
+    FMP provides accurate, up-to-date constituent lists with sector data.
+  - European/Asian → hardcoded lists with proper Yahoo Finance ticker suffixes
+    (.DE, .L, .PA, etc.) because public data sources use local tickers without
+    these suffixes, making them unusable for yfinance price lookups.
 """
 
 from typing import Optional, List, Dict, Any
@@ -391,8 +391,9 @@ INDICES_REGISTRY: Dict[str, Dict[str, Any]] = {
         "yf_ticker": "^GSPC",
         "currency": "USD",
         "flag": "🇺🇸",
-        "source": "wikipedia",
-        "wikipedia": {
+        "source": "fmp",            # Primary: FMP /sp500_constituent
+        "fmp_symbol": "SP500",
+        "wikipedia": {              # Fallback if FMP fails
             "url": "https://en.wikipedia.org/wiki/List_of_S%26P_500_companies",
             "table_index": 0,
             "ticker_col": "Symbol",
@@ -408,8 +409,9 @@ INDICES_REGISTRY: Dict[str, Dict[str, Any]] = {
         "yf_ticker": "^NDX",
         "currency": "USD",
         "flag": "🇺🇸",
-        "source": "hardcoded",
-        "hardcoded": NDX100,
+        "source": "fmp",            # Primary: FMP /nasdaq_constituent
+        "fmp_symbol": "NDX",
+        "hardcoded": NDX100,        # Fallback if FMP fails
     },
     "DJI": {
         "name": "Dow Jones Industrial Average",
@@ -419,8 +421,9 @@ INDICES_REGISTRY: Dict[str, Dict[str, Any]] = {
         "yf_ticker": "^DJI",
         "currency": "USD",
         "flag": "🇺🇸",
-        "source": "hardcoded",
-        "hardcoded": DOW30,
+        "source": "fmp",            # Primary: FMP /dowjones_constituent
+        "fmp_symbol": "DJI",
+        "hardcoded": DOW30,         # Fallback if FMP fails
     },
     "RUT": {
         "name": "Russell 2000",

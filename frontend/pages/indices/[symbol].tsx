@@ -1,15 +1,20 @@
 /**
  * /indices/[symbol] — Index Detail Page
  *
+ * Two-phase loading:
+ *   Phase 1 → constituents list (fast, ~1-2s — FMP cached)
+ *   Phase 2 → prices enrichment (background, ~5-20s — yfinance, cached 15min)
+ *
  * Three views:
- *  1. Heatmap  — Treemap colored by % change, grouped by sector
- *  2. Table    — Sortable full constituent list
- *  3. Sectors  — Donut chart of sector breakdown
+ *   1. Heatmap  — Treemap colored by % change, grouped by sector
+ *   2. Table    — Sortable full constituent list
+ *   3. Sectors  — Donut chart of sector breakdown
  */
 
 import { useRouter } from 'next/router';
-import { useState, useEffect, useMemo } from 'react';
+import { useState, useMemo } from 'react';
 import Link from 'next/link';
+import useSWR from 'swr';
 import {
   Treemap,
   ResponsiveContainer,
@@ -19,6 +24,7 @@ import {
   Tooltip,
   Legend,
 } from 'recharts';
+import { fetcher } from '../../lib/fetcher';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Types
@@ -53,6 +59,7 @@ interface IndexData {
   constituents_count: number;
   constituents: Constituent[];
   sectors: SectorStat[];
+  prices_included: boolean;
   last_updated: string;
 }
 
@@ -84,6 +91,40 @@ const SECTOR_COLORS = [
 ];
 
 // ─────────────────────────────────────────────────────────────────────────────
+// Skeleton components
+// ─────────────────────────────────────────────────────────────────────────────
+
+function SkeletonHeader() {
+  return (
+    <div className="border-b border-terminal-border bg-terminal-surface">
+      <div className="max-w-7xl mx-auto px-4 py-4">
+        <div className="flex items-center gap-2 mb-3">
+          <div className="h-4 w-12 bg-terminal-border animate-pulse rounded" />
+          <span className="text-terminal-textDim">/</span>
+          <div className="h-4 w-16 bg-terminal-border animate-pulse rounded" />
+        </div>
+        <div className="flex items-end justify-between">
+          <div>
+            <div className="h-8 w-48 bg-terminal-border animate-pulse rounded mb-2" />
+            <div className="h-4 w-64 bg-terminal-border animate-pulse rounded" />
+          </div>
+          <div className="h-14 w-28 bg-terminal-border animate-pulse rounded" />
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function SkeletonHeatmap() {
+  return (
+    <div className="bg-terminal-surface border border-terminal-border rounded p-4">
+      <div className="h-4 w-64 bg-terminal-border animate-pulse rounded mb-3" />
+      <div className="h-[580px] bg-terminal-border/30 animate-pulse rounded" />
+    </div>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // Page
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -91,31 +132,60 @@ export default function IndexPage() {
   const router = useRouter();
   const { symbol } = router.query as { symbol?: string };
 
-  const [data, setData] = useState<IndexData | null>(null);
-  const [isLoading, setIsLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
   const [view, setView] = useState<ViewMode>('heatmap');
   const [sortKey, setSortKey] = useState<SortKey>('change_pct');
   const [sortDesc, setSortDesc] = useState(true);
   const [sectorFilter, setSectorFilter] = useState<string>('All');
 
-  useEffect(() => {
-    if (!symbol) return;
-    setIsLoading(true);
-    setError(null);
+  // ── Phase 1: fast — constituents without prices (FMP cache ~1-2s) ──
+  const {
+    data: fastData,
+    error: fastError,
+    isLoading: isLoadingFast,
+  } = useSWR<IndexData>(
+    symbol ? `${API_URL}/api/indices/${symbol}?include_prices=false` : null,
+    fetcher,
+    { revalidateOnFocus: false, dedupingInterval: 60_000 }
+  );
 
-    fetch(`${API_URL}/api/indices/${symbol}`)
-      .then((r) => {
-        if (!r.ok) throw new Error(`HTTP ${r.status}`);
-        return r.json();
-      })
-      .then(setData)
-      .catch(() => setError('Failed to load index data. The first request may take up to 30s.'))
-      .finally(() => setIsLoading(false));
-  }, [symbol]);
+  // ── Phase 2: full — with prices (yfinance batch, cached 15min) ──
+  const {
+    data: fullData,
+    isLoading: isLoadingPrices,
+  } = useSWR<IndexData>(
+    symbol ? `${API_URL}/api/indices/${symbol}` : null,
+    fetcher,
+    {
+      revalidateOnFocus: false,
+      dedupingInterval: 60_000 * 15,  // 15 min dedupe matches backend cache
+    }
+  );
+
+  // Use full data (with prices) when available, else fast data (no prices)
+  const data = fullData || fastData;
+  const pricesLoaded = !!fullData;
+  const isInitialLoading = isLoadingFast && !fastData;
+  const error = fastError;
 
   const isPositiveIndex =
     data?.index_change_pct != null && data.index_change_pct >= 0;
+
+  // Loading state — show skeleton header
+  if (isInitialLoading || (!data && !error)) {
+    return (
+      <div className="min-h-screen bg-terminal-bg text-terminal-text">
+        <SkeletonHeader />
+        <div className="max-w-7xl mx-auto px-4 py-6">
+          <div className="flex gap-1 mb-6 border-b border-terminal-border pb-4">
+            {[80, 80, 80].map((_, i) => (
+              <div key={i} className="h-9 w-24 bg-terminal-border animate-pulse rounded" />
+            ))}
+          </div>
+          <SkeletonHeatmap />
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen bg-terminal-bg text-terminal-text">
@@ -172,25 +242,23 @@ export default function IndexPage() {
       </div>
 
       <div className="max-w-7xl mx-auto px-4 py-6">
-        {/* ── Loading / Error ── */}
-        {isLoading && (
-          <div className="text-center py-24 text-terminal-textMuted">
-            <div className="text-4xl mb-4 animate-pulse">⏳</div>
-            <p>Loading constituents + prices…</p>
-            <p className="text-xs mt-2 text-terminal-textDim">
-              First load may take 15-30s while fetching {symbol} prices.
-            </p>
+        {/* ── Error ── */}
+        {error && (
+          <div className="bg-red-500/10 border border-red-500/30 rounded px-4 py-3 text-red-500 text-sm mb-6">
+            Failed to load index data. Please try again.
           </div>
         )}
 
-        {error && !isLoading && (
-          <div className="bg-red-500/10 border border-red-500/30 rounded px-4 py-3 text-red-500 text-sm">
-            {error}
-          </div>
-        )}
-
-        {data && !isLoading && (
+        {data && (
           <>
+            {/* ── Prices loading banner ── */}
+            {isLoadingPrices && !pricesLoaded && (
+              <div className="flex items-center gap-2 text-xs text-terminal-textDim bg-terminal-surface border border-terminal-border/50 rounded px-3 py-2 mb-4">
+                <span className="animate-spin inline-block">⟳</span>
+                <span>Loading live prices in background…</span>
+              </div>
+            )}
+
             {/* ── View tabs ── */}
             <div className="flex gap-1 mb-6 border-b border-terminal-border pb-4">
               {(['heatmap', 'table', 'sectors'] as ViewMode[]).map((v) => (
@@ -222,7 +290,9 @@ export default function IndexPage() {
 
             {/* ── HEATMAP VIEW ── */}
             {view === 'heatmap' && (
-              <HeatmapView constituents={data.constituents} />
+              isLoadingPrices && !pricesLoaded
+                ? <SkeletonHeatmap />
+                : <HeatmapView constituents={data.constituents} />
             )}
 
             {/* ── TABLE VIEW ── */}
@@ -232,6 +302,7 @@ export default function IndexPage() {
                 sortKey={sortKey}
                 sortDesc={sortDesc}
                 sectorFilter={sectorFilter}
+                isLoadingPrices={isLoadingPrices && !pricesLoaded}
                 onSort={(key) => {
                   if (key === sortKey) setSortDesc(!sortDesc);
                   else { setSortKey(key); setSortDesc(true); }
@@ -260,7 +331,6 @@ function HeatmapView({
 }: {
   constituents: Constituent[];
 }) {
-  // Build recharts Treemap data — grouped by sector
   const treeData = useMemo(() => {
     const bySector: Record<string, Constituent[]> = {};
     for (const c of constituents) {
@@ -304,8 +374,6 @@ function CustomTreemapCell(props: any) {
 
   if (width < 2 || height < 2) return null;
 
-  // depth=1 → sector label (not drawn as cell, handled by recharts)
-  // depth=2 → individual stock
   const fill = depth === 1 ? '#0d1117' : getHeatColor(change_pct);
   const border = depth === 1 ? '#1e2a3a' : '#0a0f1a';
 
@@ -384,6 +452,7 @@ function TableView({
   sortKey,
   sortDesc,
   sectorFilter,
+  isLoadingPrices,
   onSort,
   onSectorFilter,
 }: {
@@ -391,6 +460,7 @@ function TableView({
   sortKey: SortKey;
   sortDesc: boolean;
   sectorFilter: string;
+  isLoadingPrices: boolean;
   onSort: (k: SortKey) => void;
   onSectorFilter: (s: string) => void;
 }) {
@@ -485,20 +555,26 @@ function TableView({
                       {c.sector || '—'}
                     </td>
                     <td className="px-4 py-2.5 num text-right text-terminal-text">
-                      {c.price != null ? c.price.toFixed(2) : '—'}
+                      {isLoadingPrices ? (
+                        <span className="inline-block h-3 w-12 bg-terminal-border animate-pulse rounded" />
+                      ) : c.price != null ? (
+                        c.price.toFixed(2)
+                      ) : '—'}
                     </td>
-                    <td
-                      className={`px-4 py-2.5 num text-right font-semibold ${
-                        c.change_pct == null
-                          ? 'text-terminal-textMuted'
-                          : isPos
-                          ? 'text-green-400'
-                          : 'text-red-400'
-                      }`}
-                    >
-                      {c.change_pct != null
-                        ? `${isPos ? '+' : ''}${c.change_pct.toFixed(2)}%`
-                        : '—'}
+                    <td className={`px-4 py-2.5 num text-right font-semibold ${
+                      isLoadingPrices
+                        ? ''
+                        : c.change_pct == null
+                        ? 'text-terminal-textMuted'
+                        : isPos
+                        ? 'text-green-400'
+                        : 'text-red-400'
+                    }`}>
+                      {isLoadingPrices ? (
+                        <span className="inline-block h-3 w-10 bg-terminal-border animate-pulse rounded" />
+                      ) : c.change_pct != null ? (
+                        `${isPos ? '+' : ''}${c.change_pct.toFixed(2)}%`
+                      ) : '—'}
                     </td>
                   </tr>
                 );
@@ -508,6 +584,9 @@ function TableView({
         </div>
         <div className="px-4 py-2 text-xs text-terminal-textDim border-t border-terminal-border/40">
           {filtered.length} of {constituents.length} constituents
+          {isLoadingPrices && (
+            <span className="ml-2 text-terminal-textDim animate-pulse">· fetching prices…</span>
+          )}
         </div>
       </div>
     </div>
@@ -605,7 +684,6 @@ function SectorsView({ sectors }: { sectors: SectorStat[] }) {
                     )}
                   </div>
                 </div>
-                {/* Weight bar */}
                 <div className="h-1 bg-terminal-border rounded-full overflow-hidden">
                   <div
                     className="h-full rounded-full transition-all"

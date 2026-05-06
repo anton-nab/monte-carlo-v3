@@ -1,12 +1,15 @@
 /**
  * /indices — Global Indices Directory
  *
+ * SWR-powered: cached data shown instantly on re-visit, refreshed in background.
  * Grid of all supported indices with current level and daily change.
  * Click any card → /indices/{symbol} for full breakdown.
  */
 
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
 import Link from 'next/link';
+import useSWR from 'swr';
+import { fetcher } from '../../lib/fetcher';
 
 interface IndexSummary {
   symbol: string;
@@ -25,27 +28,16 @@ interface IndexSummary {
 const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
 
 export default function IndicesPage() {
-  const [indices, setIndices] = useState<IndexSummary[]>([]);
-  const [isLoading, setIsLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
   const [search, setSearch] = useState('');
 
-  useEffect(() => {
-    const fetchIndices = async () => {
-      try {
-        const res = await fetch(`${API_URL}/api/indices/`);
-        if (!res.ok) throw new Error('Failed to load indices');
-        const data = await res.json();
-        setIndices(data);
-      } catch (err) {
-        setError('Failed to load indices list');
-        console.error(err);
-      } finally {
-        setIsLoading(false);
-      }
-    };
-    fetchIndices();
-  }, []);
+  const { data: indices = [], isLoading, error } = useSWR<IndexSummary[]>(
+    `${API_URL}/api/indices/`,
+    fetcher,
+    {
+      revalidateOnFocus: false,
+      dedupingInterval: 60_000 * 5,   // 5 min dedupe — prices are fairly stable
+    }
+  );
 
   // Filter by search query (name, symbol, region, exchange)
   const filtered = search.trim()
@@ -105,14 +97,26 @@ export default function IndicesPage() {
 
       <div className="max-w-7xl mx-auto px-4 py-8">
         {isLoading && (
-          <div className="text-terminal-textMuted text-center py-20">
-            Loading indices…
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3">
+            {Array.from({ length: 16 }).map((_, i) => (
+              <div
+                key={i}
+                className="bg-terminal-surface border border-terminal-border rounded p-4 animate-pulse"
+              >
+                <div className="flex items-start justify-between mb-3">
+                  <div className="h-5 w-24 bg-terminal-border rounded" />
+                </div>
+                <div className="h-4 w-32 bg-terminal-border rounded mb-2" />
+                <div className="h-3 w-full bg-terminal-border rounded mb-3" />
+                <div className="h-8 bg-terminal-border/50 rounded" />
+              </div>
+            ))}
           </div>
         )}
 
         {error && (
           <div className="bg-red-500/10 border border-red-500/30 rounded px-4 py-3 text-red-500 text-sm">
-            {error}
+            Failed to load indices list
           </div>
         )}
 

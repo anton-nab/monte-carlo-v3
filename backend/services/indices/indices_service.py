@@ -3,15 +3,20 @@ IndicesService — orchestrates constituent fetching + price enrichment.
 
 Pipeline per request:
   1. Get index config from registry
-  2. Get constituent list (Wikipedia or hardcoded)
-  3. Batch-download prices via yfinance (one call for all tickers)
+  2. Get constituent list (FMP → hardcoded/Wikipedia fallback)
+  3. Optionally batch-download prices via yfinance (one call for all tickers)
   4. Enrich each constituent with price/change data
   5. Aggregate sector stats
   6. Return unified response dict
 
+Two-phase loading:
+  Pass include_prices=False to skip price enrichment and return immediately
+  (constituents + metadata only). The frontend then makes a second request
+  with include_prices=True to get prices in the background.
+
 Caching strategy:
-  - Constituents: 24h (Wikipedia)
-  - Prices: 15 min (yfinance batch)
+  - Constituents:  24h (FMP in-memory cache / Wikipedia)
+  - Prices:        15 min (yfinance batch, in-memory)
 """
 
 import asyncio
@@ -23,6 +28,7 @@ import pandas as pd
 
 from .indices_registry import INDICES_REGISTRY, get_index
 from .wikipedia_provider import WikipediaProvider
+from ..fmp_provider import FMPProvider, get_fmp_provider
 
 
 class IndicesService:
@@ -31,7 +37,8 @@ class IndicesService:
 
     def __init__(self) -> None:
         self._wiki = WikipediaProvider()
-        self._price_cache: Dict[str, tuple[Dict, datetime]] = {}
+        self._fmp: FMPProvider = get_fmp_provider()
+        self._price_cache: Dict[str, tuple] = {}
 
     # -------------------------------------------------------------------------
     # Public API
@@ -39,7 +46,6 @@ class IndicesService:
 
     async def list_indices(self) -> List[Dict[str, Any]]:
         """Return a lightweight list of all supported indices (no constituents)."""
-        loop = asyncio.get_event_loop()
         results = []
         for symbol, cfg in INDICES_REGISTRY.items():
             idx_quote = await self._get_index_quote(cfg["yf_ticker"])
@@ -57,21 +63,38 @@ class IndicesService:
             })
         return results
 
-    async def get_index(self, symbol: str) -> Dict[str, Any]:
-        """Return full index data: metadata + constituents with prices + sector stats."""
+    async def get_index(
+        self,
+        symbol: str,
+        include_prices: bool = True,
+    ) -> Dict[str, Any]:
+        """Return full index data: metadata + constituents (+ prices if requested).
+
+        Args:
+            symbol: Index symbol (SP500, NDX, DJI, CAC40, DAX, FTSE100, …)
+            include_prices: If False, skip yfinance price enrichment and return
+                            constituent list immediately (fast path for two-phase
+                            loading on the frontend). Prices will be None.
+        """
         cfg = get_index(symbol)
         if cfg is None:
             raise ValueError(f"Unknown index: {symbol}")
 
-        # 1. Get index-level quote
+        # 1. Get index-level quote (fast — uses fast_info)
         idx_quote = await self._get_index_quote(cfg["yf_ticker"])
 
-        # 2. Get constituents
-        constituents = await self._get_constituents(cfg)
+        # 2. Get constituents (FMP or hardcoded or Wikipedia)
+        constituents = await self._get_constituents(symbol, cfg)
 
-        # 3. Enrich with prices if we have constituents
-        if constituents:
+        # 3. Optionally enrich with prices
+        if constituents and include_prices:
             constituents = await self._enrich_prices(constituents, symbol)
+        elif constituents and not include_prices:
+            # Return without prices — frontend will request prices separately
+            constituents = [
+                {**c, "price": None, "change_pct": None, "volume": None}
+                for c in constituents
+            ]
 
         # 4. Aggregate sectors
         sectors = self._aggregate_sectors(constituents)
@@ -87,6 +110,7 @@ class IndicesService:
             "yf_ticker": cfg["yf_ticker"],
             "has_constituents": len(constituents) > 0,
             "constituents_count": len(constituents),
+            "prices_included": include_prices,
             "last_updated": datetime.now().isoformat(),
             **idx_quote,
             "constituents": constituents,
@@ -98,21 +122,47 @@ class IndicesService:
     # -------------------------------------------------------------------------
 
     async def _get_constituents(
-        self, cfg: Dict[str, Any]
+        self,
+        symbol: str,
+        cfg: Dict[str, Any],
     ) -> List[Dict[str, Any]]:
         source = cfg.get("source", "none")
 
+        if source == "fmp":
+            fmp_symbol = cfg.get("fmp_symbol", symbol)
+            try:
+                result = await self._fmp.get_index_constituents(fmp_symbol)
+                if result:
+                    return result
+                print(f"[FMP] Empty result for {fmp_symbol}, trying fallback")
+            except Exception as exc:
+                print(f"[FMP] Failed for {fmp_symbol}: {exc} — trying fallback")
+
+            # Fallback: hardcoded list
+            if "hardcoded" in cfg:
+                print(f"[{symbol}] Using hardcoded fallback ({len(cfg['hardcoded'])} stocks)")
+                return list(cfg["hardcoded"])
+
+            # Fallback: Wikipedia
+            if "wikipedia" in cfg:
+                print(f"[{symbol}] Using Wikipedia fallback")
+                try:
+                    return await self._wiki.get_constituents(cfg["wikipedia"])
+                except Exception as exc:
+                    print(f"[{symbol}] Wikipedia fallback also failed: {exc}")
+            return []
+
         if source == "hardcoded":
-            return list(cfg["hardcoded"])  # defensive copy
+            return list(cfg["hardcoded"])
 
         if source == "wikipedia":
             try:
                 return await self._wiki.get_constituents(cfg["wikipedia"])
             except Exception as exc:
-                print(f"Warning: Wikipedia scrape failed, falling back: {exc}")
+                print(f"[{symbol}] Wikipedia scrape failed: {exc}")
                 return []
 
-        return []
+        return []  # source == "none"
 
     # -------------------------------------------------------------------------
     # Internal: price enrichment
@@ -124,7 +174,6 @@ class IndicesService:
         cache_key: str,
     ) -> List[Dict[str, Any]]:
         """Add price / change_pct to each constituent via yfinance batch download."""
-        # Check price cache
         cached = self._price_cache.get(cache_key)
         if cached:
             prices, ts = cached
@@ -133,7 +182,6 @@ class IndicesService:
 
         tickers = [c["ticker"] for c in constituents]
         prices = await self._fetch_prices_batch(tickers)
-
         self._price_cache[cache_key] = (prices, datetime.now())
         return self._apply_prices(constituents, prices)
 
@@ -153,8 +201,6 @@ class IndicesService:
         if not tickers:
             return result
 
-        # Batch download — one call for all tickers
-        # period=5d to have enough rows even with weekends
         try:
             raw = yf.download(
                 tickers=" ".join(tickers),
@@ -176,15 +222,13 @@ class IndicesService:
         if close is None or close.empty:
             return result
 
-        # For a single ticker yf.download returns flat columns
+        # Single ticker returns a flat Series
         if isinstance(close, pd.Series):
             close = close.to_frame(tickers[0])
         if volume is not None and isinstance(volume, pd.Series):
             volume = volume.to_frame(tickers[0])
 
-        # Drop weekends/empty rows
         close = close.dropna(how="all")
-
         if len(close) < 2:
             return result
 
@@ -238,7 +282,7 @@ class IndicesService:
 
     @staticmethod
     def _aggregate_sectors(
-        constituents: List[Dict[str, Any]]
+        constituents: List[Dict[str, Any]],
     ) -> List[Dict[str, Any]]:
         sectors: Dict[str, Dict] = {}
         for c in constituents:

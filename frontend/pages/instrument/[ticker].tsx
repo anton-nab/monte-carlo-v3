@@ -1,6 +1,9 @@
 /**
  * Instrument Page — /instrument/{ticker}
  *
+ * SWR-powered: cached data shown instantly on re-visit, refreshed in background.
+ * Quote auto-refreshes every 30s.
+ *
  * Strategy:
  * - Fetch full historical data once (period=max)
  * - Use visibleRange to zoom on selected period (1M, 3M, 6M, etc.)
@@ -9,8 +12,10 @@
  */
 
 import { useRouter } from 'next/router';
-import { useState, useEffect, useMemo } from 'react';
+import { useState, useMemo } from 'react';
+import useSWR from 'swr';
 import { TradingViewChart, ChartType } from '../../components/TradingViewChart';
+import { fetcher } from '../../lib/fetcher';
 
 interface QuoteData {
   ticker: string;
@@ -74,6 +79,12 @@ interface ChartOHLCPoint {
   close: number;
 }
 
+interface ChartResponse {
+  ticker: string;
+  period: string;
+  data: HistoricalPoint[];
+}
+
 const CHART_PERIODS = [
   { label: '1M', value: '1mo', days: 30 },
   { label: '3M', value: '3mo', days: 90 },
@@ -85,101 +96,62 @@ const CHART_PERIODS = [
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
 
+// ─────────────────────────────────────────────────────────────────────────────
+// Skeleton helpers
+// ─────────────────────────────────────────────────────────────────────────────
+
+function SkeletonBlock({ className }: { className?: string }) {
+  return <div className={`bg-terminal-border animate-pulse rounded ${className ?? ''}`} />;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Page
+// ─────────────────────────────────────────────────────────────────────────────
+
 export default function InstrumentPage() {
   const router = useRouter();
   const { ticker } = router.query;
-  const [quote, setQuote] = useState<QuoteData | null>(null);
-  const [fundamentals, setFundamentals] = useState<FundamentalsData | null>(null);
-  const [historical, setHistorical] = useState<HistoricalPoint[]>([]);
+  const tickerStr = ticker ? String(ticker).toUpperCase() : null;
+
   const [selectedPeriod, setSelectedPeriod] = useState('1y');
   const [chartType, setChartType] = useState<ChartType>('area');
-  const [isLoadingChart, setIsLoadingChart] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [news, setNews] = useState<NewsItem[]>([]);
-  const [etfHoldings, setEtfHoldings] = useState<EtfHolding[]>([]);
-  const [isLoadingNews, setIsLoadingNews] = useState(false);
 
-  useEffect(() => {
-    if (!ticker) return;
+  // ── Quote: auto-refresh every 30s, show cached instantly on revisit ──
+  const { data: quote } = useSWR<QuoteData>(
+    tickerStr ? `${API_URL}/api/instruments/quote/${tickerStr}` : null,
+    fetcher,
+    { refreshInterval: 30_000, dedupingInterval: 10_000 }
+  );
 
-    const fetchQuote = async () => {
-      try {
-        const res = await fetch(`${API_URL}/api/instruments/quote/${ticker}`);
-        if (res.ok) setQuote(await res.json());
-      } catch (err) {
-        console.error('Quote fetch error:', err);
-      }
-    };
+  // ── Fundamentals: cached, no auto-refresh ──
+  const { data: fundamentals } = useSWR<FundamentalsData>(
+    tickerStr ? `${API_URL}/api/instruments/fundamentals/${tickerStr}` : null,
+    fetcher,
+    { revalidateOnFocus: false, dedupingInterval: 60_000 * 5 }
+  );
 
-    const fetchFundamentals = async () => {
-      try {
-        const res = await fetch(`${API_URL}/api/instruments/fundamentals/${ticker}`);
-        if (res.ok) setFundamentals(await res.json());
-      } catch (err) {
-        console.error('Fundamentals fetch error:', err);
-      }
-    };
+  // ── Chart data: cached 5min ──
+  const { data: chartResponse, isLoading: isLoadingChart, error: chartError } = useSWR<ChartResponse>(
+    tickerStr ? `${API_URL}/api/instruments/chart/${tickerStr}?period=max&interval=1d` : null,
+    fetcher,
+    { revalidateOnFocus: false, dedupingInterval: 60_000 * 5 }
+  );
 
-    const fetchNews = async () => {
-      setIsLoadingNews(true);
-      try {
-        const res = await fetch(`${API_URL}/api/instruments/news/${ticker}`);
-        if (res.ok) setNews(await res.json());
-      } catch (err) {
-        console.error('News fetch error:', err);
-      } finally {
-        setIsLoadingNews(false);
-      }
-    };
+  // ── News: cached 5min ──
+  const { data: news = [], isLoading: isLoadingNews } = useSWR<NewsItem[]>(
+    tickerStr ? `${API_URL}/api/instruments/news/${tickerStr}` : null,
+    fetcher,
+    { revalidateOnFocus: false, dedupingInterval: 60_000 * 5 }
+  );
 
-    const fetchEtfHoldings = async () => {
-      try {
-        const res = await fetch(`${API_URL}/api/instruments/etf-holdings/${ticker}`);
-        if (res.ok) {
-          const data = await res.json();
-          if (Array.isArray(data) && data.length > 0) setEtfHoldings(data);
-        }
-      } catch (err) {
-        console.error('ETF holdings fetch error:', err);
-      }
-    };
+  // ── ETF holdings: cached 24h ──
+  const { data: etfHoldings = [] } = useSWR<EtfHolding[]>(
+    tickerStr ? `${API_URL}/api/instruments/etf-holdings/${tickerStr}` : null,
+    fetcher,
+    { revalidateOnFocus: false, dedupingInterval: 60_000 * 60 * 24 }
+  );
 
-    fetchQuote();
-    fetchFundamentals();
-    fetchNews();
-    fetchEtfHoldings();
-
-    const interval = setInterval(fetchQuote, 30000);
-    return () => clearInterval(interval);
-  }, [ticker]);
-
-  // Fetch full chart data once per ticker (period=max)
-  useEffect(() => {
-    if (!ticker) return;
-
-    const fetchChart = async () => {
-      setIsLoadingChart(true);
-      setError(null);
-      try {
-        const res = await fetch(
-          `${API_URL}/api/instruments/chart/${ticker}?period=max&interval=1d`
-        );
-        if (res.ok) {
-          const data = await res.json();
-          setHistorical(data.data || []);
-        } else {
-          setError('Failed to load chart data');
-        }
-      } catch (err) {
-        console.error('Chart fetch error:', err);
-        setError('Failed to load chart');
-      } finally {
-        setIsLoadingChart(false);
-      }
-    };
-
-    fetchChart();
-  }, [ticker]);
+  const historical = chartResponse?.data ?? [];
 
   // Transform historical to line/area format
   const lineData: ChartLinePoint[] = useMemo(
@@ -218,7 +190,7 @@ export default function InstrumentPage() {
     return { from: fromDate, to: lastDate };
   }, [historical, selectedPeriod]);
 
-  if (!ticker) {
+  if (!tickerStr) {
     return (
       <div className="min-h-screen bg-terminal-bg text-terminal-text flex items-center justify-center">
         <div className="text-terminal-textMuted">Loading...</div>
@@ -229,26 +201,28 @@ export default function InstrumentPage() {
   const isPositive = quote && quote.change >= 0;
   const changeColor = isPositive ? 'text-green-500' : 'text-red-500';
   const changeBgColor = isPositive ? 'bg-green-500/10' : 'bg-red-500/10';
-  const lineColor = isPositive ? '#26a69a' : '#ef5350';
+  const lineColor = isPositive !== false ? '#26a69a' : '#ef5350';
 
   return (
     <div className="min-h-screen bg-terminal-bg text-terminal-text">
-      {/* Header Section (not sticky to avoid covering content) */}
+      {/* Header Section */}
       <div className="border-b border-terminal-border bg-terminal-surface">
         <div className="max-w-7xl mx-auto px-4 py-4">
           <div className="flex items-end justify-between mb-4">
             <div>
               <h1 className="text-3xl font-bold num text-terminal-cyan">
-                {String(ticker).toUpperCase()}
+                {tickerStr}
               </h1>
-              {fundamentals?.name && (
+              {fundamentals?.name ? (
                 <p className="text-terminal-textMuted text-sm mt-1">
                   {fundamentals.name}
                   {fundamentals.sector && ` · ${fundamentals.sector}`}
                 </p>
+              ) : (
+                <SkeletonBlock className="h-4 w-48 mt-2" />
               )}
             </div>
-            {quote && (
+            {quote ? (
               <div className={`text-right ${changeBgColor} rounded px-4 py-2`}>
                 <div className="text-2xl font-bold num text-terminal-text">
                   ${quote.price.toFixed(2)}
@@ -257,51 +231,58 @@ export default function InstrumentPage() {
                   {isPositive ? '+' : ''}{quote.change.toFixed(2)} ({quote.change_pct.toFixed(2)}%)
                 </div>
               </div>
+            ) : (
+              <SkeletonBlock className="h-14 w-32" />
             )}
           </div>
 
-          {quote && (
-            <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
+            {quote ? (
               <div>
                 <div className="text-terminal-textMuted text-xs">Volume</div>
                 <div className="font-semibold num">
-                  {(quote.volume / 1000000).toFixed(1)}M
+                  {(quote.volume / 1_000_000).toFixed(1)}M
                 </div>
               </div>
-              {fundamentals?.market_cap && (
-                <div>
-                  <div className="text-terminal-textMuted text-xs">Market Cap</div>
-                  <div className="font-semibold num">
-                    ${(fundamentals.market_cap / 1000000000).toFixed(1)}B
-                  </div>
+            ) : (
+              <div>
+                <SkeletonBlock className="h-3 w-12 mb-1" />
+                <SkeletonBlock className="h-4 w-16" />
+              </div>
+            )}
+            {fundamentals?.market_cap ? (
+              <div>
+                <div className="text-terminal-textMuted text-xs">Market Cap</div>
+                <div className="font-semibold num">
+                  ${(fundamentals.market_cap / 1_000_000_000).toFixed(1)}B
                 </div>
-              )}
-              {fundamentals?.pe_ratio && (
-                <div>
-                  <div className="text-terminal-textMuted text-xs">P/E Ratio</div>
-                  <div className="font-semibold num">
-                    {fundamentals.pe_ratio.toFixed(2)}x
-                  </div>
+              </div>
+            ) : null}
+            {fundamentals?.pe_ratio ? (
+              <div>
+                <div className="text-terminal-textMuted text-xs">P/E Ratio</div>
+                <div className="font-semibold num">
+                  {fundamentals.pe_ratio.toFixed(2)}x
                 </div>
-              )}
-              {fundamentals?.dividend_yield && (
-                <div>
-                  <div className="text-terminal-textMuted text-xs">Dividend Yield</div>
-                  <div className="font-semibold num">
-                    {(fundamentals.dividend_yield * 100).toFixed(2)}%
-                  </div>
+              </div>
+            ) : null}
+            {fundamentals?.dividend_yield ? (
+              <div>
+                <div className="text-terminal-textMuted text-xs">Dividend Yield</div>
+                <div className="font-semibold num">
+                  {(fundamentals.dividend_yield * 100).toFixed(2)}%
                 </div>
-              )}
-            </div>
-          )}
+              </div>
+            ) : null}
+          </div>
         </div>
       </div>
 
       {/* Main Content */}
       <div className="max-w-7xl mx-auto px-4 py-6">
-        {error && (
+        {chartError && (
           <div className="bg-red-500/10 border border-red-500/30 rounded px-4 py-3 mb-6 text-red-500 text-sm">
-            {error}
+            Failed to load chart data
           </div>
         )}
 
@@ -354,9 +335,7 @@ export default function InstrumentPage() {
           </div>
           <div className="bg-terminal-bg rounded p-2">
             {isLoadingChart ? (
-              <div className="h-96 flex items-center justify-center text-terminal-textMuted">
-                Loading chart...
-              </div>
+              <SkeletonBlock className="h-96 w-full" />
             ) : historical.length > 0 ? (
               <TradingViewChart
                 data={lineData}
@@ -379,11 +358,11 @@ export default function InstrumentPage() {
         </div>
 
         {/* Fundamentals Grid */}
-        {fundamentals && (
-          <div className="bg-terminal-surface border border-terminal-border rounded p-4">
+        {fundamentals ? (
+          <div className="bg-terminal-surface border border-terminal-border rounded p-4 mb-6">
             <h2 className="text-lg font-semibold mb-4">Fundamentals</h2>
             <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
-              {fundamentals.pe_ratio !== undefined && fundamentals.pe_ratio !== null && (
+              {fundamentals.pe_ratio != null && (
                 <div>
                   <div className="text-terminal-textMuted text-xs">P/E Ratio</div>
                   <div className="text-lg font-semibold num text-terminal-cyan">
@@ -391,7 +370,7 @@ export default function InstrumentPage() {
                   </div>
                 </div>
               )}
-              {fundamentals.pb_ratio !== undefined && fundamentals.pb_ratio !== null && (
+              {fundamentals.pb_ratio != null && (
                 <div>
                   <div className="text-terminal-textMuted text-xs">P/B Ratio</div>
                   <div className="text-lg font-semibold num text-terminal-cyan">
@@ -399,7 +378,7 @@ export default function InstrumentPage() {
                   </div>
                 </div>
               )}
-              {fundamentals.roe !== undefined && fundamentals.roe !== null && (
+              {fundamentals.roe != null && (
                 <div>
                   <div className="text-terminal-textMuted text-xs">ROE</div>
                   <div className="text-lg font-semibold num text-terminal-cyan">
@@ -407,7 +386,7 @@ export default function InstrumentPage() {
                   </div>
                 </div>
               )}
-              {fundamentals.eps !== undefined && fundamentals.eps !== null && (
+              {fundamentals.eps != null && (
                 <div>
                   <div className="text-terminal-textMuted text-xs">EPS</div>
                   <div className="text-lg font-semibold num text-terminal-cyan">
@@ -415,7 +394,7 @@ export default function InstrumentPage() {
                   </div>
                 </div>
               )}
-              {fundamentals.beta !== undefined && fundamentals.beta !== null && (
+              {fundamentals.beta != null && (
                 <div>
                   <div className="text-terminal-textMuted text-xs">Beta</div>
                   <div className="text-lg font-semibold num text-terminal-cyan">
@@ -423,7 +402,7 @@ export default function InstrumentPage() {
                   </div>
                 </div>
               )}
-              {fundamentals.dividend_yield !== undefined && fundamentals.dividend_yield !== null && (
+              {fundamentals.dividend_yield != null && (
                 <div>
                   <div className="text-terminal-textMuted text-xs">Dividend Yield</div>
                   <div className="text-lg font-semibold num text-terminal-cyan">
@@ -431,7 +410,7 @@ export default function InstrumentPage() {
                   </div>
                 </div>
               )}
-              {fundamentals.debt_to_equity !== undefined && fundamentals.debt_to_equity !== null && (
+              {fundamentals.debt_to_equity != null && (
                 <div>
                   <div className="text-terminal-textMuted text-xs">Debt/Equity</div>
                   <div className="text-lg font-semibold num text-terminal-cyan">
@@ -449,10 +428,24 @@ export default function InstrumentPage() {
               )}
             </div>
           </div>
+        ) : (
+          /* Skeleton fundamentals */
+          <div className="bg-terminal-surface border border-terminal-border rounded p-4 mb-6">
+            <SkeletonBlock className="h-5 w-32 mb-4" />
+            <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
+              {Array.from({ length: 6 }).map((_, i) => (
+                <div key={i}>
+                  <SkeletonBlock className="h-3 w-16 mb-2" />
+                  <SkeletonBlock className="h-6 w-20" />
+                </div>
+              ))}
+            </div>
+          </div>
         )}
+
         {/* ETF Holdings — shown only when holdings are available */}
         {etfHoldings.length > 0 && (
-          <div className="bg-terminal-surface border border-terminal-border rounded p-4 mt-6">
+          <div className="bg-terminal-surface border border-terminal-border rounded p-4 mb-6">
             <h2 className="text-lg font-semibold mb-4">
               Top Holdings
               <span className="ml-2 text-xs text-terminal-textMuted font-normal">
@@ -500,13 +493,26 @@ export default function InstrumentPage() {
         )}
 
         {/* News Section */}
-        <div className="bg-terminal-surface border border-terminal-border rounded p-4 mt-6">
+        <div className="bg-terminal-surface border border-terminal-border rounded p-4">
           <h2 className="text-lg font-semibold mb-4">Latest News</h2>
           {isLoadingNews && (
-            <p className="text-terminal-textMuted text-sm animate-pulse">Loading news…</p>
+            <div className="space-y-4">
+              {Array.from({ length: 4 }).map((_, i) => (
+                <div key={i} className="flex gap-3">
+                  <SkeletonBlock className="w-16 h-12 shrink-0" />
+                  <div className="flex-1">
+                    <SkeletonBlock className="h-4 w-full mb-2" />
+                    <SkeletonBlock className="h-3 w-3/4 mb-2" />
+                    <SkeletonBlock className="h-3 w-24" />
+                  </div>
+                </div>
+              ))}
+            </div>
           )}
           {!isLoadingNews && news.length === 0 && (
-            <p className="text-terminal-textDim text-sm">No news available for {String(ticker).toUpperCase()}</p>
+            <p className="text-terminal-textDim text-sm">
+              No news available for {tickerStr}
+            </p>
           )}
           {!isLoadingNews && news.length > 0 && (
             <div className="space-y-4">
