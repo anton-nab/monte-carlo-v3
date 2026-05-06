@@ -30,6 +30,9 @@ pydantic>=2.10.0              # Data validation
 yfinance>=0.2.36              # Yahoo Finance data (stocks, ETFs, crypto, forex)
 rapidfuzz>=3.6.0              # Fuzzy string matching for search
 
+# PHASE 2.5: Index/ETF decomposition
+lxml>=5.1.0                   # HTML parser for pandas.read_html (Wikipedia scraping)
+
 # ===================================================================
 # NOTES
 # ===================================================================

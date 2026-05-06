@@ -34,6 +34,7 @@ from datetime import datetime
 from api.macro import router as macro_router
 from api.instruments import router as instruments_router
 from api.search import router as search_router
+from api.indices import router as indices_router
 
 # ===========================================================================
 # 1. CRÉER L'APPLICATION FASTAPI
@@ -76,6 +77,7 @@ app.add_middleware(
 app.include_router(macro_router)           # /api/macro/*         (Phase 1)
 app.include_router(instruments_router)     # /api/instruments/*   (Phase 2)
 app.include_router(search_router)          # /api/search/*        (Phase 2)
+app.include_router(indices_router)         # /api/indices/*       (Phase 2.5)
 
 # ===========================================================================
 # 3. ROUTES (Endpoints API)
