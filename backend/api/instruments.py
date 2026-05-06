@@ -1,11 +1,13 @@
 from fastapi import APIRouter, HTTPException, Query
 from services.instruments import YFinanceProvider, InstrumentsService
+from services.fmp_provider import get_fmp_provider
 
 router = APIRouter(prefix="/api/instruments", tags=["instruments"])
 
 # Initialize services
 provider = YFinanceProvider()
 service = InstrumentsService(provider)
+_fmp = get_fmp_provider()
 
 
 @router.get("/snapshot/{ticker}")
@@ -103,5 +105,33 @@ async def get_price(ticker: str):
     try:
         price = await service.get_price(ticker)
         return {"ticker": ticker, "price": price}
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@router.get("/news/{ticker}")
+async def get_news(ticker: str):
+    """Get latest news for a ticker.
+
+    Returns up to 15 news items from Yahoo Finance.
+    Example: GET /api/instruments/news/AAPL
+    """
+    try:
+        result = await provider.get_news(ticker.upper())
+        return result
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@router.get("/etf-holdings/{ticker}")
+async def get_etf_holdings(ticker: str):
+    """Get ETF top holdings via yfinance.
+
+    Returns top holdings with weight % for ETFs (SPY, QQQ, VTI, etc.)
+    Example: GET /api/instruments/etf-holdings/SPY
+    """
+    try:
+        result = await provider.get_etf_holdings(ticker.upper())
+        return result
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))

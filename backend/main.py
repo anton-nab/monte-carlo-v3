@@ -34,6 +34,7 @@ from datetime import datetime
 from api.macro import router as macro_router
 from api.instruments import router as instruments_router
 from api.search import router as search_router
+from api.indices import router as indices_router
 
 # ===========================================================================
 # 1. CRÉER L'APPLICATION FASTAPI
@@ -76,6 +77,7 @@ app.add_middleware(
 app.include_router(macro_router)           # /api/macro/*         (Phase 1)
 app.include_router(instruments_router)     # /api/instruments/*   (Phase 2)
 app.include_router(search_router)          # /api/search/*        (Phase 2)
+app.include_router(indices_router)         # /api/indices/*       (Phase 2.5)
 
 # ===========================================================================
 # 3. ROUTES (Endpoints API)
@@ -180,6 +182,47 @@ async def test_echo(data: dict):
 # 4. ROOT ENDPOINT (Landing Page Info)
 # ===========================================================================
 
+@app.get("/api/debug/sources")
+async def debug_sources():
+    """
+    Diagnostic: test connectivity to each data source used by the indices service.
+    SP500 → GitHub CSV | NDX/DJI → hardcoded | Prices → yfinance
+    """
+    import httpx as _httpx
+    result: dict = {}
+
+    # ── SP500 GitHub CSV ─────────────────────────────────────────────────────
+    csv_url = (
+        "https://raw.githubusercontent.com/datasets/"
+        "s-and-p-500-companies/main/data/constituents.csv"
+    )
+    try:
+        with _httpx.Client(timeout=15) as c:
+            r = c.get(csv_url, follow_redirects=True)
+        lines = r.text.strip().splitlines()
+        result["sp500_csv"] = {
+            "status": r.status_code,
+            "ok": r.status_code == 200,
+            "rows": len(lines) - 1,  # minus header
+            "header": lines[0] if lines else None,
+        }
+    except Exception as e:
+        result["sp500_csv"] = {"ok": False, "error": str(e)}
+
+    # ── yfinance spot check ──────────────────────────────────────────────────
+    try:
+        import yfinance as yf
+        fi = yf.Ticker("AAPL").fast_info
+        result["yfinance"] = {
+            "ok": True,
+            "AAPL_last_price": getattr(fi, "last_price", None),
+        }
+    except Exception as e:
+        result["yfinance"] = {"ok": False, "error": str(e)}
+
+    return result
+
+
 @app.get("/")
 async def root():
     """
@@ -214,8 +257,14 @@ async def root():
 @app.on_event("startup")
 async def startup_event():
     """Called when API starts"""
+    import os
     print("[*] API Startup - Monte Carlo v3")
     print("[*] All systems operational")
+    # Diagnostic: show which API keys are configured
+    fred_key = os.getenv("FRED_API_KEY", "")
+    print(f"[*] FRED_API_KEY: {'SET (' + fred_key[:6] + '...)' if fred_key else 'NOT SET'}")
+    print("[*] SP500 source : GitHub CSV (datasets/s-and-p-500-companies)")
+    print("[*] NDX/DJI source: hardcoded (with Wikipedia fallback attempt)")
 
 
 @app.on_event("shutdown")

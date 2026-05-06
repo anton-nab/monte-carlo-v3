@@ -19,6 +19,7 @@ interface NavItem {
 const NAV_ITEMS: NavItem[] = [
   { href: '/', label: 'Home', emoji: '⌂', enabled: true },
   { href: '/dashboard', label: 'Macro', emoji: '📊', enabled: true },
+  { href: '/indices', label: 'Indices', emoji: '🗂️', enabled: true },
   { href: '/discover', label: 'Discover', emoji: '🔥', enabled: false, badge: 'P2.7' },
   { href: '/instrument', label: 'Instruments', emoji: '📈', enabled: true },
   { href: '/sentiment', label: 'Sentiment', emoji: '🌡️', enabled: false, badge: 'P3.5' },
