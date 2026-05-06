@@ -1,165 +1,202 @@
-# 📈 Monte Carlo Simulator v2 – Avancé
+# Monte Carlo v3 — Financial Analysis Platform
 
-Simulation probabiliste des marchés avec **4 modèles stochastiques**, **backtesting**, **optimisation de portefeuille Markowitz** et **explications en langage naturel**.
+Full-stack financial analysis platform. React frontend (Vercel) + FastAPI backend (Railway) + yfinance/FRED data.
 
-## 🎯 Objectifs
+**Live:**
+- Frontend → https://monte-carlo-v3.vercel.app *(update with actual URL)*
+- Backend API → https://monte-carlo-v3.up.railway.app *(update with actual URL)*
+- API Docs → `/docs` (Swagger UI)
 
-- **Modélisation réaliste** : GBM + Merton (sauts) + Heston (vol. stochastique) + GARCH (clustering)
-- **Validation scientifique** : backtesting sur fenêtres passées
-- **Optimisation** : frontière efficiente interactive
-- **Accessibilité** : explications pour non-techniciens
+---
 
-## 🚀 Lancement
+## ✅ What's Built
+
+### Phase 0 — Foundation
+- FastAPI backend skeleton, CORS, health check
+- Next.js 14 + Tailwind CSS frontend
+- Railway (backend) + Vercel (frontend) deployment
+
+### Phase 1 — Macro Dashboard
+- 10+ macro indicators via FRED API (CPI, unemployment, GDP, yield curve, Fed rate, oil, dollar index…)
+- Interactive line charts (Recharts)
+- Live data, 1h cache
+
+### Phase 2 — Instruments
+- Universal search (stocks, ETFs, crypto, forex, indices) with fuzzy matching
+- Instrument detail page: quote, OHLCV chart, fundamentals, news, ETF holdings
+- Any Yahoo Finance ticker supported (AAPL, BTC-USD, EUR/USD, ^GSPC…)
+- 30s quote refresh via SWR
+
+### Phase 2.5 — Global Indices
+- 16 global indices with constituent breakdown
+- 3 views: **Heatmap** (treemap by sector), **Table** (sortable, filterable), **Sectors** (donut chart)
+- Two-phase loading: fast metadata (~1s) + background price enrichment (cached 15min)
+- Skeleton screens on all loading states
+
+### Phase 2.6 — Data Sources & Performance
+- SP500: live from GitHub CSV (auto-updated quarterly, 503 stocks, 11 sectors)
+- SWR caching throughout frontend (stale-while-revalidate)
+- Fixed: Wikipedia and FMP both dead/blocked → replaced with reliable sources
+
+---
+
+## 📊 Supported Indices
+
+| Index | Region | Stocks | Data Source |
+|-------|--------|--------|-------------|
+| S&P 500 | 🇺🇸 USA | 503 | GitHub CSV (auto-updated) |
+| Nasdaq 100 | 🇺🇸 USA | 91 | Hardcoded |
+| Dow Jones | 🇺🇸 USA | 30 | Hardcoded |
+| CAC 40 | 🇫🇷 France | 40 | Hardcoded |
+| DAX 40 | 🇩🇪 Germany | 40 | Hardcoded |
+| FTSE 100 | 🇬🇧 UK | 60 | Hardcoded |
+| EURO STOXX 50 | 🇪🇺 Eurozone | 50 | Hardcoded |
+| SMI | 🇨🇭 Switzerland | 20 | Hardcoded |
+| IBEX 35 | 🇪🇸 Spain | 35 | Hardcoded |
+| Nifty 50 | 🇮🇳 India | 50 | Hardcoded |
+| Nikkei 225 | 🇯🇵 Japan | 71 | Hardcoded |
+| Hang Seng | 🇭🇰 Hong Kong | 50 | Hardcoded |
+| S&P/ASX 200 | 🇦🇺 Australia | 50 | Hardcoded |
+| S&P/TSX 60 | 🇨🇦 Canada | 61 | Hardcoded |
+| Bovespa | 🇧🇷 Brazil | 50 | Hardcoded |
+| Russell 2000 | 🇺🇸 USA | — | Price only (2000 stocks) |
+
+---
+
+## 🗺️ Roadmap
+
+### ✅ Done — Phases 0–2.6
+See above.
+
+### 🔜 Phase 3 — Monte Carlo Simulation Engine
+*The core feature of the project.*
+- [ ] Endpoint `POST /api/simulate` — run Monte Carlo simulation server-side
+- [ ] Models: GBM (baseline), Merton (jumps), Heston (stochastic vol), GARCH (clustering)
+- [ ] Response: trajectories, VaR, Expected Shortfall, percentiles
+- [ ] Frontend simulation page: ticker input → parameters → results
+- [ ] Interactive charts: fan chart (trajectories), distribution histogram, density heatmap
+- [ ] Results: VaR 95%/99%, Expected Shortfall, max drawdown, P(loss)
+
+### 🔜 Phase 4 — Portfolio Analysis
+- [ ] Multi-asset portfolio constructor (add tickers + weights)
+- [ ] Markowitz efficient frontier
+- [ ] Optimal Sharpe ratio portfolio
+- [ ] Correlated Monte Carlo (Cholesky decomposition)
+- [ ] Portfolio risk metrics (VaR, diversification ratio, correlation matrix)
+- [ ] Portfolio vs benchmark comparison
+
+### 🔜 Phase 5 — Backtesting
+- [ ] Rolling-window backtesting on historical data
+- [ ] VaR coverage (empirical vs theoretical)
+- [ ] Calibration diagnostic (well-calibrated / over/under-estimates risk)
+- [ ] Model comparison (which model fits best for this asset?)
+
+### 🔜 Phase 6 — User Features
+- [ ] Watchlists (save favourite instruments)
+- [ ] Saved simulations + portfolios
+- [ ] Auth (NextAuth or Clerk)
+- [ ] PostgreSQL persistence (Railway)
+
+### 💡 Future Ideas
+- [ ] Options pricing (Black-Scholes, Greeks)
+- [ ] Risk contribution per asset in portfolio
+- [ ] Stress testing (custom scenario: "what if vol doubles?")
+- [ ] Mobile-responsive layout improvements
+- [ ] Russell 2000 constituent display (top 200 from IWM ETF)
+- [ ] Export simulation results to PDF
+
+---
+
+## 🏗️ Architecture
+
+```
+monte-carlo-v3/
+├── backend/                    # FastAPI — deployed on Railway
+│   ├── main.py                 # App entry point, CORS, routes
+│   ├── api/
+│   │   ├── macro.py            # /api/macro/* (FRED data)
+│   │   ├── instruments.py      # /api/instruments/* (yfinance)
+│   │   ├── search.py           # /api/search/* (fuzzy search)
+│   │   └── indices.py          # /api/indices/* (global indices)
+│   └── services/
+│       ├── fred_provider.py    # FRED API client
+│       ├── instruments/        # yfinance wrapper
+│       └── indices/
+│           ├── indices_registry.py   # All 16 indices + constituent lists
+│           ├── indices_service.py    # Orchestration + price enrichment
+│           ├── csv_provider.py       # GitHub CSV fetcher (SP500)
+│           └── wikipedia_provider.py # Kept for future use
+│
+└── frontend/                   # Next.js 14 — deployed on Vercel
+    ├── pages/
+    │   ├── index.tsx           # Home / Macro dashboard
+    │   ├── search.tsx          # Universal search
+    │   ├── instrument/[ticker].tsx   # Instrument detail
+    │   └── indices/
+    │       ├── index.tsx       # All indices list
+    │       └── [symbol].tsx    # Index detail (heatmap/table/sectors)
+    ├── components/
+    │   └── Header.tsx
+    └── lib/
+        └── fetcher.ts          # SWR fetcher
+```
+
+---
+
+## 🛠️ Tech Stack
+
+| Layer | Tech |
+|-------|------|
+| Frontend | Next.js 14, TypeScript, Tailwind CSS, Recharts, SWR |
+| Backend | FastAPI, Python 3.13, uvicorn |
+| Data | yfinance (prices), FRED API (macro), GitHub CSV (SP500) |
+| Deploy | Vercel (frontend), Railway (backend) |
+
+---
+
+## 🚀 Local Development
 
 ```bash
+# Backend
+cd backend
+python -m venv venv && venv\Scripts\activate
 pip install -r requirements.txt
-streamlit run app.py
+uvicorn main:app --reload --port 8000
+
+# Frontend
+cd frontend
+npm install
+npm run dev      # → http://localhost:3000
 ```
 
-## 🧬 Modèles implémentés
-
-| Modèle | Équation | Cas d'usage | Pros/Cons |
-|--------|----------|-----------|-----------|
-| **GBM** | dS = μS dt + σS dW | Baseline classique | ✅ Rapide ❌ Sous-estime queues |
-| **Merton** | GBM + J·N (sauts Poisson) | Crashs/crises | ✅ Fat tails ❌ Lent |
-| **Heston** | Vol. stochastique + EDS couplées | Smile de vol. | ✅ Réaliste ❌ 2 variables |
-| **GARCH** | Bootstrap résidus GARCH(1,1) | Volatility clustering | ✅ Empirique ❌ Historique limité |
-
-## 📊 Nouvelles fonctionnalités
-
-### 1. **Backtesting** (Tab 7)
-- Simule le modèle sur **fenêtres passées**
-- Calcule VaR 95% prédite vs rendements réalisés
-- Mesure **couverture empirique** (doit être ~5%)
-- Diagnostic : "bien calibré" ou "à affiner"
-
-```python
-backtest_results = backtesting.rolling_window_backtesting(
-    prices=asset["prices"],
-    lookback_days=252,
-    horizon_days=20,
-    n_sims=2000,
-)
+**Environment variables:**
+```
+# backend/.env
+FRED_API_KEY=your_fred_key        # https://fred.stlouisfed.org/
 ```
 
-### 2. **Explications non-techniques** (Tab 6)
-- Résumé rapide des résultats pour non-techniciens
-- Dictionnaire complet des métriques : VaR, ES, drawdown, etc.
-- Interprétation en français simple
+---
 
-```python
-explanations.interpretation_summary(metrics, S0)
-# → "Une VaR 95% à −15% signifie qu'il y a 5 chances sur 100..."
-```
-
-### 3. **Optimisation de portefeuille** (Tab 2 multi-actifs)
-- Frontière efficiente Markowitz
-- Portefeuille Sharpe optimal
-- Allocations pondérées par ticker
-- Visualisation interactive (risque vs rendement)
-
-```python
-frontier = optimization.efficient_frontier(
-    mean_returns, cov_matrix, n_points=50
-)
-```
-
-### 4. **Multi-actifs corrélés** (Module `correlation.py`)
-- Matrice de corrélation historique
-- Décomposition Cholesky
-- Génération de trajectoires corrélées
-
-```python
-paths = correlation.simulate_correlated_gbm(
-    S0_dict, mu_dict, sigma_dict, corr_matrix
-)
-```
-
-## 📁 Architecture
+## 📡 API Endpoints
 
 ```
-├── app.py                          # Dashboard enrichi
-├── modules/
-│   ├── simulation.py               # GBM, Merton, Heston, GARCH
-│   ├── correlation.py              # Cholesky, multi-actifs
-│   ├── backtesting.py              # Validation rolling-window
-│   ├── optimization.py             # Markowitz, Sharpe
-│   ├── explanations.py             # Dictionnaires explicatifs
-│   ├── risk_metrics.py             # VaR, ES, drawdown (inchangé)
-│   ├── data_fetcher.py             # Yahoo Finance (inchangé)
-│   ├── visualizations.py           # Plotly (inchangé)
-│   └── scenarios.py                # Scénarios de marché (inchangé)
-└── requirements.txt                # + scipy, numba
+GET  /health                              Health check
+GET  /api/version                         API version
+
+GET  /api/macro/{indicator}               Macro data (FRED)
+     Indicators: gdp, inflation, unemployment, fed-rate,
+                 yield-curve, oil, dollar, vix, ...
+
+GET  /api/search?q={query}                Universal search
+GET  /api/instruments/snapshot/{ticker}   Full instrument data
+GET  /api/instruments/chart/{ticker}      OHLCV history
+GET  /api/instruments/quote/{ticker}      Real-time quote
+GET  /api/instruments/news/{ticker}       Latest news
+GET  /api/instruments/etf-holdings/{etf}  ETF top holdings
+
+GET  /api/indices/                        All indices list (with prices)
+GET  /api/indices/{symbol}                Index detail + constituents + prices
+GET  /api/indices/{symbol}?include_prices=false  Fast path (no price enrichment)
+
+GET  /api/debug/sources                   Data source connectivity check
 ```
-
-## 🎛️ Sidebar enrichi
-
-### Modèle de simulation
-- **GBM (classique)** : baseline
-- **Merton (sauts)** : λ, amplitude et écart-type des sauts
-- **Heston (vol. stochastique)** : v0, κ, θ, σ_v, ρ
-- **GARCH (bootstrap)** : calibrage automatique sur historique
-
-### Paramètres GBM
-- μ et σ manuels (override)
-- Variables antithétiques
-- Scénarios (base, bull, bear, stress)
-
-## 📈 Onglets actif unique
-
-1. **Trajectoires** : N trajectoires simulées
-2. **Distribution finale** : histogramme + percentiles
-3. **Rendements** : distribution des rendements finaux
-4. **Densité dans le temps** : heatmap probabiliste
-5. **Données brutes** : table complète des métriques
-6. **Explications** : interprétation non-technique + drill-down
-7. **Backtesting** : validation sur fenêtres passées
-
-## 📊 Onglets multi-actifs
-
-1. **Comparaison individuelle** : courbes de rendement comparées + synthèse
-2. **Optimisation portefeuille** : frontière Markowitz + allocations Sharpe
-
-## 🔧 Performance
-
-- **Vectorisation 100% NumPy** : pas de boucles Python
-- **Cache Streamlit** : ~1h pour données, illimité pour simulations
-- **Numba** : optionnel pour GBM très gros (>100k simulations)
-
-Pour 100k simulations en <5s :
-```python
-from numba import jit
-
-@jit(nopython=True)
-def fast_gbm(...):
-    # implémentation Numba
-```
-
-## 📚 Explications incluses
-
-- **Métriques** : VaR, ES, drawdown, P(perte), etc. — en français accessible
-- **Modèles** : GBM, Merton, Heston, GARCH — pros/cons
-- **Scénarios** : base, bull, bear, stress — impact sur μ/σ
-- **Backtesting** : couverture, miscalibration — diagnostic
-
-## ⚠️ Limites & avertissements
-
-- Modèles supposent **marchés continus** (pas de circuit-breaker)
-- Backtesting repose sur **performance passée** (non-garantie future)
-- GARCH limité à **volatility clustering seul** (pas causalité prix-vol comme Heston)
-- Optimisation Markowitz ignore **coûts de transaction** et **frictions**
-
-**C'est un outil pédagogique, pas un conseil en investissement.**
-
-## 🚀 Améliorations futures
-
-- [ ] Optimisation GPU (CuPy) pour 1M+ simulations
-- [ ] Calibration Black-Litterman (vues utilisateur)
-- [ ] Copules pour multi-actifs exotiques
-- [ ] Pricing d'options (Black-Scholes, payoff custom)
-- [ ] Risk contribution par actif
-- [ ] Stress-testing paramétrique
-
-## 📜 Licence
-
-Code libre d'usage à des fins personnelles et éducatives.
