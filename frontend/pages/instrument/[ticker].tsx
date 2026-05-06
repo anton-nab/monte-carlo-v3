@@ -1,15 +1,16 @@
 /**
  * Instrument Page — /instrument/{ticker}
  *
- * Displays:
- * - Real-time quote (price, change, volume)
- * - Interactive chart with period selector
- * - Company fundamentals (P/E, PB, ROE, market cap, etc.)
+ * Strategy:
+ * - Fetch full historical data once (period=max)
+ * - Use visibleRange to zoom on selected period (1M, 3M, 6M, etc.)
+ * - User can scroll/zoom to see ALL the data, not just the period window
+ * - Toggle between line/area/candlestick view
  */
 
 import { useRouter } from 'next/router';
-import { useState, useEffect } from 'react';
-import { TradingViewChart } from '../../components/TradingViewChart';
+import { useState, useEffect, useMemo } from 'react';
+import { TradingViewChart, ChartType } from '../../components/TradingViewChart';
 
 interface QuoteData {
   ticker: string;
@@ -44,18 +45,26 @@ interface HistoricalPoint {
   volume: number;
 }
 
-interface ChartDataPoint {
+interface ChartLinePoint {
   date: string;
   value: number;
 }
 
+interface ChartOHLCPoint {
+  date: string;
+  open: number;
+  high: number;
+  low: number;
+  close: number;
+}
+
 const CHART_PERIODS = [
-  { label: '1M', value: '1mo' },
-  { label: '3M', value: '3mo' },
-  { label: '6M', value: '6mo' },
-  { label: '1Y', value: '1y' },
-  { label: '5Y', value: '5y' },
-  { label: 'Max', value: 'max' },
+  { label: '1M', value: '1mo', days: 30 },
+  { label: '3M', value: '3mo', days: 90 },
+  { label: '6M', value: '6mo', days: 180 },
+  { label: '1Y', value: '1y', days: 365 },
+  { label: '5Y', value: '5y', days: 365 * 5 },
+  { label: 'Max', value: 'max', days: null },
 ];
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
@@ -65,12 +74,12 @@ export default function InstrumentPage() {
   const { ticker } = router.query;
   const [quote, setQuote] = useState<QuoteData | null>(null);
   const [fundamentals, setFundamentals] = useState<FundamentalsData | null>(null);
-  const [chartData, setChartData] = useState<ChartDataPoint[]>([]);
+  const [historical, setHistorical] = useState<HistoricalPoint[]>([]);
   const [selectedPeriod, setSelectedPeriod] = useState('1y');
+  const [chartType, setChartType] = useState<ChartType>('area');
   const [isLoadingChart, setIsLoadingChart] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  // Fetch quote + fundamentals on ticker change
   useEffect(() => {
     if (!ticker) return;
 
@@ -99,7 +108,7 @@ export default function InstrumentPage() {
     return () => clearInterval(interval);
   }, [ticker]);
 
-  // Fetch chart data when ticker or period changes
+  // Fetch full chart data once per ticker (period=max)
   useEffect(() => {
     if (!ticker) return;
 
@@ -108,17 +117,13 @@ export default function InstrumentPage() {
       setError(null);
       try {
         const res = await fetch(
-          `${API_URL}/api/instruments/chart/${ticker}?period=${selectedPeriod}&interval=1d`
+          `${API_URL}/api/instruments/chart/${ticker}?period=max&interval=1d`
         );
         if (res.ok) {
           const data = await res.json();
-          const points: ChartDataPoint[] = (data.data || []).map((p: HistoricalPoint) => ({
-            date: p.date.split('T')[0],
-            value: p.close,
-          }));
-          setChartData(points);
+          setHistorical(data.data || []);
         } else {
-          setError(`Failed to load chart data`);
+          setError('Failed to load chart data');
         }
       } catch (err) {
         console.error('Chart fetch error:', err);
@@ -129,7 +134,44 @@ export default function InstrumentPage() {
     };
 
     fetchChart();
-  }, [ticker, selectedPeriod]);
+  }, [ticker]);
+
+  // Transform historical to line/area format
+  const lineData: ChartLinePoint[] = useMemo(
+    () =>
+      historical.map((p) => ({
+        date: p.date.split('T')[0],
+        value: p.close,
+      })),
+    [historical]
+  );
+
+  // Transform historical to OHLC format
+  const ohlcData: ChartOHLCPoint[] = useMemo(
+    () =>
+      historical.map((p) => ({
+        date: p.date.split('T')[0],
+        open: p.open,
+        high: p.high,
+        low: p.low,
+        close: p.close,
+      })),
+    [historical]
+  );
+
+  // Compute visible range from selected period
+  const visibleRange = useMemo(() => {
+    if (historical.length === 0) return undefined;
+    const period = CHART_PERIODS.find((p) => p.value === selectedPeriod);
+    if (!period || period.days === null) return undefined;
+
+    const lastDate = historical[historical.length - 1].date.split('T')[0];
+    const lastTs = new Date(lastDate).getTime();
+    const fromTs = lastTs - period.days * 24 * 60 * 60 * 1000;
+    const fromDate = new Date(fromTs).toISOString().split('T')[0];
+
+    return { from: fromDate, to: lastDate };
+  }, [historical, selectedPeriod]);
 
   if (!ticker) {
     return (
@@ -146,8 +188,8 @@ export default function InstrumentPage() {
 
   return (
     <div className="min-h-screen bg-terminal-bg text-terminal-text">
-      {/* Header Section */}
-      <div className="border-b border-terminal-border bg-terminal-surface sticky top-14 z-10">
+      {/* Header Section (not sticky to avoid covering content) */}
+      <div className="border-b border-terminal-border bg-terminal-surface">
         <div className="max-w-7xl mx-auto px-4 py-4">
           <div className="flex items-end justify-between mb-4">
             <div>
@@ -173,7 +215,6 @@ export default function InstrumentPage() {
             )}
           </div>
 
-          {/* Additional Info */}
           {quote && (
             <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
               <div>
@@ -221,8 +262,35 @@ export default function InstrumentPage() {
 
         {/* Chart Section */}
         <div className="bg-terminal-surface border border-terminal-border rounded mb-6 p-4">
-          <div className="mb-4 flex items-center justify-between">
-            <h2 className="text-lg font-semibold">Price Chart</h2>
+          <div className="mb-4 flex items-center justify-between flex-wrap gap-3">
+            <div className="flex items-center gap-3">
+              <h2 className="text-lg font-semibold">Price Chart</h2>
+              {/* Chart type toggle */}
+              <div className="flex border border-terminal-border rounded overflow-hidden">
+                <button
+                  onClick={() => setChartType('area')}
+                  className={`px-2 py-1 text-xs transition ${
+                    chartType === 'area'
+                      ? 'bg-terminal-cyan text-terminal-bg font-semibold'
+                      : 'text-terminal-textMuted hover:text-terminal-text'
+                  }`}
+                  title="Line / Area"
+                >
+                  Line
+                </button>
+                <button
+                  onClick={() => setChartType('candle')}
+                  className={`px-2 py-1 text-xs transition border-l border-terminal-border ${
+                    chartType === 'candle'
+                      ? 'bg-terminal-cyan text-terminal-bg font-semibold'
+                      : 'text-terminal-textMuted hover:text-terminal-text'
+                  }`}
+                  title="Candlestick"
+                >
+                  Candle
+                </button>
+              </div>
+            </div>
             <div className="flex gap-2 flex-wrap">
               {CHART_PERIODS.map((period) => (
                 <button
@@ -244,13 +312,15 @@ export default function InstrumentPage() {
               <div className="h-96 flex items-center justify-center text-terminal-textMuted">
                 Loading chart...
               </div>
-            ) : chartData.length > 0 ? (
+            ) : historical.length > 0 ? (
               <TradingViewChart
-                data={chartData}
+                data={lineData}
+                ohlcData={ohlcData}
+                chartType={chartType}
                 height={400}
                 color={lineColor}
-                fill={true}
                 showAxes={true}
+                visibleRange={visibleRange}
               />
             ) : (
               <div className="h-96 flex items-center justify-center text-terminal-textMuted">
@@ -258,6 +328,9 @@ export default function InstrumentPage() {
               </div>
             )}
           </div>
+          <p className="text-2xs text-terminal-textDim mt-2">
+            Tip: scroll/drag the chart to see data outside the selected period.
+          </p>
         </div>
 
         {/* Fundamentals Grid */}
