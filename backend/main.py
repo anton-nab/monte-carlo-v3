@@ -182,33 +182,44 @@ async def test_echo(data: dict):
 # 4. ROOT ENDPOINT (Landing Page Info)
 # ===========================================================================
 
-@app.get("/api/debug/fmp")
-async def debug_fmp():
+@app.get("/api/debug/sources")
+async def debug_sources():
     """
-    Diagnostic: test FMP API connectivity and key validity.
-    Hit this endpoint to check if FMP is working.
+    Diagnostic: test connectivity to each data source used by the indices service.
+    SP500 → GitHub CSV | NDX/DJI → hardcoded | Prices → yfinance
     """
-    import os
-    from services.fmp_provider import get_fmp_provider
-    fmp_key = os.getenv("FMP_API_KEY", "")
-    result = {
-        "fmp_key_set": bool(fmp_key),
-        "fmp_key_preview": (fmp_key[:6] + "..." + fmp_key[-4:]) if len(fmp_key) > 10 else ("SET" if fmp_key else "MISSING"),
-        "tests": {}
-    }
-    fmp = get_fmp_provider()
-    # Test DJI (smallest, 30 stocks — fastest to verify)
+    import httpx as _httpx
+    result: dict = {}
+
+    # ── SP500 GitHub CSV ─────────────────────────────────────────────────────
+    csv_url = (
+        "https://raw.githubusercontent.com/datasets/"
+        "s-and-p-500-companies/main/data/constituents.csv"
+    )
     try:
-        dji = await fmp.get_index_constituents("DJI")
-        result["tests"]["DJI"] = {"status": "ok", "count": len(dji), "sample": dji[0] if dji else None}
+        with _httpx.Client(timeout=15) as c:
+            r = c.get(csv_url, follow_redirects=True)
+        lines = r.text.strip().splitlines()
+        result["sp500_csv"] = {
+            "status": r.status_code,
+            "ok": r.status_code == 200,
+            "rows": len(lines) - 1,  # minus header
+            "header": lines[0] if lines else None,
+        }
     except Exception as e:
-        result["tests"]["DJI"] = {"status": "error", "detail": str(e)}
-    # Test SP500
+        result["sp500_csv"] = {"ok": False, "error": str(e)}
+
+    # ── yfinance spot check ──────────────────────────────────────────────────
     try:
-        sp = await fmp.get_index_constituents("SP500")
-        result["tests"]["SP500"] = {"status": "ok", "count": len(sp), "sample": sp[0] if sp else None}
+        import yfinance as yf
+        fi = yf.Ticker("AAPL").fast_info
+        result["yfinance"] = {
+            "ok": True,
+            "AAPL_last_price": getattr(fi, "last_price", None),
+        }
     except Exception as e:
-        result["tests"]["SP500"] = {"status": "error", "detail": str(e)}
+        result["yfinance"] = {"ok": False, "error": str(e)}
+
     return result
 
 
@@ -250,10 +261,10 @@ async def startup_event():
     print("[*] API Startup - Monte Carlo v3")
     print("[*] All systems operational")
     # Diagnostic: show which API keys are configured
-    fmp_key = os.getenv("FMP_API_KEY", "")
     fred_key = os.getenv("FRED_API_KEY", "")
-    print(f"[*] FMP_API_KEY : {'SET (' + fmp_key[:6] + '...)' if fmp_key else 'NOT SET — FMP will fall back to hardcoded data!'}")
     print(f"[*] FRED_API_KEY: {'SET (' + fred_key[:6] + '...)' if fred_key else 'NOT SET'}")
+    print("[*] SP500 source : GitHub CSV (datasets/s-and-p-500-companies)")
+    print("[*] NDX/DJI source: hardcoded (with Wikipedia fallback attempt)")
 
 
 @app.on_event("shutdown")

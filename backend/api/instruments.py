@@ -125,25 +125,13 @@ async def get_news(ticker: str):
 
 @router.get("/etf-holdings/{ticker}")
 async def get_etf_holdings(ticker: str):
-    """Get ETF top holdings.
+    """Get ETF top holdings via yfinance.
 
-    Tries FMP API first (reliable, 24h cache), falls back to yfinance.
     Returns top holdings with weight % for ETFs (SPY, QQQ, VTI, etc.)
-
     Example: GET /api/instruments/etf-holdings/SPY
     """
-    t = ticker.upper()
     try:
-        # Primary: FMP API (accurate, free tier, 24h cache)
-        result = await _fmp.get_etf_holdings(t)
-        if result:
-            return result
-    except Exception as exc:
-        print(f"FMP ETF holdings failed for {t}: {exc}")
-
-    # Fallback: yfinance
-    try:
-        result = await provider.get_etf_holdings(t)
+        result = await provider.get_etf_holdings(ticker.upper())
         return result
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))

@@ -2,8 +2,10 @@
 Registry of supported global indices.
 
 Source strategy per index:
-  - US (SP500, NDX, DJI) → FMP API (primary) with hardcoded/Wikipedia fallback.
-    FMP provides accurate, up-to-date constituent lists with sector data.
+  - SP500 → GitHub CSV (datasets/s-and-p-500-companies, public, maintained quarterly).
+    Plain CSV over HTTPS — no auth, no bot-blocking, 24h cache.
+  - NDX, DJI → hardcoded lists + Wikipedia fallback attempt (Wikipedia blocks most IPs,
+    so hardcoded is effectively always used).
   - European/Asian → hardcoded lists with proper Yahoo Finance ticker suffixes
     (.DE, .L, .PA, etc.) because public data sources use local tickers without
     these suffixes, making them unusable for yfinance price lookups.
@@ -391,15 +393,9 @@ INDICES_REGISTRY: Dict[str, Dict[str, Any]] = {
         "yf_ticker": "^GSPC",
         "currency": "USD",
         "flag": "🇺🇸",
-        "source": "fmp",            # Primary: FMP /sp500_constituent
-        "fmp_symbol": "SP500",
-        "wikipedia": {              # Fallback if FMP fails
-            "url": "https://en.wikipedia.org/wiki/List_of_S%26P_500_companies",
-            "table_index": 0,
-            "ticker_col": "Symbol",
-            "name_col": "Security",
-            "sector_col": "GICS Sector",
-        },
+        "source": "csv",
+        # GitHub CSV maintained by the "datasets" org — updated after each quarterly rebalance
+        # Format: Symbol, Name, Sector
     },
     "NDX": {
         "name": "Nasdaq 100",
@@ -409,9 +405,15 @@ INDICES_REGISTRY: Dict[str, Dict[str, Any]] = {
         "yf_ticker": "^NDX",
         "currency": "USD",
         "flag": "🇺🇸",
-        "source": "fmp",            # Primary: FMP /nasdaq_constituent
-        "fmp_symbol": "NDX",
-        "hardcoded": NDX100,        # Fallback if FMP fails
+        "source": "wikipedia",
+        "wikipedia": {
+            "url": "https://en.wikipedia.org/wiki/Nasdaq-100",
+            "table_index": 3,
+            "ticker_col": "Ticker",
+            "name_col": "Company",
+            "sector_col": "GICS Sector",
+        },
+        "hardcoded": NDX100,        # Fallback if Wikipedia fails
     },
     "DJI": {
         "name": "Dow Jones Industrial Average",
@@ -421,9 +423,15 @@ INDICES_REGISTRY: Dict[str, Dict[str, Any]] = {
         "yf_ticker": "^DJI",
         "currency": "USD",
         "flag": "🇺🇸",
-        "source": "fmp",            # Primary: FMP /dowjones_constituent
-        "fmp_symbol": "DJI",
-        "hardcoded": DOW30,         # Fallback if FMP fails
+        "source": "wikipedia",
+        "wikipedia": {
+            "url": "https://en.wikipedia.org/wiki/Dow_Jones_Industrial_Average",
+            "table_index": 1,
+            "ticker_col": "Symbol",
+            "name_col": "Company",
+            "sector_col": "Industry",
+        },
+        "hardcoded": DOW30,         # Fallback if Wikipedia fails
     },
     "RUT": {
         "name": "Russell 2000",

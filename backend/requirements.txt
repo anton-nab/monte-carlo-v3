@@ -32,6 +32,7 @@ rapidfuzz>=3.6.0              # Fuzzy string matching for search
 
 # PHASE 2.5: Index/ETF decomposition
 lxml>=5.1.0                   # HTML parser for pandas.read_html (Wikipedia scraping)
+html5lib>=1.1                 # Fallback HTML parser (required when lxml fails on some pages)
 
 # ===================================================================
 # NOTES

@@ -3,7 +3,7 @@ IndicesService — orchestrates constituent fetching + price enrichment.
 
 Pipeline per request:
   1. Get index config from registry
-  2. Get constituent list (FMP → hardcoded/Wikipedia fallback)
+  2. Get constituent list (CSV / hardcoded / Wikipedia fallback)
   3. Optionally batch-download prices via yfinance (one call for all tickers)
   4. Enrich each constituent with price/change data
   5. Aggregate sector stats
@@ -15,7 +15,7 @@ Two-phase loading:
   with include_prices=True to get prices in the background.
 
 Caching strategy:
-  - Constituents:  24h (FMP in-memory cache / Wikipedia)
+  - Constituents:  24h (CSV provider / hardcoded)
   - Prices:        15 min (yfinance batch, in-memory)
 """
 
@@ -28,7 +28,7 @@ import pandas as pd
 
 from .indices_registry import INDICES_REGISTRY, get_index
 from .wikipedia_provider import WikipediaProvider
-from ..fmp_provider import FMPProvider, get_fmp_provider
+from .csv_provider import CsvProvider
 
 
 class IndicesService:
@@ -37,7 +37,7 @@ class IndicesService:
 
     def __init__(self) -> None:
         self._wiki = WikipediaProvider()
-        self._fmp: FMPProvider = get_fmp_provider()
+        self._csv = CsvProvider()
         self._price_cache: Dict[str, tuple] = {}
 
     # -------------------------------------------------------------------------
@@ -128,39 +128,36 @@ class IndicesService:
     ) -> List[Dict[str, Any]]:
         source = cfg.get("source", "none")
 
-        if source == "fmp":
-            fmp_symbol = cfg.get("fmp_symbol", symbol)
+        if source == "csv":
             try:
-                result = await self._fmp.get_index_constituents(fmp_symbol)
+                result = await self._csv.get_constituents(symbol)
                 if result:
                     return result
-                print(f"[FMP] Empty result for {fmp_symbol}, trying fallback")
+                print(f"[{symbol}] CSV provider returned empty list")
             except Exception as exc:
-                print(f"[FMP] Failed for {fmp_symbol}: {exc} — trying fallback")
-
-            # Fallback: hardcoded list
+                print(f"[{symbol}] CSV fetch failed: {exc}")
+            # Fallback to hardcoded if available
             if "hardcoded" in cfg:
                 print(f"[{symbol}] Using hardcoded fallback ({len(cfg['hardcoded'])} stocks)")
                 return list(cfg["hardcoded"])
+            return []
 
-            # Fallback: Wikipedia
-            if "wikipedia" in cfg:
-                print(f"[{symbol}] Using Wikipedia fallback")
-                try:
-                    return await self._wiki.get_constituents(cfg["wikipedia"])
-                except Exception as exc:
-                    print(f"[{symbol}] Wikipedia fallback also failed: {exc}")
+        if source == "wikipedia":
+            try:
+                result = await self._wiki.get_constituents(cfg["wikipedia"])
+                if result:
+                    return result
+                print(f"[{symbol}] Wikipedia returned empty, trying hardcoded fallback")
+            except Exception as exc:
+                print(f"[{symbol}] Wikipedia scrape failed: {exc} — trying hardcoded fallback")
+            # Fallback: hardcoded list (NDX and DJI have one)
+            if "hardcoded" in cfg:
+                print(f"[{symbol}] Using hardcoded fallback ({len(cfg['hardcoded'])} stocks)")
+                return list(cfg["hardcoded"])
             return []
 
         if source == "hardcoded":
             return list(cfg["hardcoded"])
-
-        if source == "wikipedia":
-            try:
-                return await self._wiki.get_constituents(cfg["wikipedia"])
-            except Exception as exc:
-                print(f"[{symbol}] Wikipedia scrape failed: {exc}")
-                return []
 
         return []  # source == "none"
 
