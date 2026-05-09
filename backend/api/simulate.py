@@ -38,8 +38,8 @@ router = APIRouter(prefix="/api/simulate", tags=["simulate"])
 class SimulateRequest(BaseModel):
     ticker: str = Field(..., min_length=1, max_length=20, description="Symbole Yahoo Finance (ex. AAPL, BTC-USD)")
     model: Literal["gbm", "merton", "heston", "garch"] = Field("gbm", description="Modèle de simulation")
-    n_sims: int = Field(1000, ge=100, le=5000, description="Nombre de trajectoires")
-    horizon_days: int = Field(252, ge=5, le=504, description="Horizon en jours de bourse (252 = 1 an)")
+    n_sims: int = Field(1000, ge=100, le=10000, description="Nombre de trajectoires")
+    horizon_days: int = Field(252, ge=5, le=1260, description="Horizon en jours de bourse (252 = 1 an, 1260 = 5 ans)")
 
     # Overrides optionnels des paramètres calibrés
     mu_override: Optional[float] = Field(None, description="Drift annualisé (ex. 0.12 = 12%). Remplace la calibration.")

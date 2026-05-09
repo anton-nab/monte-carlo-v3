@@ -1,16 +1,13 @@
 /**
  * /simulate — Monte Carlo Simulation Page (Phase 3)
  *
- * Flow :
- *   1. User entre un ticker → on charge S0, µ, σ via GET /api/simulate/info/{ticker}
- *   2. User choisit modèle, horizon, n_sims (+ overrides optionnels)
- *   3. Click "Run" → POST /api/simulate → résultats
- *
- * Charts :
- *   - Fan chart : bandes de percentiles (ComposedChart Recharts)
- *   - Distribution : histogramme des prix finaux (BarChart)
- *
- * Métriques : VaR, ES, drawdown, probabilités directionnelles
+ * Améliorations v2 :
+ *  - Tooltip fan chart custom (P5/P25/P50/P75/P95 corrects, P95=haut P5=bas)
+ *  - 10 000 simulations disponibles
+ *  - Horizons jusqu'à 5 ans
+ *  - µ et σ avec explication (ⓘ) au survol
+ *  - Prix le plus probable (Mode) sur l'histogramme
+ *  - Tooltips ⓘ sur toutes les métriques de risque
  */
 
 import { useState, useEffect, useCallback } from 'react';
@@ -48,6 +45,21 @@ interface TickerInfo {
 
 interface FanPoint {
   day: number;
+  p5: number;
+  p25: number;
+  p50: number;
+  p75: number;
+  p95: number;
+}
+
+interface StackedFanPoint {
+  day: number;
+  base: number;
+  band_lo: number;
+  band_mid_lo: number;
+  band_mid_hi: number;
+  band_hi: number;
+  // Absolus pour tooltip et lignes
   p5: number;
   p25: number;
   p50: number;
@@ -103,33 +115,58 @@ interface SimResult {
 type ModelId = 'gbm' | 'merton' | 'heston' | 'garch';
 
 const MODELS: { id: ModelId; label: string; desc: string }[] = [
-  { id: 'gbm', label: 'GBM', desc: 'Geometric Brownian Motion — baseline classique' },
-  { id: 'merton', label: 'Merton', desc: 'Jump-Diffusion — ajoute des sauts brusques' },
-  { id: 'heston', label: 'Heston', desc: 'Volatilité stochastique — vol qui évolue dans le temps' },
-  { id: 'garch', label: 'GARCH', desc: 'Bootstrap GARCH(1,1) — clustering de volatilité' },
+  { id: 'gbm',    label: 'GBM',    desc: 'Geometric Brownian Motion — modèle de base. µ et σ constants, trajectoires log-normales.' },
+  { id: 'merton', label: 'Merton', desc: 'Jump-Diffusion — ajoute des sauts brusques (crash, news). Queues de distribution plus épaisses.' },
+  { id: 'heston', label: 'Heston', desc: 'Volatilité stochastique — σ évolue dans le temps avec mean-reversion. Modèle le plus réaliste.' },
+  { id: 'garch',  label: 'GARCH',  desc: 'Bootstrap GARCH(1,1) — clustering de volatilité (les chocs créent des chocs). Calibré sur les résidus historiques.' },
 ];
 
 const HORIZONS: { label: string; days: number }[] = [
-  { label: '1M', days: 21 },
-  { label: '3M', days: 63 },
-  { label: '6M', days: 126 },
-  { label: '1Y', days: 252 },
-  { label: '2Y', days: 504 },
+  { label: '1M',  days: 21   },
+  { label: '3M',  days: 63   },
+  { label: '6M',  days: 126  },
+  { label: '1Y',  days: 252  },
+  { label: '2Y',  days: 504  },
+  { label: '3Y',  days: 756  },
+  { label: '5Y',  days: 1260 },
 ];
 
-const NSIMS_OPTIONS = [100, 500, 1000, 2000, 5000];
+const NSIMS_OPTIONS = [100, 500, 1000, 2000, 5000, 10000];
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Helpers
+// Helpers UI
 // ─────────────────────────────────────────────────────────────────────────────
 
 const pct = (v: number, digits = 1) => `${(v * 100).toFixed(digits)}%`;
-const fmt = (v: number, digits = 2) => v.toLocaleString('en-US', { minimumFractionDigits: digits, maximumFractionDigits: digits });
+const fmt = (v: number, digits = 2) =>
+  v.toLocaleString('en-US', { minimumFractionDigits: digits, maximumFractionDigits: digits });
 
-function MetricRow({ label, value, color }: { label: string; value: string; color?: string }) {
+/** Petit cercle ⓘ avec tooltip natif au survol */
+function InfoBadge({ text }: { text: string }) {
+  return (
+    <span
+      title={text}
+      className="inline-flex items-center justify-center w-3.5 h-3.5 rounded-full border border-terminal-textDim text-terminal-textDim text-[9px] cursor-help ml-1 select-none hover:border-terminal-cyan hover:text-terminal-cyan transition-colors"
+    >
+      i
+    </span>
+  );
+}
+
+interface MetricRowProps {
+  label: string;
+  value: string;
+  color?: string;
+  info?: string;
+}
+
+function MetricRow({ label, value, color, info }: MetricRowProps) {
   return (
     <div className="flex justify-between items-center py-1.5 border-b border-terminal-border last:border-0">
-      <span className="text-terminal-textMuted text-sm">{label}</span>
+      <span className="text-terminal-textMuted text-sm flex items-center">
+        {label}
+        {info && <InfoBadge text={info} />}
+      </span>
       <span className={`num text-sm font-medium ${color ?? 'text-terminal-text'}`}>{value}</span>
     </div>
   );
@@ -143,20 +180,73 @@ function SectionTitle({ children }: { children: React.ReactNode }) {
   );
 }
 
-// Fan chart : transforme { p5, p25, p50, p75, p95 } en stacked deltas
-function toStackedFan(data: FanPoint[]) {
+// ─────────────────────────────────────────────────────────────────────────────
+// Fan chart — transform + custom tooltip
+// ─────────────────────────────────────────────────────────────────────────────
+
+/** Convertit les percentiles absolus en deltas empilables pour Recharts */
+function toStackedFan(data: FanPoint[]): StackedFanPoint[] {
   return data.map((d) => ({
     day: d.day,
     base: d.p5,
-    band_lo: d.p25 - d.p5,
+    band_lo:     d.p25 - d.p5,
     band_mid_lo: d.p50 - d.p25,
     band_mid_hi: d.p75 - d.p50,
-    band_hi: d.p95 - d.p75,
-    // Valeurs absolues pour le tooltip / lignes
-    p5: d.p5,
+    band_hi:     d.p95 - d.p75,
+    // Valeurs absolues — utilisées par le tooltip et les lignes
+    p5:  d.p5,
+    p25: d.p25,
     p50: d.p50,
+    p75: d.p75,
     p95: d.p95,
   }));
+}
+
+interface TooltipPayload {
+  payload: StackedFanPoint;
+}
+
+/** Tooltip personnalisé : affiche P95 (optimiste) en haut, P5 (pessimiste) en bas */
+function FanTooltip({
+  active,
+  payload,
+  label,
+}: {
+  active?: boolean;
+  payload?: TooltipPayload[];
+  label?: number;
+}) {
+  if (!active || !payload || !payload.length) return null;
+  const d = payload[0].payload; // données brutes du point
+
+  const rows: { label: string; value: number; color: string; bold?: boolean }[] = [
+    { label: 'P95 — optimiste',  value: d.p95, color: 'rgba(255,100,100,0.85)' },
+    { label: 'P75',              value: d.p75, color: 'rgba(180,210,255,0.7)'  },
+    { label: 'P50 — médiane',    value: d.p50, color: '#00e5ff', bold: true    },
+    { label: 'P25',              value: d.p25, color: 'rgba(180,210,255,0.7)'  },
+    { label: 'P5 — pessimiste',  value: d.p5,  color: 'rgba(255,100,100,0.85)' },
+  ];
+
+  return (
+    <div style={{
+      background: '#0f1117',
+      border: '1px solid #2a2d3a',
+      borderRadius: 6,
+      padding: '8px 12px',
+      fontSize: 12,
+      minWidth: 180,
+    }}>
+      <p style={{ color: '#6b7280', marginBottom: 6, fontFamily: 'monospace' }}>Jour {label}</p>
+      {rows.map(({ label: l, value, color, bold }) => (
+        <div key={l} style={{ display: 'flex', justifyContent: 'space-between', gap: 12, marginBottom: 2 }}>
+          <span style={{ color }}>{l}</span>
+          <span style={{ color: bold ? color : '#e5e7eb', fontFamily: 'monospace', fontWeight: bold ? 700 : 400 }}>
+            ${value.toFixed(2)}
+          </span>
+        </div>
+      ))}
+    </div>
+  );
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -165,32 +255,31 @@ function toStackedFan(data: FanPoint[]) {
 
 export default function SimulatePage() {
   // ── Formulaire ───────────────────────────────────────────────────────────
-  const [tickerInput, setTickerInput] = useState('AAPL');
-  const [model, setModel] = useState<ModelId>('gbm');
-  const [horizonDays, setHorizonDays] = useState(252);
-  const [nSims, setNSims] = useState(1000);
+  const [tickerInput, setTickerInput]   = useState('AAPL');
+  const [model, setModel]               = useState<ModelId>('gbm');
+  const [horizonDays, setHorizonDays]   = useState(252);
+  const [nSims, setNSims]               = useState(1000);
   const [showAdvanced, setShowAdvanced] = useState(false);
 
   // Overrides optionnels
-  const [muOverride, setMuOverride] = useState('');
+  const [muOverride, setMuOverride]       = useState('');
   const [sigmaOverride, setSigmaOverride] = useState('');
   // Merton
   const [lambdaPoisson, setLambdaPoisson] = useState('0.5');
-  const [jumpMean, setJumpMean] = useState('-0.05');
-  const [jumpStd, setJumpStd] = useState('0.1');
+  const [jumpMean, setJumpMean]           = useState('-0.05');
+  const [jumpStd, setJumpStd]             = useState('0.1');
   // Heston
-  const [kappa, setKappa] = useState('2.0');
+  const [kappa, setKappa]   = useState('2.0');
   const [sigmaV, setSigmaV] = useState('0.3');
-  const [rho, setRho] = useState('-0.7');
+  const [rho, setRho]       = useState('-0.7');
 
   // ── État ─────────────────────────────────────────────────────────────────
-  const [tickerInfo, setTickerInfo] = useState<TickerInfo | null>(null);
+  const [tickerInfo, setTickerInfo]   = useState<TickerInfo | null>(null);
   const [tickerError, setTickerError] = useState<string | null>(null);
   const [loadingInfo, setLoadingInfo] = useState(false);
-
-  const [result, setResult] = useState<SimResult | null>(null);
-  const [running, setRunning] = useState(false);
-  const [runError, setRunError] = useState<string | null>(null);
+  const [result, setResult]           = useState<SimResult | null>(null);
+  const [running, setRunning]         = useState(false);
+  const [runError, setRunError]       = useState<string | null>(null);
 
   // ── Chargement info ticker (debounce 600ms) ───────────────────────────────
   useEffect(() => {
@@ -203,8 +292,7 @@ export default function SimulatePage() {
         const info = await apiFetch<TickerInfo>(`/api/simulate/info/${t}`);
         setTickerInfo(info);
       } catch (e: unknown) {
-        const msg = e instanceof Error ? e.message : 'Ticker introuvable';
-        setTickerError(msg);
+        setTickerError(e instanceof Error ? e.message : 'Ticker introuvable');
         setTickerInfo(null);
       } finally {
         setLoadingInfo(false);
@@ -221,35 +309,25 @@ export default function SimulatePage() {
     setRunError(null);
     setResult(null);
 
-    const body: Record<string, unknown> = {
-      ticker,
-      model,
-      n_sims: nSims,
-      horizon_days: horizonDays,
-    };
-
-    if (muOverride) body.mu_override = parseFloat(muOverride) / 100;
+    const body: Record<string, unknown> = { ticker, model, n_sims: nSims, horizon_days: horizonDays };
+    if (muOverride)    body.mu_override    = parseFloat(muOverride) / 100;
     if (sigmaOverride) body.sigma_override = parseFloat(sigmaOverride) / 100;
     if (model === 'merton') {
       body.lambda_poisson = parseFloat(lambdaPoisson) || 0.5;
-      body.jump_mean = parseFloat(jumpMean) || -0.05;
-      body.jump_std = parseFloat(jumpStd) || 0.1;
+      body.jump_mean      = parseFloat(jumpMean) || -0.05;
+      body.jump_std       = parseFloat(jumpStd)  || 0.1;
     }
     if (model === 'heston') {
-      body.kappa = parseFloat(kappa) || 2.0;
-      body.sigma_v = parseFloat(sigmaV) || 0.3;
-      body.rho = parseFloat(rho) || -0.7;
+      body.kappa   = parseFloat(kappa)   || 2.0;
+      body.sigma_v = parseFloat(sigmaV)  || 0.3;
+      body.rho     = parseFloat(rho)     || -0.7;
     }
 
     try {
-      const data = await apiFetch<SimResult>('/api/simulate', {
-        method: 'POST',
-        body: JSON.stringify(body),
-      });
+      const data = await apiFetch<SimResult>('/api/simulate', { method: 'POST', body: JSON.stringify(body) });
       setResult(data);
     } catch (e: unknown) {
-      const msg = e instanceof Error ? e.message : 'Erreur de simulation';
-      setRunError(msg);
+      setRunError(e instanceof Error ? e.message : 'Erreur de simulation');
     } finally {
       setRunning(false);
     }
@@ -259,13 +337,19 @@ export default function SimulatePage() {
   const stackedFan = result ? toStackedFan(result.fan_chart) : [];
   const m = result?.metrics;
 
+  // Prix le plus probable = bin avec le plus de trajectoires
+  const modeBin = result?.histogram.reduce<HistPoint | null>((best, bin) =>
+    best === null || bin.count > best.count ? bin : best, null);
+
   const varColor = (v: number) => v < -0.2 ? 'text-bear' : v < -0.1 ? 'text-warn' : 'text-bull';
+
+  // Libellé horizon pour les badges
+  const horizonLabel = HORIZONS.find((h) => h.days === result?.simulation.horizon_days)?.label
+    ?? (result ? `${result.simulation.horizon_days}j` : '');
 
   return (
     <>
-      <Head>
-        <title>Simulate — Monte Carlo v3</title>
-      </Head>
+      <Head><title>Simulate — Monte Carlo v3</title></Head>
       <Header />
 
       <main className="max-w-7xl mx-auto px-4 py-6 space-y-6">
@@ -294,7 +378,7 @@ export default function SimulatePage() {
             </div>
 
             {/* Info calibration */}
-            <div className="flex-1 min-w-[220px]">
+            <div className="flex-1 min-w-[240px]">
               {loadingInfo && (
                 <div className="flex items-center gap-2 text-terminal-textDim text-sm">
                   <span className="animate-spin">⟳</span> Chargement…
@@ -304,24 +388,33 @@ export default function SimulatePage() {
                 <div className="text-bear text-sm">❌ {tickerError}</div>
               )}
               {tickerInfo && !loadingInfo && (
-                <div className="flex gap-4 flex-wrap">
+                <div className="flex gap-5 flex-wrap">
                   <div>
                     <div className="text-xs text-terminal-textDim">Dernier prix</div>
                     <div className="num text-terminal-cyan font-semibold">${fmt(tickerInfo.S0)}</div>
                   </div>
                   <div>
-                    <div className="text-xs text-terminal-textDim">µ annuel</div>
+                    <div
+                      className="text-xs text-terminal-textDim flex items-center cursor-help"
+                      title="µ (mu) = rendement moyen annualisé calculé sur les 2 dernières années. C'est la tendance du modèle : +12% signifie que le modèle part du principe que l'action monte en moyenne de 12%/an. Vous pouvez l'overrider dans les paramètres avancés."
+                    >
+                      µ annuel <InfoBadge text="µ (mu) = rendement moyen annualisé sur 2 ans. Représente la tendance haussière ou baissière attendue du modèle. Calibré automatiquement, overridable." />
+                    </div>
                     <div className={`num font-medium ${tickerInfo.mu_pct >= 0 ? 'text-bull' : 'text-bear'}`}>
                       {tickerInfo.mu_pct >= 0 ? '+' : ''}{tickerInfo.mu_pct.toFixed(1)}%
                     </div>
                   </div>
                   <div>
-                    <div className="text-xs text-terminal-textDim">σ annuelle</div>
+                    <div
+                      className="text-xs text-terminal-textDim flex items-center cursor-help"
+                    >
+                      σ annuelle <InfoBadge text="σ (sigma) = volatilité annualisée. Mesure l'écart-type des rendements journaliers × √252. Plus σ est grand, plus les trajectoires sont dispersées. Un σ de 20-30% est typique pour une action, 60-80% pour une crypto." />
+                    </div>
                     <div className="num text-warn font-medium">{tickerInfo.sigma_pct.toFixed(1)}%</div>
                   </div>
                   <div>
-                    <div className="text-xs text-terminal-textDim">Obs.</div>
-                    <div className="num text-terminal-textMuted">{tickerInfo.n_obs}j</div>
+                    <div className="text-xs text-terminal-textDim">Historique</div>
+                    <div className="num text-terminal-textMuted">{tickerInfo.n_obs} jours</div>
                   </div>
                 </div>
               )}
@@ -348,7 +441,7 @@ export default function SimulatePage() {
               ))}
             </div>
             <p className="text-xs text-terminal-textDim mt-1.5">
-              {MODELS.find((m) => m.id === model)?.desc}
+              {MODELS.find((mod) => mod.id === model)?.desc}
             </p>
           </div>
 
@@ -356,7 +449,7 @@ export default function SimulatePage() {
           <div className="flex flex-wrap gap-6">
             <div>
               <label className="block text-xs text-terminal-textDim mb-2">Horizon</label>
-              <div className="flex gap-1">
+              <div className="flex flex-wrap gap-1">
                 {HORIZONS.map((h) => (
                   <button
                     key={h.days}
@@ -374,8 +467,11 @@ export default function SimulatePage() {
             </div>
 
             <div>
-              <label className="block text-xs text-terminal-textDim mb-2">Simulations</label>
-              <div className="flex gap-1">
+              <label className="block text-xs text-terminal-textDim mb-2">
+                Simulations
+                <InfoBadge text="Nombre de trajectoires générées. Plus il y en a, plus les métriques (VaR, ES…) sont précises. 1 000 est un bon équilibre. 10 000 donne des résultats très stables mais peut prendre plusieurs secondes." />
+              </label>
+              <div className="flex flex-wrap gap-1">
                 {NSIMS_OPTIONS.map((n) => (
                   <button
                     key={n}
@@ -390,80 +486,105 @@ export default function SimulatePage() {
                   </button>
                 ))}
               </div>
+              {nSims >= 5000 && (
+                <p className="text-xs text-warn mt-1">⚠ {nSims >= 10000 ? '10k sims peut prendre 5-15s selon le modèle' : '5k sims peut prendre 2-5s'}</p>
+              )}
             </div>
           </div>
 
-          {/* Row 4 : Paramètres avancés (accordéon) */}
+          {/* Row 4 : Paramètres avancés */}
           <div>
             <button
               onClick={() => setShowAdvanced(!showAdvanced)}
               className="text-xs text-terminal-textDim hover:text-terminal-text flex items-center gap-1"
             >
               <span>{showAdvanced ? '▾' : '▸'}</span>
-              Paramètres avancés
+              Paramètres avancés (µ/σ override{model !== 'gbm' ? `, paramètres ${model}` : ''})
             </button>
 
             {showAdvanced && (
               <div className="mt-3 grid grid-cols-2 md:grid-cols-4 gap-4">
                 <div>
-                  <label className="block text-xs text-terminal-textDim mb-1">µ override (%/an)</label>
+                  <label className="block text-xs text-terminal-textDim mb-1">
+                    µ override (%/an)
+                    <InfoBadge text="Remplace le µ calibré automatiquement. Entrez le rendement annuel attendu en %. Ex: 15 pour +15%/an." />
+                  </label>
                   <input
                     type="number"
                     value={muOverride}
                     onChange={(e) => setMuOverride(e.target.value)}
                     placeholder={tickerInfo ? `${tickerInfo.mu_pct.toFixed(1)}` : '—'}
-                    className="w-full bg-terminal-bg border border-terminal-border text-terminal-text px-2 py-1.5 rounded text-sm num"
+                    className="w-full bg-terminal-bg border border-terminal-border text-terminal-text px-2 py-1.5 rounded text-sm num focus:outline-none focus:border-terminal-cyan"
                   />
                 </div>
                 <div>
-                  <label className="block text-xs text-terminal-textDim mb-1">σ override (%/an)</label>
+                  <label className="block text-xs text-terminal-textDim mb-1">
+                    σ override (%/an)
+                    <InfoBadge text="Remplace la volatilité calibrée automatiquement. Entrez la vol annuelle en %. Ex: 30 pour σ=30%. Un σ élevé élargit le fan chart." />
+                  </label>
                   <input
                     type="number"
                     value={sigmaOverride}
                     onChange={(e) => setSigmaOverride(e.target.value)}
                     placeholder={tickerInfo ? `${tickerInfo.sigma_pct.toFixed(1)}` : '—'}
-                    className="w-full bg-terminal-bg border border-terminal-border text-terminal-text px-2 py-1.5 rounded text-sm num"
+                    className="w-full bg-terminal-bg border border-terminal-border text-terminal-text px-2 py-1.5 rounded text-sm num focus:outline-none focus:border-terminal-cyan"
                   />
                 </div>
 
-                {/* Merton params */}
                 {model === 'merton' && (
                   <>
                     <div>
-                      <label className="block text-xs text-terminal-textDim mb-1">λ (sauts/an)</label>
+                      <label className="block text-xs text-terminal-textDim mb-1">
+                        λ (sauts/an)
+                        <InfoBadge text="λ (lambda) = intensité du processus de Poisson. Nombre de sauts attendus par an. 0.5 = 1 saut tous les 2 ans. 2.0 = 2 sauts par an." />
+                      </label>
                       <input type="number" value={lambdaPoisson} onChange={(e) => setLambdaPoisson(e.target.value)}
-                        className="w-full bg-terminal-bg border border-terminal-border text-terminal-text px-2 py-1.5 rounded text-sm num" />
+                        className="w-full bg-terminal-bg border border-terminal-border text-terminal-text px-2 py-1.5 rounded text-sm num focus:outline-none focus:border-terminal-cyan" />
                     </div>
                     <div>
-                      <label className="block text-xs text-terminal-textDim mb-1">Jump mean</label>
+                      <label className="block text-xs text-terminal-textDim mb-1">
+                        Jump mean
+                        <InfoBadge text="Taille moyenne d'un saut en log-rendement. -0.05 = saut de -5% en moyenne. Utilisez des valeurs négatives pour modéliser les crashes." />
+                      </label>
                       <input type="number" value={jumpMean} onChange={(e) => setJumpMean(e.target.value)}
-                        className="w-full bg-terminal-bg border border-terminal-border text-terminal-text px-2 py-1.5 rounded text-sm num" />
+                        className="w-full bg-terminal-bg border border-terminal-border text-terminal-text px-2 py-1.5 rounded text-sm num focus:outline-none focus:border-terminal-cyan" />
                     </div>
                     <div>
-                      <label className="block text-xs text-terminal-textDim mb-1">Jump std</label>
+                      <label className="block text-xs text-terminal-textDim mb-1">
+                        Jump std
+                        <InfoBadge text="Écart-type de la taille des sauts. 0.1 = les sauts varient d'environ ±10% autour de la moyenne." />
+                      </label>
                       <input type="number" value={jumpStd} onChange={(e) => setJumpStd(e.target.value)}
-                        className="w-full bg-terminal-bg border border-terminal-border text-terminal-text px-2 py-1.5 rounded text-sm num" />
+                        className="w-full bg-terminal-bg border border-terminal-border text-terminal-text px-2 py-1.5 rounded text-sm num focus:outline-none focus:border-terminal-cyan" />
                     </div>
                   </>
                 )}
 
-                {/* Heston params */}
                 {model === 'heston' && (
                   <>
                     <div>
-                      <label className="block text-xs text-terminal-textDim mb-1">κ (mean-rev)</label>
+                      <label className="block text-xs text-terminal-textDim mb-1">
+                        κ (mean-rev)
+                        <InfoBadge text="κ (kappa) = vitesse de réversion à la moyenne de la variance. Plus κ est grand, plus la vol revient vite vers sa moyenne long-terme θ. Typiquement 0.5–5." />
+                      </label>
                       <input type="number" value={kappa} onChange={(e) => setKappa(e.target.value)}
-                        className="w-full bg-terminal-bg border border-terminal-border text-terminal-text px-2 py-1.5 rounded text-sm num" />
+                        className="w-full bg-terminal-bg border border-terminal-border text-terminal-text px-2 py-1.5 rounded text-sm num focus:outline-none focus:border-terminal-cyan" />
                     </div>
                     <div>
-                      <label className="block text-xs text-terminal-textDim mb-1">σᵥ (vol of vol)</label>
+                      <label className="block text-xs text-terminal-textDim mb-1">
+                        σᵥ (vol of vol)
+                        <InfoBadge text="σᵥ = volatilité de la volatilité. Contrôle à quelle vitesse σ fluctue. Plus σᵥ est grand, plus la vol est erratique. Typiquement 0.1–0.5." />
+                      </label>
                       <input type="number" value={sigmaV} onChange={(e) => setSigmaV(e.target.value)}
-                        className="w-full bg-terminal-bg border border-terminal-border text-terminal-text px-2 py-1.5 rounded text-sm num" />
+                        className="w-full bg-terminal-bg border border-terminal-border text-terminal-text px-2 py-1.5 rounded text-sm num focus:outline-none focus:border-terminal-cyan" />
                     </div>
                     <div>
-                      <label className="block text-xs text-terminal-textDim mb-1">ρ (corr S-v)</label>
+                      <label className="block text-xs text-terminal-textDim mb-1">
+                        ρ (corr S-v)
+                        <InfoBadge text="ρ (rho) = corrélation entre le mouvement du prix et celui de la variance. Généralement négatif (effet levier) : quand le prix baisse, la vol monte. Typiquement -0.7 à -0.3." />
+                      </label>
                       <input type="number" min="-1" max="1" step="0.1" value={rho} onChange={(e) => setRho(e.target.value)}
-                        className="w-full bg-terminal-bg border border-terminal-border text-terminal-text px-2 py-1.5 rounded text-sm num" />
+                        className="w-full bg-terminal-bg border border-terminal-border text-terminal-text px-2 py-1.5 rounded text-sm num focus:outline-none focus:border-terminal-cyan" />
                     </div>
                   </>
                 )}
@@ -482,13 +603,9 @@ export default function SimulatePage() {
                   : 'bg-terminal-cyan text-terminal-bg hover:opacity-90 active:scale-95'
               }`}
             >
-              {running ? (
-                <span className="flex items-center gap-2">
-                  <span className="animate-spin inline-block">⟳</span> Simulation en cours…
-                </span>
-              ) : (
-                '▶ Lancer la simulation'
-              )}
+              {running
+                ? <span className="flex items-center gap-2"><span className="animate-spin inline-block">⟳</span> Simulation en cours…</span>
+                : '▶ Lancer la simulation'}
             </button>
 
             {result && !running && (
@@ -508,26 +625,29 @@ export default function SimulatePage() {
         {/* ── Résultats ─────────────────────────────────────────────── */}
         {result && m && (
           <>
-            {/* Calibration badge */}
+            {/* Badges résumé */}
             <div className="flex flex-wrap gap-2 text-xs">
               <span className="bg-terminal-surface border border-terminal-border rounded px-2 py-1 num">
                 {result.ticker} · {result.model.toUpperCase()}
               </span>
               <span className="bg-terminal-surface border border-terminal-border rounded px-2 py-1 num">
-                µ={result.calibration.mu_pct.toFixed(1)}%{result.calibration.mu_overridden ? ' (override)' : ''}
+                µ={result.calibration.mu_pct.toFixed(1)}%{result.calibration.mu_overridden ? ' ✎' : ''}
               </span>
               <span className="bg-terminal-surface border border-terminal-border rounded px-2 py-1 num">
-                σ={result.calibration.sigma_pct.toFixed(1)}%{result.calibration.sigma_overridden ? ' (override)' : ''}
+                σ={result.calibration.sigma_pct.toFixed(1)}%{result.calibration.sigma_overridden ? ' ✎' : ''}
               </span>
               <span className="bg-terminal-surface border border-terminal-border rounded px-2 py-1 text-terminal-textDim">
-                {HORIZONS.find((h) => h.days === result.simulation.horizon_days)?.label ?? `${result.simulation.horizon_days}j`} · {result.calibration.n_obs}j historique
+                {horizonLabel} · {result.simulation.n_sims.toLocaleString()} sims · {result.calibration.n_obs}j historique
+              </span>
+              <span className="bg-terminal-surface border border-terminal-border rounded px-2 py-1 num text-terminal-textDim">
+                {result.computation_time_ms}ms
               </span>
             </div>
 
             {/* Fan Chart */}
             <div className="bg-terminal-surface border border-terminal-border rounded-lg p-5">
               <SectionTitle>
-                Fan Chart — {result.ticker} · {result.simulation.n_sims.toLocaleString()} simulations
+                Fan Chart — {result.ticker} · {result.simulation.n_sims.toLocaleString()} simulations · {horizonLabel}
               </SectionTitle>
               <ResponsiveContainer width="100%" height={340}>
                 <ComposedChart data={stackedFan} margin={{ top: 4, right: 12, bottom: 0, left: 12 }}>
@@ -540,46 +660,38 @@ export default function SimulatePage() {
                   />
                   <YAxis
                     tick={{ fill: '#6b7280', fontSize: 11 }}
-                    tickFormatter={(v) => `$${v.toFixed(0)}`}
+                    tickFormatter={(v) => `$${Number(v).toFixed(0)}`}
                     width={60}
                   />
-                  <Tooltip
-                    contentStyle={{ background: '#0f1117', border: '1px solid #2a2d3a', borderRadius: 6, fontSize: 12 }}
-                    formatter={(value, name) => {
-                      if (name === 'p50') return [`$${Number(value).toFixed(2)}`, 'Médiane'];
-                      if (name === 'p95') return [`$${Number(value).toFixed(2)}`, 'P95'];
-                      if (name === 'p5') return [`$${Number(value).toFixed(2)}`, 'P5'];
-                      return [null, null];
-                    }}
-                    labelFormatter={(label) => `Jour ${label}`}
+                  {/* Custom tooltip — lit les valeurs absolues brutes */}
+                  <Tooltip content={<FanTooltip />} />
+
+                  {/* Bandes empilées P5→P25→P50→P75→P95 */}
+                  <Area stackId="fan" type="monotone" dataKey="base"       stroke="none" fill="transparent"           legendType="none" />
+                  <Area stackId="fan" type="monotone" dataKey="band_lo"    stroke="none" fill="rgba(0,229,255,0.07)"  legendType="none" />
+                  <Area stackId="fan" type="monotone" dataKey="band_mid_lo" stroke="none" fill="rgba(0,229,255,0.15)" legendType="none" />
+                  <Area stackId="fan" type="monotone" dataKey="band_mid_hi" stroke="none" fill="rgba(0,229,255,0.15)" legendType="none" />
+                  <Area stackId="fan" type="monotone" dataKey="band_hi"    stroke="none" fill="rgba(0,229,255,0.07)"  legendType="none" />
+
+                  {/* Lignes P50 (médiane), P95 (optimiste en haut), P5 (pessimiste en bas) */}
+                  <Line type="monotone" dataKey="p50" stroke="#00e5ff"              strokeWidth={2}   dot={false} />
+                  <Line type="monotone" dataKey="p95" stroke="rgba(255,100,100,0.6)" strokeWidth={1}  strokeDasharray="4 3" dot={false} />
+                  <Line type="monotone" dataKey="p5"  stroke="rgba(255,100,100,0.6)" strokeWidth={1}  strokeDasharray="4 3" dot={false} />
+
+                  {/* Ligne S0 de référence */}
+                  <ReferenceLine
+                    y={result.S0}
+                    stroke="rgba(255,255,255,0.15)"
+                    strokeDasharray="6 3"
+                    label={{ value: `$${result.S0.toFixed(0)}`, fill: '#6b7280', fontSize: 10 }}
                   />
-
-                  {/* Bandes stacked : base (p5) transparent, puis deltas colorés */}
-                  <Area stackId="fan" type="monotone" dataKey="base"
-                    stroke="none" fill="transparent" legendType="none" />
-                  <Area stackId="fan" type="monotone" dataKey="band_lo"
-                    stroke="none" fill="rgba(0,229,255,0.06)" legendType="none" />
-                  <Area stackId="fan" type="monotone" dataKey="band_mid_lo"
-                    stroke="none" fill="rgba(0,229,255,0.14)" legendType="none" />
-                  <Area stackId="fan" type="monotone" dataKey="band_mid_hi"
-                    stroke="none" fill="rgba(0,229,255,0.14)" legendType="none" />
-                  <Area stackId="fan" type="monotone" dataKey="band_hi"
-                    stroke="none" fill="rgba(0,229,255,0.06)" legendType="none" />
-
-                  {/* Lignes de percentile */}
-                  <Line type="monotone" dataKey="p50" stroke="#00e5ff" strokeWidth={2} dot={false} name="p50" />
-                  <Line type="monotone" dataKey="p95" stroke="rgba(255,100,100,0.55)" strokeWidth={1} strokeDasharray="4 3" dot={false} name="p95" />
-                  <Line type="monotone" dataKey="p5" stroke="rgba(255,100,100,0.55)" strokeWidth={1} strokeDasharray="4 3" dot={false} name="p5" />
-
-                  {/* Ligne S0 */}
-                  <ReferenceLine y={result.S0} stroke="rgba(255,255,255,0.15)" strokeDasharray="6 3"
-                    label={{ value: `$${result.S0.toFixed(0)}`, fill: '#6b7280', fontSize: 10 }} />
                 </ComposedChart>
               </ResponsiveContainer>
-              <div className="flex gap-4 mt-2 text-xs text-terminal-textDim">
-                <span><span className="inline-block w-4 h-0.5 bg-terminal-cyan align-middle mr-1" />Médiane (P50)</span>
-                <span><span className="inline-block w-4 h-0.5 border-t border-dashed border-bear opacity-60 align-middle mr-1" />P5 / P95</span>
-                <span><span className="inline-block w-3 h-3 rounded-sm bg-terminal-cyan opacity-20 align-middle mr-1" />P25–P75</span>
+              <div className="flex gap-5 mt-2 text-xs text-terminal-textDim flex-wrap">
+                <span><span className="inline-block w-5 h-0.5 bg-terminal-cyan align-middle mr-1.5" />P50 médiane</span>
+                <span><span className="inline-block w-5 h-0.5 border-t border-dashed border-red-400 opacity-60 align-middle mr-1.5" />P5 pessimiste / P95 optimiste</span>
+                <span><span className="inline-block w-3 h-3 rounded-sm bg-terminal-cyan opacity-20 align-middle mr-1.5" />P25–P75 (IQR 50%)</span>
+                <span><span className="inline-block w-5 h-0.5 bg-terminal-cyan opacity-10 align-middle mr-1.5" />P5–P95 (90% des trajectoires)</span>
               </div>
             </div>
 
@@ -592,9 +704,12 @@ export default function SimulatePage() {
                 <ResponsiveContainer width="100%" height={240}>
                   <BarChart data={result.histogram} margin={{ top: 4, right: 8, bottom: 0, left: 8 }}>
                     <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.05)" vertical={false} />
-                    <XAxis dataKey="price" tick={{ fill: '#6b7280', fontSize: 10 }}
+                    <XAxis
+                      dataKey="price"
+                      tick={{ fill: '#6b7280', fontSize: 10 }}
                       tickFormatter={(v) => `$${Number(v).toFixed(0)}`}
-                      interval={Math.floor(result.histogram.length / 6)} />
+                      interval={Math.floor(result.histogram.length / 6)}
+                    />
                     <YAxis tick={{ fill: '#6b7280', fontSize: 10 }} width={36} />
                     <Tooltip
                       contentStyle={{ background: '#0f1117', border: '1px solid #2a2d3a', borderRadius: 6, fontSize: 12 }}
@@ -602,12 +717,36 @@ export default function SimulatePage() {
                       labelFormatter={(l) => `Prix : $${Number(l).toFixed(2)}`}
                     />
                     <Bar dataKey="count" fill="rgba(0,229,255,0.5)" radius={[2, 2, 0, 0]} />
+
+                    {/* S0 de départ */}
                     <ReferenceLine x={result.S0} stroke="rgba(255,255,255,0.3)" strokeDasharray="4 2"
-                      label={{ value: 'S₀', fill: '#9ca3af', fontSize: 10 }} />
+                      label={{ value: 'S₀', fill: '#9ca3af', fontSize: 10, position: 'top' }} />
+
+                    {/* Médiane */}
                     <ReferenceLine x={m.p50} stroke="#00e5ff" strokeWidth={1.5}
-                      label={{ value: 'P50', fill: '#00e5ff', fontSize: 10 }} />
+                      label={{ value: 'P50', fill: '#00e5ff', fontSize: 10, position: 'top' }} />
+
+                    {/* Prix le plus probable (mode) */}
+                    {modeBin && modeBin.price !== m.p50 && (
+                      <ReferenceLine x={modeBin.price} stroke="rgba(255,200,0,0.8)" strokeWidth={1.5}
+                        label={{ value: 'Mode', fill: 'rgba(255,200,0,0.9)', fontSize: 10, position: 'top' }} />
+                    )}
                   </BarChart>
                 </ResponsiveContainer>
+                {modeBin && (
+                  <div className="mt-2 flex gap-4 text-xs text-terminal-textDim flex-wrap">
+                    <span>
+                      <span className="inline-block w-3 h-0.5 bg-yellow-400 opacity-80 align-middle mr-1" />
+                      Prix le plus probable :{' '}
+                      <span className="num text-terminal-text">${modeBin.price.toFixed(2)}</span>
+                      {' '}({modeBin.count} trajectoires)
+                    </span>
+                    <span>
+                      <span className="inline-block w-3 h-0.5 bg-terminal-cyan align-middle mr-1" />
+                      Médiane : <span className="num text-terminal-text">${m.p50.toFixed(2)}</span>
+                    </span>
+                  </div>
+                )}
               </div>
 
               {/* Métriques de risque */}
@@ -615,41 +754,67 @@ export default function SimulatePage() {
                 <SectionTitle>Métriques de risque</SectionTitle>
 
                 <div className="grid grid-cols-2 gap-x-6">
-                  {/* Colonne gauche — Prix */}
+                  {/* Colonne gauche — Prix final */}
                   <div>
                     <p className="text-xs text-terminal-textDim font-semibold uppercase tracking-wide mb-1">Prix final</p>
-                    <MetricRow label="Médiane" value={`$${fmt(m.median_price)}`} />
-                    <MetricRow label="Attendu" value={`$${fmt(m.expected_price)}`} />
-                    <MetricRow label="P5" value={`$${fmt(m.p5)}`} color="text-bear" />
-                    <MetricRow label="P95" value={`$${fmt(m.p95)}`} color="text-bull" />
-                    <MetricRow label="Rendement attendu" value={pct(m.expected_return)}
-                      color={m.expected_return >= 0 ? 'text-bull' : 'text-bear'} />
+                    <MetricRow
+                      label="Médiane" value={`$${fmt(m.median_price)}`}
+                      info="P50 des prix finaux : 50% des simulations terminent au-dessus, 50% en-dessous. Meilleure estimation centrale que la moyenne car insensible aux outliers." />
+                    <MetricRow
+                      label="Attendu" value={`$${fmt(m.expected_price)}`}
+                      info="Moyenne arithmétique des prix finaux. Sous GBM = S0 × exp(µ × T). Légèrement supérieur à la médiane à cause de l'asymétrie log-normale." />
+                    <MetricRow
+                      label="P5 (pessimiste)" value={`$${fmt(m.p5)}`} color="text-bear"
+                      info="5e percentile des prix finaux. Dans 5% des simulations, le prix sera inférieur à cette valeur. Représente un scénario défavorable." />
+                    <MetricRow
+                      label="P95 (optimiste)" value={`$${fmt(m.p95)}`} color="text-bull"
+                      info="95e percentile des prix finaux. Dans 5% des simulations, le prix sera supérieur à cette valeur. Représente un scénario favorable." />
+                    <MetricRow
+                      label="Rendement attendu" value={pct(m.expected_return)}
+                      color={m.expected_return >= 0 ? 'text-bull' : 'text-bear'}
+                      info="(Prix final moyen − S0) / S0. Rendement total attendu sur l'horizon de simulation." />
                   </div>
 
                   {/* Colonne droite — Risque */}
                   <div>
                     <p className="text-xs text-terminal-textDim font-semibold uppercase tracking-wide mb-1">Risque</p>
-                    <MetricRow label="VaR 95%" value={pct(m.var_95)} color={varColor(m.var_95)} />
-                    <MetricRow label="VaR 99%" value={pct(m.var_99)} color={varColor(m.var_99)} />
-                    <MetricRow label="ES 95%" value={pct(m.es_95)} color="text-bear" />
-                    <MetricRow label="ES 99%" value={pct(m.es_99)} color="text-bear" />
-                    <MetricRow label="Max drawdown moyen" value={pct(m.avg_max_drawdown)} color="text-warn" />
+                    <MetricRow
+                      label="VaR 95%" value={pct(m.var_95)} color={varColor(m.var_95)}
+                      info="Value at Risk à 95% : dans 95% des cas, la perte sera inférieure à cette valeur. Ex: -15% signifie que vous ne perdrez pas plus de 15% dans 95% des scénarios." />
+                    <MetricRow
+                      label="VaR 99%" value={pct(m.var_99)} color={varColor(m.var_99)}
+                      info="Value at Risk à 99% : seuil de perte dépassé dans seulement 1% des cas. Correspond aux scénarios extrêmes." />
+                    <MetricRow
+                      label="ES 95%" value={pct(m.es_95)} color="text-bear"
+                      info="Expected Shortfall (CVaR) à 95% : perte MOYENNE dans les 5% pires scénarios. Toujours pire que la VaR, mesure le risque de queue de distribution." />
+                    <MetricRow
+                      label="ES 99%" value={pct(m.es_99)} color="text-bear"
+                      info="Expected Shortfall à 99% : perte moyenne dans le 1% pire. Indicateur réglementaire (Bâle III). Correspond à un scénario de crise sévère." />
+                    <MetricRow
+                      label="Drawdown moyen" value={pct(m.avg_max_drawdown)} color="text-warn"
+                      info="Max drawdown moyen sur toutes les trajectoires. Pour chaque simulation, on calcule (creux − pic) / pic. Cette valeur est la moyenne de tous ces drawdowns." />
                   </div>
                 </div>
 
                 {/* Probabilités directionnelles */}
                 <div>
-                  <p className="text-xs text-terminal-textDim font-semibold uppercase tracking-wide mb-2">Probabilités</p>
+                  <p className="text-xs text-terminal-textDim font-semibold uppercase tracking-wide mb-2">
+                    Probabilités
+                    <InfoBadge text="Fréquences observées sur les N simulations. P(perte) = % de trajectoires dont le prix final est inférieur au prix initial S0." />
+                  </p>
                   <div className="grid grid-cols-2 gap-2">
                     {[
-                      { label: 'P(perte)', value: m.prob_loss, bear: true },
-                      { label: 'P(gain > 10%)', value: m.prob_gain_10pct, bear: false },
-                      { label: 'P(perte > 10%)', value: m.prob_loss_10pct, bear: true },
-                      { label: 'P(gain > 20%)', value: m.prob_gain_20pct, bear: false },
-                    ].map(({ label, value, bear }) => (
+                      { label: 'P(perte)',       value: m.prob_loss,       bear: true,  info: `Part des simulations terminant sous $${fmt(result.S0)} (prix initial).` },
+                      { label: 'P(gain > 10%)',  value: m.prob_gain_10pct, bear: false, info: `Part des simulations terminant 10% au-dessus de $${fmt(result.S0)}.` },
+                      { label: 'P(perte > 10%)', value: m.prob_loss_10pct, bear: true,  info: `Part des simulations terminant 10% en-dessous de $${fmt(result.S0)}.` },
+                      { label: 'P(gain > 20%)',  value: m.prob_gain_20pct, bear: false, info: `Part des simulations terminant 20% au-dessus de $${fmt(result.S0)}.` },
+                    ].map(({ label, value, bear, info }) => (
                       <div key={label}
                         className="bg-terminal-bg border border-terminal-border rounded px-3 py-2 flex justify-between items-center">
-                        <span className="text-xs text-terminal-textDim">{label}</span>
+                        <span className="text-xs text-terminal-textDim flex items-center">
+                          {label}
+                          <InfoBadge text={info} />
+                        </span>
                         <span className={`num text-sm font-semibold ${bear ? 'text-bear' : 'text-bull'}`}>
                           {pct(value)}
                         </span>
@@ -662,7 +827,7 @@ export default function SimulatePage() {
           </>
         )}
 
-        {/* ── Placeholder (pas encore lancé) ──────────────────────── */}
+        {/* ── Placeholder ───────────────────────────────────────────── */}
         {!result && !running && (
           <div className="border border-dashed border-terminal-border rounded-lg p-12 text-center text-terminal-textDim">
             <div className="text-4xl mb-3">📊</div>
@@ -671,7 +836,7 @@ export default function SimulatePage() {
           </div>
         )}
 
-        {/* ── Skeleton chargement ──────────────────────────────────── */}
+        {/* ── Skeleton ─────────────────────────────────────────────── */}
         {running && (
           <div className="space-y-4">
             <div className="bg-terminal-surface border border-terminal-border rounded-lg p-5 h-64 animate-pulse" />
