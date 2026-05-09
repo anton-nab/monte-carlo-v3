@@ -35,6 +35,7 @@ from api.macro import router as macro_router
 from api.instruments import router as instruments_router
 from api.search import router as search_router
 from api.indices import router as indices_router
+from api.simulate import router as simulate_router
 
 # ===========================================================================
 # 1. CRÉER L'APPLICATION FASTAPI
@@ -78,6 +79,7 @@ app.include_router(macro_router)           # /api/macro/*         (Phase 1)
 app.include_router(instruments_router)     # /api/instruments/*   (Phase 2)
 app.include_router(search_router)          # /api/search/*        (Phase 2)
 app.include_router(indices_router)         # /api/indices/*       (Phase 2.5)
+app.include_router(simulate_router)        # /api/simulate        (Phase 3)
 
 # ===========================================================================
 # 3. ROUTES (Endpoints API)
@@ -264,7 +266,8 @@ async def startup_event():
     fred_key = os.getenv("FRED_API_KEY", "")
     print(f"[*] FRED_API_KEY: {'SET (' + fred_key[:6] + '...)' if fred_key else 'NOT SET'}")
     print("[*] SP500 source : GitHub CSV (datasets/s-and-p-500-companies)")
-    print("[*] NDX/DJI source: hardcoded (with Wikipedia fallback attempt)")
+    print("[*] NDX/DJI source: hardcoded")
+    print("[*] Simulation : GBM / Merton / Heston / GARCH (POST /api/simulate)")
 
 
 @app.on_event("shutdown")

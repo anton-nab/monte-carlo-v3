@@ -28,16 +28,14 @@ interface PhaseInfo {
 
 const PHASES: PhaseInfo[] = [
   { num: '0', name: 'Foundation', status: 'done', description: 'Cloud deployment, Vercel + Railway' },
-  { num: '1', name: 'Global Macro', status: 'done', href: '/dashboard', description: '17 indicators × 4 countries via FRED' },
-  { num: '1.5', name: 'Polish v1', status: 'next', description: 'Terminal palette, monospace, click-to-expand (current)' },
-  { num: '2', name: 'Instruments', status: 'planned', description: 'yfinance, search by ticker/name/ISIN, fundamentals' },
-  { num: '2.5', name: 'Index/ETF decomposition', status: 'planned', description: '25+ indices: S&P, CAC, DAX, Nikkei… + ETFs' },
-  { num: '2.7', name: 'Discovery feed', status: 'planned', description: 'Trending stocks/ETFs/bonds, "what\'s hot today"' },
-  { num: '3', name: 'Monte Carlo intégré', status: 'planned', description: 'GBM/Heston/Merton/GARCH on any instrument' },
-  { num: '3.5', name: 'Sentiment', status: 'planned', description: 'Fear & Greed, FOMO, analyst, insider, short interest' },
-  { num: '4', name: 'Bonds & yield curves', status: 'planned', description: 'Sovereign + corporate bonds globally' },
-  { num: '5', name: 'Theses & probabilities', status: 'planned', description: 'Editorial CMS, recession proba, backtests' },
-  { num: '6', name: 'Bloomberg polish', status: 'planned', description: 'Multi-pane layout, watchlists, alerts, dark terminal' },
+  { num: '1', name: 'Global Macro', status: 'done', href: '/dashboard', description: '17 indicators via FRED API' },
+  { num: '2', name: 'Instruments', status: 'done', href: '/instrument', description: 'yfinance, search, fundamentals, news, ETF holdings' },
+  { num: '2.5', name: 'Global Indices', status: 'done', href: '/indices', description: '16 indices : heatmap, table, donut sectoriel' },
+  { num: '2.6', name: 'Data & Perf', status: 'done', description: 'GitHub CSV SP500, SWR caching, two-phase loading' },
+  { num: '3', name: 'Monte Carlo', status: 'next', href: '/simulate', description: 'GBM / Merton / Heston / GARCH — calibration auto yfinance' },
+  { num: '4', name: 'Portfolio', status: 'planned', description: 'Markowitz, frontière efficiente, Sharpe, corrélations' },
+  { num: '5', name: 'Backtesting', status: 'planned', description: 'Rolling VaR, couverture empirique, diagnostic de calibration' },
+  { num: '6', name: 'User Features', status: 'planned', description: 'Watchlists, auth, PostgreSQL persistence' },
 ];
 
 export default function Home() {

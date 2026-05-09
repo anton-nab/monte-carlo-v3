@@ -22,6 +22,7 @@ const NAV_ITEMS: NavItem[] = [
   { href: '/indices', label: 'Indices', emoji: '🗂️', enabled: true },
   { href: '/discover', label: 'Discover', emoji: '🔥', enabled: false, badge: 'P2.7' },
   { href: '/instrument', label: 'Instruments', emoji: '📈', enabled: true },
+  { href: '/simulate', label: 'Simulate', emoji: '⚡', enabled: true },
   { href: '/sentiment', label: 'Sentiment', emoji: '🌡️', enabled: false, badge: 'P3.5' },
   { href: '/bonds', label: 'Bonds', emoji: '🏦', enabled: false, badge: 'P4' },
 ];
