@@ -4,7 +4,7 @@
  * 3 tabs:
  *   Chart      — price chart (12 timeframes) + key stats + news
  *   Financials — Income Statement / Balance Sheet / Cash Flow (annual/quarterly)
- *   Analysis   — Earnings EPS history + Analyst recommendations + price targets
+ *   Analysis   — Earnings EPS history + Analyst recommendations + price targets + FOMO
  */
 
 import { useRouter } from 'next/router';
@@ -37,7 +37,7 @@ interface EtfHolding { ticker: string; name: string; weight_pct: number; }
 interface HistoricalPoint { date: string; open: number; high: number; low: number; close: number; volume: number; }
 interface ChartResponse { ticker: string; period: string; data: HistoricalPoint[]; }
 
-// Financial statement row
+// Financial statement rows
 interface ISRow {
   date: string; revenue: number | null; gross_profit: number | null; ebitda: number | null;
   operating_income: number | null; net_income: number | null; rd_expense: number | null;
@@ -64,6 +64,11 @@ interface FinancialsData {
     recommendations: { strong_buy: number; buy: number; hold: number; sell: number; strong_sell: number; } | null;
     price_targets: { low: number | null; mean: number | null; high: number | null; count: number; } | null;
   };
+}
+
+interface FomoResult {
+  score: number;
+  breakdown: { momentum: number; volume: number; analyst: number; eps: number };
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -134,6 +139,83 @@ function SkeletonBlock({ className }: { className?: string }) {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// FOMO computation
+// ─────────────────────────────────────────────────────────────────────────────
+
+function computeFomoScore(
+  chartData: HistoricalPoint[],
+  currentVolume: number | undefined,
+  financials: FinancialsData | undefined,
+): FomoResult | null {
+  if (!chartData.length) return null;
+
+  let momentumPts = 0, volumePts = 0, analystPts = 0, epsPts = 0;
+
+  // 1. Price momentum 30d (0-30 pts)
+  const last = chartData[chartData.length - 1].close;
+  const cutoffTime = Date.now() - 30 * 86_400_000;
+  let refClose = chartData[0].close;
+  for (let i = chartData.length - 1; i >= 0; i--) {
+    if (new Date(chartData[i].date).getTime() <= cutoffTime) {
+      refClose = chartData[i].close;
+      break;
+    }
+  }
+  const changePct = ((last - refClose) / refClose) * 100;
+  // -20% → 0pts · 0% → 15pts · +20% → 30pts
+  momentumPts = Math.max(0, Math.min(30, ((changePct + 20) / 40) * 30));
+
+  // 2. Volume surge vs 20-day avg (0-20 pts)
+  if (chartData.length >= 20 && currentVolume != null && currentVolume > 0) {
+    const avgVol = chartData.slice(-20).reduce((s, p) => s + (p.volume ?? 0), 0) / 20;
+    if (avgVol > 0) {
+      const ratio = currentVolume / avgVol;
+      // 1× avg → 0pts · 2× avg → 20pts
+      volumePts = Math.max(0, Math.min(20, (ratio - 1) * 20));
+    }
+  }
+
+  // 3. Analyst bullish % (0-25 pts)
+  if (financials?.analyst?.recommendations) {
+    const r = financials.analyst.recommendations;
+    const total = r.strong_buy + r.buy + r.hold + r.sell + r.strong_sell;
+    if (total > 0) {
+      const weighted = (r.strong_buy * 1.0 + r.buy * 0.7) / total;
+      analystPts = Math.min(25, weighted * 35);
+    }
+  }
+
+  // 4. Avg EPS surprise last 4 quarters (0-25 pts)
+  if (financials?.earnings?.length) {
+    const last4 = financials.earnings.slice(-4);
+    const surprises = last4.filter((e) => e.surprise_pct != null).map((e) => e.surprise_pct as number);
+    if (surprises.length > 0) {
+      const avg = surprises.reduce((a, b) => a + b, 0) / surprises.length;
+      // -10% → 0pts · 0% → 12.5pts · +10% → 25pts
+      epsPts = Math.max(0, Math.min(25, ((avg + 10) / 20) * 25));
+    }
+  }
+
+  return {
+    score: Math.round(Math.min(100, momentumPts + volumePts + analystPts + epsPts)),
+    breakdown: {
+      momentum: Math.round(momentumPts),
+      volume:   Math.round(volumePts),
+      analyst:  Math.round(analystPts),
+      eps:      Math.round(epsPts),
+    },
+  };
+}
+
+function getFomoMeta(score: number) {
+  if (score >= 80) return { emoji: '🚀', label: 'FOMO',     ringColor: '#ef4444', textColor: 'text-red-400',    bgColor: 'bg-red-500/10'    };
+  if (score >= 60) return { emoji: '🔥', label: 'Chaud',    ringColor: '#f97316', textColor: 'text-orange-400', bgColor: 'bg-orange-500/10' };
+  if (score >= 40) return { emoji: '📈', label: 'Momentum', ringColor: '#eab308', textColor: 'text-yellow-400', bgColor: 'bg-yellow-500/10' };
+  if (score >= 20) return { emoji: '😐', label: 'Neutre',   ringColor: '#6b7280', textColor: 'text-gray-400',   bgColor: 'bg-gray-500/10'   };
+  return              { emoji: '❄️', label: 'Froid',    ringColor: '#3b82f6', textColor: 'text-blue-400',   bgColor: 'bg-blue-500/10'   };
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // Recharts shared tooltip style
 // ─────────────────────────────────────────────────────────────────────────────
 const TOOLTIP_STYLE = {
@@ -153,11 +235,11 @@ export default function InstrumentPage() {
   const { ticker } = router.query;
   const tickerStr = ticker ? String(ticker).toUpperCase() : null;
 
-  const [activeTab, setActiveTab]       = useState<PageTab>('chart');
+  const [activeTab, setActiveTab]         = useState<PageTab>('chart');
   const [selectedLabel, setSelectedLabel] = useState('1Y');
-  const [chartType, setChartType]       = useState<ChartType>('area');
-  const [fsPeriod, setFsPeriod]         = useState<'annual' | 'quarterly'>('annual');
-  const [fsTab, setFsTab]               = useState<'income' | 'balance' | 'cashflow'>('income');
+  const [chartType, setChartType]         = useState<ChartType>('area');
+  const [fsPeriod, setFsPeriod]           = useState<'annual' | 'quarterly'>('annual');
+  const [fsTab, setFsTab]                 = useState<'income' | 'balance' | 'cashflow'>('income');
 
   const tf = TIMEFRAMES.find((t) => t.label === selectedLabel) ?? TIMEFRAMES[9];
 
@@ -188,6 +270,11 @@ export default function InstrumentPage() {
       : null,
     fetcher, { revalidateOnFocus: false, dedupingInterval: 3_600_000 }
   );
+  // Dedicated 6-month daily fetch for FOMO score (always loaded, lightweight)
+  const { data: fomoChart } = useSWR<ChartResponse>(
+    tickerStr ? `${API_URL}/api/instruments/chart/${tickerStr}?period=6mo&interval=1d` : null,
+    fetcher, { revalidateOnFocus: false, dedupingInterval: 3_600_000 }
+  );
 
   // ── Chart data processing ──────────────────────────────────────────────────
   const rawHistorical = chartResponse?.data ?? [];
@@ -204,6 +291,12 @@ export default function InstrumentPage() {
     const fromDate = new Date(new Date(lastDate).getTime() - tf.visibleDays * 86_400_000).toISOString().split('T')[0];
     return { from: fromDate, to: lastDate };
   }, [historical, tf.isIntraday, tf.visibleDays]);
+
+  // ── FOMO score ─────────────────────────────────────────────────────────────
+  const fomoResult = useMemo(
+    () => computeFomoScore(fomoChart?.data ?? [], quote?.volume, financials),
+    [fomoChart, quote?.volume, financials]
+  );
 
   if (!tickerStr) return (
     <div className="min-h-screen bg-terminal-bg flex items-center justify-center text-terminal-textMuted">Loading…</div>
@@ -237,16 +330,17 @@ export default function InstrumentPage() {
             ) : <SkeletonBlock className="h-14 w-32" />}
           </div>
 
-          {/* Quick stats row */}
-          <div className="flex flex-wrap gap-x-6 gap-y-1 text-sm">
-            {quote && <Stat label="Volume" value={`${(quote.volume / 1_000_000).toFixed(1)}M`} />}
-            {fundamentals?.market_cap && <Stat label="Mkt Cap" value={fmtBig(fundamentals.market_cap)} />}
-            {fundamentals?.pe_ratio    && <Stat label="P/E"     value={`${fundamentals.pe_ratio.toFixed(1)}x`} />}
-            {fundamentals?.eps         && <Stat label="EPS"     value={`$${fundamentals.eps.toFixed(2)}`} />}
-            {fundamentals?.beta        && <Stat label="Beta"    value={fundamentals.beta.toFixed(2)} />}
-            {fundamentals?.dividend_yield && <Stat label="Div Yield" value={fmtPct(fundamentals.dividend_yield)} />}
-            {fundamentals?.revenue_ttm && <Stat label="Rev TTM" value={fmtBig(fundamentals.revenue_ttm)} />}
-            {fundamentals?.gross_margin && <Stat label="Gross Margin" value={fmtPct(fundamentals.gross_margin)} />}
+          {/* Quick stats row + FOMO badge */}
+          <div className="flex flex-wrap gap-x-6 gap-y-1 text-sm items-center">
+            {quote && <Stat label="Volume" value={`${(quote.volume / 1_000_000).toFixed(1)}M`} info="Number of shares traded today" />}
+            {fundamentals?.market_cap && <Stat label="Mkt Cap"      value={fmtBig(fundamentals.market_cap)} info="Total market value of all shares outstanding (price × shares)" />}
+            {fundamentals?.pe_ratio    && <Stat label="P/E"         value={`${fundamentals.pe_ratio.toFixed(1)}x`} info="Price-to-Earnings: stock price divided by earnings per share. Lower = cheaper relative to earnings." />}
+            {fundamentals?.eps         && <Stat label="EPS"         value={`$${fundamentals.eps.toFixed(2)}`} info="Earnings Per Share: net profit divided by shares outstanding" />}
+            {fundamentals?.beta        && <Stat label="Beta"        value={fundamentals.beta.toFixed(2)} info="Volatility vs market. β=1 moves with market; β>1 more volatile; β<1 more stable." />}
+            {fundamentals?.dividend_yield && <Stat label="Div Yield" value={fmtPct(fundamentals.dividend_yield)} info="Annual dividend payments as % of current stock price" />}
+            {fundamentals?.revenue_ttm && <Stat label="Rev TTM"     value={fmtBig(fundamentals.revenue_ttm)} info="Total revenue over the last 12 months (Trailing Twelve Months)" />}
+            {fundamentals?.gross_margin && <Stat label="Gross Margin" value={fmtPct(fundamentals.gross_margin)} info="(Revenue − Cost of Goods Sold) / Revenue — measures production efficiency" />}
+            {fomoResult && <FomoBadge score={fomoResult.score} />}
           </div>
         </div>
 
@@ -390,6 +484,7 @@ export default function InstrumentPage() {
             financials={financials}
             isLoading={isLoadingFS}
             quote={quote}
+            fomoResult={fomoResult}
           />
         )}
       </div>
@@ -401,19 +496,52 @@ export default function InstrumentPage() {
 // Small reusable components
 // ─────────────────────────────────────────────────────────────────────────────
 
-function Stat({ label, value }: { label: string; value: string }) {
+/** Hover ⓘ tooltip. dir defaults to 'right' (ideal for table/row labels). */
+function InfoTip({ text, dir = 'right' }: { text: string; dir?: 'right' | 'top' | 'bottom' }) {
+  const pos = {
+    right:  'left-full top-1/2 -translate-y-1/2 ml-1.5',
+    top:    'bottom-full left-1/2 -translate-x-1/2 mb-1.5',
+    bottom: 'top-full left-1/2 -translate-x-1/2 mt-1.5',
+  }[dir];
+  return (
+    <span className="relative group inline-flex items-center cursor-help align-middle ml-0.5">
+      <span className="text-terminal-textDim/60 text-[9px] select-none leading-none">ⓘ</span>
+      <span className={`pointer-events-none absolute ${pos} z-50
+        invisible group-hover:visible opacity-0 group-hover:opacity-100 transition-opacity duration-150
+        bg-[#0f1522] border border-terminal-border rounded px-2 py-1.5
+        text-xs text-terminal-text w-52 leading-snug shadow-xl`}>
+        {text}
+      </span>
+    </span>
+  );
+}
+
+function Stat({ label, value, info }: { label: string; value: string; info?: string }) {
   return (
     <div className="flex items-baseline gap-1.5">
-      <span className="text-terminal-textMuted text-xs">{label}</span>
+      <span className="text-terminal-textMuted text-xs">
+        {label}{info && <InfoTip text={info} dir="bottom" />}
+      </span>
       <span className="font-semibold num text-sm">{value}</span>
     </div>
   );
 }
+
 function TfBtn({ label, active, onClick }: { label: string; active: boolean; onClick: () => void }) {
   return (
     <button onClick={onClick} className={`px-2.5 py-1 text-xs rounded transition num ${
       active ? 'bg-terminal-cyan text-terminal-bg font-semibold' : 'border border-terminal-border text-terminal-textMuted hover:text-terminal-text hover:border-terminal-cyan'
     }`}>{label}</button>
+  );
+}
+
+/** Small inline FOMO badge for the header stats row */
+function FomoBadge({ score }: { score: number }) {
+  const { emoji, label, textColor, bgColor } = getFomoMeta(score);
+  return (
+    <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-bold border border-current/20 ${textColor} ${bgColor}`}>
+      {emoji} {score} · {label}
+    </span>
   );
 }
 
@@ -440,7 +568,6 @@ function FinancialsTab({
     <div className="space-y-6">
       {/* Controls */}
       <div className="flex items-center gap-4 flex-wrap">
-        {/* Period toggle */}
         <div className="flex border border-terminal-border rounded overflow-hidden">
           {(['annual', 'quarterly'] as const).map((p) => (
             <button key={p} onClick={() => setFsPeriod(p)}
@@ -451,7 +578,6 @@ function FinancialsTab({
             </button>
           ))}
         </div>
-        {/* Statement tabs */}
         <div className="flex gap-1">
           {([['income', 'Income Statement'], ['balance', 'Balance Sheet'], ['cashflow', 'Cash Flow']] as const).map(([k, label]) => (
             <button key={k} onClick={() => setFsTab(k)}
@@ -482,16 +608,16 @@ function IncomeStatementPanel({ data }: { data: ISRow[] }) {
     'Net Income': r.net_income,
   }));
 
-  const metrics: { key: keyof ISRow; label: string; fmt: (v: number | null) => string }[] = [
-    { key: 'revenue',          label: 'Revenue',           fmt: (v) => fmtBig(v) },
-    { key: 'gross_profit',     label: 'Gross Profit',      fmt: (v) => fmtBig(v) },
-    { key: 'ebitda',           label: 'EBITDA',            fmt: (v) => fmtBig(v) },
-    { key: 'operating_income', label: 'Operating Income',  fmt: (v) => fmtBig(v) },
-    { key: 'net_income',       label: 'Net Income',        fmt: (v) => fmtBig(v) },
-    { key: 'rd_expense',       label: 'R&D Expense',       fmt: (v) => fmtBig(v) },
-    { key: 'gross_margin',     label: 'Gross Margin',      fmt: (v) => fmtPct(v) },
-    { key: 'operating_margin', label: 'Operating Margin',  fmt: (v) => fmtPct(v) },
-    { key: 'net_margin',       label: 'Net Margin',        fmt: (v) => fmtPct(v) },
+  const metrics: { key: keyof ISRow; label: string; fmt: (v: number | null) => string; info: string }[] = [
+    { key: 'revenue',          label: 'Revenue',           fmt: (v) => fmtBig(v), info: 'Total sales before any deductions or expenses' },
+    { key: 'gross_profit',     label: 'Gross Profit',      fmt: (v) => fmtBig(v), info: 'Revenue minus Cost of Goods Sold (COGS)' },
+    { key: 'ebitda',           label: 'EBITDA',            fmt: (v) => fmtBig(v), info: 'Earnings Before Interest, Taxes, Depreciation & Amortization — operating cash earnings proxy' },
+    { key: 'operating_income', label: 'Operating Income',  fmt: (v) => fmtBig(v), info: 'Profit from core business after COGS and operating expenses' },
+    { key: 'net_income',       label: 'Net Income',        fmt: (v) => fmtBig(v), info: 'Bottom-line profit after all expenses, interest and taxes' },
+    { key: 'rd_expense',       label: 'R&D Expense',       fmt: (v) => fmtBig(v), info: 'Research & Development spending — key for tech/pharma growth assessment' },
+    { key: 'gross_margin',     label: 'Gross Margin',      fmt: (v) => fmtPct(v), info: 'Gross Profit / Revenue — measures production cost efficiency' },
+    { key: 'operating_margin', label: 'Operating Margin',  fmt: (v) => fmtPct(v), info: 'Operating Income / Revenue — operational profitability before interest & taxes' },
+    { key: 'net_margin',       label: 'Net Margin',        fmt: (v) => fmtPct(v), info: 'Net Income / Revenue — final % of revenue that becomes profit' },
   ];
 
   return (
@@ -509,19 +635,19 @@ function BalanceSheetPanel({ data }: { data: BSRow[] }) {
 
   const chartData = data.map((r) => ({
     date: shortDate(r.date),
-    'Total Assets':    r.total_assets,
-    'Total Debt':      r.total_debt,
-    Cash:              r.cash,
-    Equity:            r.equity,
+    'Total Assets': r.total_assets,
+    'Total Debt':   r.total_debt,
+    Cash:           r.cash,
+    Equity:         r.equity,
   }));
 
-  const metrics: { key: keyof BSRow; label: string; fmt: (v: number | null) => string }[] = [
-    { key: 'total_assets',      label: 'Total Assets',      fmt: (v) => fmtBig(v) },
-    { key: 'total_liabilities', label: 'Total Liabilities', fmt: (v) => fmtBig(v) },
-    { key: 'equity',            label: 'Equity',            fmt: (v) => fmtBig(v) },
-    { key: 'cash',              label: 'Cash & Equiv.',     fmt: (v) => fmtBig(v) },
-    { key: 'total_debt',        label: 'Total Debt',        fmt: (v) => fmtBig(v) },
-    { key: 'net_debt',          label: 'Net Debt',          fmt: (v) => fmtBig(v) },
+  const metrics: { key: keyof BSRow; label: string; fmt: (v: number | null) => string; info: string }[] = [
+    { key: 'total_assets',      label: 'Total Assets',      fmt: (v) => fmtBig(v), info: 'Everything the company owns — current assets + long-term assets' },
+    { key: 'total_liabilities', label: 'Total Liabilities', fmt: (v) => fmtBig(v), info: 'All debts, obligations and financial commitments' },
+    { key: 'equity',            label: 'Equity',            fmt: (v) => fmtBig(v), info: "Shareholders' equity = Total Assets − Total Liabilities. Net worth." },
+    { key: 'cash',              label: 'Cash & Equiv.',     fmt: (v) => fmtBig(v), info: 'Cash on hand + short-term highly liquid investments' },
+    { key: 'total_debt',        label: 'Total Debt',        fmt: (v) => fmtBig(v), info: 'Short-term + long-term financial borrowings and bonds' },
+    { key: 'net_debt',          label: 'Net Debt',          fmt: (v) => fmtBig(v), info: 'Total Debt − Cash. True debt burden; negative = more cash than debt.' },
   ];
 
   return (
@@ -544,12 +670,12 @@ function CashFlowPanel({ data }: { data: CFRow[] }) {
     CapEx:          r.capex ? Math.abs(r.capex) : null,
   }));
 
-  const metrics: { key: keyof CFRow; label: string; fmt: (v: number | null) => string }[] = [
-    { key: 'operating_cf',  label: 'Operating CF',  fmt: (v) => fmtBig(v) },
-    { key: 'investing_cf',  label: 'Investing CF',  fmt: (v) => fmtBig(v) },
-    { key: 'financing_cf',  label: 'Financing CF',  fmt: (v) => fmtBig(v) },
-    { key: 'capex',         label: 'CapEx',         fmt: (v) => fmtBig(v) },
-    { key: 'free_cf',       label: 'Free CF',       fmt: (v) => fmtBig(v) },
+  const metrics: { key: keyof CFRow; label: string; fmt: (v: number | null) => string; info: string }[] = [
+    { key: 'operating_cf', label: 'Operating CF', fmt: (v) => fmtBig(v), info: 'Cash generated from core business operations. Should be positive and growing.' },
+    { key: 'investing_cf', label: 'Investing CF', fmt: (v) => fmtBig(v), info: 'Cash used for asset purchases, acquisitions and investments (usually negative)' },
+    { key: 'financing_cf', label: 'Financing CF', fmt: (v) => fmtBig(v), info: 'Cash flow from debt issuance/repayment, dividends, stock buybacks' },
+    { key: 'capex',        label: 'CapEx',        fmt: (v) => fmtBig(v), info: 'Capital Expenditures — spending on PP&E and infrastructure maintenance/growth' },
+    { key: 'free_cf',      label: 'Free CF',      fmt: (v) => fmtBig(v), info: 'Operating CF − CapEx. Cash freely available to investors, debt repayment or buybacks.' },
   ];
 
   return (
@@ -587,7 +713,7 @@ function FinTable<T extends { date: string }>({
   data, metrics,
 }: {
   data: T[];
-  metrics: { key: keyof T; label: string; fmt: (v: number | null) => string }[];
+  metrics: { key: keyof T; label: string; fmt: (v: number | null) => string; info?: string }[];
 }) {
   return (
     <div className="bg-terminal-surface border border-terminal-border rounded overflow-hidden">
@@ -604,9 +730,14 @@ function FinTable<T extends { date: string }>({
             </tr>
           </thead>
           <tbody>
-            {metrics.map(({ key, label, fmt }, mi) => (
+            {metrics.map(({ key, label, fmt, info }, mi) => (
               <tr key={String(key)} className={`border-b border-terminal-border/30 ${mi % 2 === 0 ? '' : 'bg-white/[0.01]'}`}>
-                <td className="px-4 py-2.5 text-terminal-textMuted text-xs">{label}</td>
+                <td className="px-4 py-2.5 text-terminal-textMuted text-xs">
+                  <span className="inline-flex items-center gap-0">
+                    {label}
+                    {info && <InfoTip text={info} />}
+                  </span>
+                </td>
                 {data.map((r) => {
                   const v = r[key] as number | null;
                   const isNeg = v != null && v < 0;
@@ -626,24 +757,24 @@ function FinTable<T extends { date: string }>({
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// AnalysisTab — Earnings + Analyst
+// AnalysisTab — Earnings + Analyst + FOMO
 // ─────────────────────────────────────────────────────────────────────────────
 
 function AnalysisTab({
-  financials, isLoading, quote,
+  financials, isLoading, quote, fomoResult,
 }: {
   financials: FinancialsData | undefined;
   isLoading: boolean;
   quote: QuoteData | undefined;
+  fomoResult: FomoResult | null;
 }) {
   if (isLoading) return (
-    <div className="space-y-4">{Array.from({ length: 2 }).map((_, i) => <SkeletonBlock key={i} className="h-64 w-full" />)}</div>
+    <div className="space-y-4">{Array.from({ length: 3 }).map((_, i) => <SkeletonBlock key={i} className="h-64 w-full" />)}</div>
   );
   if (!financials) return <div className="text-terminal-textMuted text-sm">No analysis data available.</div>;
 
   const { earnings, analyst } = financials;
 
-  // ── Earnings chart data ───────────────────────────────────────────────────
   const earningsData = earnings.map((e) => ({
     label:        e.period || shortDate(e.date),
     eps_actual:   e.eps_actual,
@@ -652,15 +783,14 @@ function AnalysisTab({
     beat:         e.eps_actual != null && e.eps_estimate != null && e.eps_actual >= e.eps_estimate,
   }));
 
-  // ── Analyst pie data ──────────────────────────────────────────────────────
   const rec = analyst.recommendations;
   const pieCols = ['#26a69a', '#4caf50', '#7a8294', '#ef6c00', '#ef5350'];
   const pieData = rec ? [
-    { name: 'Strong Buy', value: rec.strong_buy,  color: pieCols[0] },
-    { name: 'Buy',        value: rec.buy,         color: pieCols[1] },
-    { name: 'Hold',       value: rec.hold,        color: pieCols[2] },
-    { name: 'Sell',       value: rec.sell,        color: pieCols[3] },
-    { name: 'Strong Sell',value: rec.strong_sell, color: pieCols[4] },
+    { name: 'Strong Buy',  value: rec.strong_buy,  color: pieCols[0] },
+    { name: 'Buy',         value: rec.buy,         color: pieCols[1] },
+    { name: 'Hold',        value: rec.hold,        color: pieCols[2] },
+    { name: 'Sell',        value: rec.sell,        color: pieCols[3] },
+    { name: 'Strong Sell', value: rec.strong_sell, color: pieCols[4] },
   ].filter((d) => d.value > 0) : [];
 
   const pt = analyst.price_targets;
@@ -669,11 +799,15 @@ function AnalysisTab({
   return (
     <div className="space-y-6">
 
+      {/* ── FOMO Indicator ── */}
+      <FomoCard fomoResult={fomoResult} />
+
       {/* ── Earnings History ── */}
       {earningsData.length > 0 ? (
         <div className="bg-terminal-surface border border-terminal-border rounded p-4">
           <h3 className="text-sm font-semibold text-terminal-textMuted uppercase tracking-wider mb-4">
             EPS — Actual vs Estimate
+            <InfoTip text="Quarterly EPS: green bars = beat estimate, red = missed. Consistent beats signal strong execution." dir="bottom" />
           </h3>
           <ResponsiveContainer width="100%" height={220}>
             <BarChart data={earningsData} barCategoryGap="30%" barGap={4}>
@@ -691,15 +825,20 @@ function AnalysisTab({
               </Bar>
             </BarChart>
           </ResponsiveContainer>
-          {/* Surprise table */}
           <div className="mt-4 overflow-x-auto">
             <table className="w-full text-xs">
               <thead>
                 <tr className="border-b border-terminal-border text-terminal-textMuted">
                   <th className="py-2 text-left">Quarter</th>
-                  <th className="py-2 text-right num">Estimate</th>
-                  <th className="py-2 text-right num">Actual</th>
-                  <th className="py-2 text-right num">Surprise</th>
+                  <th className="py-2 text-right num">
+                    Estimate <InfoTip text="Consensus EPS estimate from analyst forecasts before the report" />
+                  </th>
+                  <th className="py-2 text-right num">
+                    Actual <InfoTip text="Reported EPS from the earnings release" />
+                  </th>
+                  <th className="py-2 text-right num">
+                    Surprise <InfoTip text="% difference between Actual and Estimate. Positive = beat, negative = miss." />
+                  </th>
                 </tr>
               </thead>
               <tbody>
@@ -731,6 +870,7 @@ function AnalysisTab({
           <div className="bg-terminal-surface border border-terminal-border rounded p-4">
             <h3 className="text-sm font-semibold text-terminal-textMuted uppercase tracking-wider mb-4">
               Analyst Consensus {pt?.count ? `(${pt.count} analysts)` : ''}
+              <InfoTip text="Current distribution of analyst recommendations — Strong Buy through Strong Sell. Source: Yahoo Finance." dir="bottom" />
             </h3>
             <div className="flex items-center gap-4">
               <PieChart width={160} height={160}>
@@ -760,6 +900,7 @@ function AnalysisTab({
           <div className="bg-terminal-surface border border-terminal-border rounded p-4">
             <h3 className="text-sm font-semibold text-terminal-textMuted uppercase tracking-wider mb-4">
               Price Targets
+              <InfoTip text="12-month price targets from analysts. The white dot shows current price vs the analyst range." dir="bottom" />
             </h3>
             <PriceTargetBar
               low={pt.low}
@@ -776,6 +917,97 @@ function AnalysisTab({
   );
 }
 
+// ── FOMO Indicator Card ───────────────────────────────────────────────────────
+function FomoCard({ fomoResult }: { fomoResult: FomoResult | null }) {
+  if (!fomoResult) {
+    return (
+      <div className="bg-terminal-surface border border-terminal-border rounded p-4">
+        <div className="flex items-center gap-2 text-terminal-textMuted text-sm">
+          <span className="animate-pulse">●</span>
+          Computing FOMO indicator…
+        </div>
+      </div>
+    );
+  }
+
+  const { score, breakdown } = fomoResult;
+  const { emoji, label, ringColor, textColor, bgColor } = getFomoMeta(score);
+
+  const items: { key: keyof FomoResult['breakdown']; label: string; max: number; info: string }[] = [
+    { key: 'momentum', label: 'Price Momentum 30d', max: 30, info: 'Price change over last 30 days. +20% → max 30pts' },
+    { key: 'volume',   label: 'Volume Surge',       max: 20, info: 'Today\'s volume vs 20-day average. 2× avg → max 20pts' },
+    { key: 'analyst',  label: 'Analyst Consensus',  max: 25, info: 'Weighted bullish analyst rating (Strong Buy weighted more). Max 25pts' },
+    { key: 'eps',      label: 'EPS Beat History',   max: 25, info: 'Average EPS surprise over last 4 quarters. +10% avg → max 25pts' },
+  ];
+
+  return (
+    <div className={`bg-terminal-surface border border-terminal-border rounded p-4 ${bgColor}`}>
+      {/* Header row */}
+      <div className="flex items-start justify-between mb-4">
+        <h3 className="text-sm font-semibold text-terminal-textMuted uppercase tracking-wider">
+          FOMO Indicator
+          <InfoTip
+            text="Composite momentum score 0–100. Components: price momentum (30pts), volume surge (20pts), analyst consensus (25pts), EPS beat history (25pts)."
+            dir="bottom"
+          />
+        </h3>
+        <div className={`flex items-center gap-3 ${textColor}`}>
+          <span className="text-3xl leading-none">{emoji}</span>
+          <div className="text-right">
+            <div className="text-3xl font-bold num leading-none">
+              {score}
+              <span className="text-sm font-normal text-terminal-textMuted ml-0.5">/100</span>
+            </div>
+            <div className="text-sm font-bold mt-0.5">{label}</div>
+          </div>
+        </div>
+      </div>
+
+      {/* Score bar */}
+      <div className="h-2.5 bg-terminal-bg rounded-full mb-5 overflow-hidden">
+        <div
+          className="h-full rounded-full transition-all"
+          style={{ width: `${score}%`, background: ringColor }}
+        />
+      </div>
+
+      {/* Breakdown rows */}
+      <div className="space-y-2.5">
+        {items.map(({ key, label: itemLabel, max, info }) => {
+          const pts = breakdown[key];
+          const pct = (pts / max) * 100;
+          return (
+            <div key={key} className="flex items-center gap-3">
+              <span className="text-xs text-terminal-textMuted w-40 shrink-0 inline-flex items-center">
+                {itemLabel}
+                <InfoTip text={info} />
+              </span>
+              <div className="flex-1 h-1.5 bg-terminal-bg rounded-full overflow-hidden">
+                <div
+                  className="h-full rounded-full"
+                  style={{ width: `${pct}%`, background: ringColor + 'bb' }}
+                />
+              </div>
+              <span className="text-xs num font-semibold text-terminal-text w-12 text-right shrink-0">
+                {pts}<span className="text-terminal-textDim">/{max}</span>
+              </span>
+            </div>
+          );
+        })}
+      </div>
+
+      {/* Scale legend */}
+      <div className="flex items-center justify-between mt-4 pt-3 border-t border-terminal-border/40 text-[10px] text-terminal-textDim">
+        <span>❄️ Froid (0–20)</span>
+        <span>😐 Neutre (20–40)</span>
+        <span>📈 Momentum (40–60)</span>
+        <span>🔥 Chaud (60–80)</span>
+        <span>🚀 FOMO (80–100)</span>
+      </div>
+    </div>
+  );
+}
+
 // ── Price target visual bar ───────────────────────────────────────────────────
 function PriceTargetBar({ low, mean, high, current }: {
   low: number | null; mean: number | null; high: number | null; current: number | null;
@@ -787,45 +1019,86 @@ function PriceTargetBar({ low, mean, high, current }: {
   const range = max - min;
   const pct = (v: number) => ((v - min) / range) * 100;
 
-  const labels: { val: number; label: string; color: string }[] = [
-    ...(low   != null ? [{ val: low,   label: `Low $${low.toFixed(0)}`,    color: '#7a8294' }] : []),
-    ...(mean  != null ? [{ val: mean,  label: `Mean $${mean.toFixed(0)}`,  color: '#00d9ff' }] : []),
-    ...(high  != null ? [{ val: high,  label: `High $${high.toFixed(0)}`,  color: '#26a69a' }] : []),
-  ];
-
   return (
-    <div className="space-y-6 pt-2">
-      {/* Bar */}
-      <div className="relative h-4 bg-terminal-bg rounded-full overflow-hidden">
-        {low != null && high != null && (
-          <div className="absolute h-full bg-terminal-cyan/20 rounded-full"
-            style={{ left: `${pct(low)}%`, width: `${pct(high) - pct(low)}%` }} />
+    <div className="space-y-4 pt-2">
+      {/* Bar area with floating "Current price" label above dot */}
+      <div className="relative pt-9">
+        {/* Floating label for current price — anchored above the dot */}
+        {current != null && (
+          <div
+            className="absolute top-0 flex flex-col items-center pointer-events-none"
+            style={{ left: `${pct(current)}%`, transform: 'translateX(-50%)' }}
+          >
+            <span className="inline-flex items-center gap-1 text-[11px] font-bold text-white bg-white/10 border border-white/25 rounded px-1.5 py-0.5 whitespace-nowrap">
+              ● Current price
+            </span>
+            {/* Arrow pointing down to bar */}
+            <svg width="8" height="5" viewBox="0 0 8 5" className="mt-0.5 shrink-0">
+              <path d="M4 5L0 0h8z" fill="rgba(255,255,255,0.25)" />
+            </svg>
+          </div>
+        )}
+
+        {/* Bar track */}
+        <div className="relative h-3.5 bg-terminal-bg rounded-full">
+          {/* Range fill between low and high */}
+          {low != null && high != null && (
+            <div
+              className="absolute h-full bg-terminal-cyan/20 rounded-full"
+              style={{ left: `${pct(low)}%`, width: `${pct(high) - pct(low)}%` }}
+            />
+          )}
+          {/* Mean target line */}
+          {mean != null && (
+            <div
+              className="absolute h-full w-0.5 bg-terminal-cyan"
+              style={{ left: `${pct(mean)}%` }}
+            />
+          )}
+          {/* Current price dot — overlaid on bar track */}
+          {current != null && (
+            <div
+              className="absolute top-1/2 w-4 h-4 rounded-full bg-white border-2 border-terminal-bg shadow-lg -translate-y-1/2 -translate-x-1/2"
+              style={{ left: `${pct(current)}%` }}
+            />
+          )}
+        </div>
+      </div>
+
+      {/* Labels below bar */}
+      <div className="flex flex-col gap-2">
+        {low != null && (
+          <div className="flex items-center justify-between text-sm">
+            <span className="text-terminal-textMuted">
+              Low <InfoTip text="Lowest analyst 12-month price target" />
+            </span>
+            <span className="num font-semibold text-terminal-textMuted">${low.toFixed(0)}</span>
+          </div>
         )}
         {mean != null && (
-          <div className="absolute h-full w-0.5 bg-terminal-cyan"
-            style={{ left: `${pct(mean)}%` }} />
-        )}
-        {current != null && (
-          <div className="absolute top-0 w-3 h-3 rounded-full bg-white border-2 border-terminal-bg -translate-y-0 mt-0.5 -translate-x-1/2"
-            style={{ left: `${pct(current)}%` }} />
-        )}
-      </div>
-      {/* Labels */}
-      <div className="flex flex-col gap-2">
-        {labels.map((l) => (
-          <div key={l.label} className="flex items-center justify-between text-sm">
-            <span style={{ color: l.color }}>{l.label.split(' ')[0]}</span>
-            <span className="num font-semibold" style={{ color: l.color }}>{l.label.split(' ')[1]}</span>
+          <div className="flex items-center justify-between text-sm">
+            <span className="text-terminal-cyan">
+              Mean <InfoTip text="Average of all analyst 12-month price targets — the consensus target" />
+            </span>
+            <span className="num font-semibold text-terminal-cyan">${mean.toFixed(0)}</span>
           </div>
-        ))}
+        )}
+        {high != null && (
+          <div className="flex items-center justify-between text-sm">
+            <span className="text-green-400">
+              High <InfoTip text="Most optimistic analyst 12-month price target" />
+            </span>
+            <span className="num font-semibold text-green-400">${high.toFixed(0)}</span>
+          </div>
+        )}
         {current != null && (
           <div className="flex items-center justify-between text-sm border-t border-terminal-border pt-2 mt-1">
-            <span className="text-white">Current</span>
+            <span className="text-white font-semibold">● Current price</span>
             <span className="num font-bold text-white">${current.toFixed(2)}</span>
           </div>
         )}
         {mean != null && current != null && (
-          <div className="text-xs text-terminal-textMuted mt-1">
+          <div className="text-xs text-terminal-textMuted">
             Upside to mean:{' '}
             <span className={`font-semibold num ${mean > current ? 'text-green-400' : 'text-red-400'}`}>
               {mean > current ? '+' : ''}{(((mean - current) / current) * 100).toFixed(1)}%
