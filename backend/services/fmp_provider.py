@@ -109,6 +109,52 @@ class FMPProvider:
         return result
 
     # ─────────────────────────────────────────────────────────────────
+    # Public: ETF breakdown (sectors + countries)
+    # ─────────────────────────────────────────────────────────────────
+
+    async def get_etf_sectors(self, ticker: str) -> List[Dict[str, Any]]:
+        """Return [{sector, weight_pct}] sorted desc for an ETF."""
+        cache_key = f"etf_sectors:{ticker.upper()}"
+        cached = self._get_cache(cache_key)
+        if cached is not None:
+            return cached
+        raw = await self._get(f"/etf-sector-weightings/{ticker.upper()}")
+        result = []
+        for item in raw:
+            sector = item.get("sector", "")
+            pct_str = str(item.get("weightPercentage", "0")).replace("%", "").strip()
+            try:
+                pct = round(float(pct_str), 2)
+            except (ValueError, TypeError):
+                pct = 0.0
+            if sector and pct > 0:
+                result.append({"sector": sector, "weight_pct": pct})
+        result.sort(key=lambda x: x["weight_pct"], reverse=True)
+        self._set_cache(cache_key, result)
+        return result
+
+    async def get_etf_countries(self, ticker: str) -> List[Dict[str, Any]]:
+        """Return [{country, weight_pct}] sorted desc for an ETF."""
+        cache_key = f"etf_countries:{ticker.upper()}"
+        cached = self._get_cache(cache_key)
+        if cached is not None:
+            return cached
+        raw = await self._get(f"/etf-country-weightings/{ticker.upper()}")
+        result = []
+        for item in raw:
+            country = item.get("country", "")
+            pct_str = str(item.get("weightPercentage", "0")).replace("%", "").strip()
+            try:
+                pct = round(float(pct_str), 2)
+            except (ValueError, TypeError):
+                pct = 0.0
+            if country and pct > 0:
+                result.append({"country": country, "weight_pct": pct})
+        result.sort(key=lambda x: x["weight_pct"], reverse=True)
+        self._set_cache(cache_key, result)
+        return result
+
+    # ─────────────────────────────────────────────────────────────────
     # Internal: HTTP + cache
     # ─────────────────────────────────────────────────────────────────
 

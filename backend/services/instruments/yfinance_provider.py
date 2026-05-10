@@ -190,6 +190,51 @@ class YFinanceProvider(BaseInstrumentProvider):
             print(f"ETF holdings fetch failed for {ticker}: {exc}")
             return []
 
+    async def get_etf_profile(self, ticker: str) -> Dict[str, Any]:
+        """Asset classes + sector weightings from yfinance funds_data (fallback source)."""
+        loop = asyncio.get_event_loop()
+        return await loop.run_in_executor(None, self._fetch_etf_profile, ticker)
+
+    def _fetch_etf_profile(self, ticker: str) -> Dict[str, Any]:
+        result: Dict[str, Any] = {"asset_classes": {}, "sector_weightings": []}
+        try:
+            t = yf.Ticker(ticker)
+            fd = t.funds_data
+            if fd is None:
+                return result
+            # Asset classes (stock / bond / cash / other)
+            try:
+                ac = getattr(fd, "asset_classes", None)
+                if ac and isinstance(ac, dict):
+                    result["asset_classes"] = {
+                        k: round(float(v) * 100, 2) if v is not None else 0.0
+                        for k, v in ac.items()
+                    }
+            except Exception as e:
+                print(f"[YF] asset_classes failed {ticker}: {e}")
+            # Sector weightings (fallback if FMP empty)
+            try:
+                sw = getattr(fd, "sector_weightings", None)
+                if sw and isinstance(sw, dict):
+                    for sector, weight in sw.items():
+                        try:
+                            w = float(weight)
+                            if w > 0:
+                                result["sector_weightings"].append({
+                                    "sector": sector,
+                                    "weight_pct": round(w * 100, 2),
+                                })
+                        except (TypeError, ValueError):
+                            pass
+                    result["sector_weightings"].sort(
+                        key=lambda x: x["weight_pct"], reverse=True
+                    )
+            except Exception as e:
+                print(f"[YF] sector_weightings failed {ticker}: {e}")
+        except Exception as e:
+            print(f"[YF] etf_profile failed {ticker}: {e}")
+        return result
+
     async def get_historical(
         self,
         ticker: str,

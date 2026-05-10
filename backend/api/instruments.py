@@ -1,3 +1,4 @@
+import asyncio
 from fastapi import APIRouter, HTTPException, Query
 from services.instruments import YFinanceProvider, InstrumentsService
 from services.fmp_provider import get_fmp_provider
@@ -135,6 +136,35 @@ async def get_financials(
     try:
         result = await service.get_financials(ticker.upper(), period)
         return result
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@router.get("/etf-profile/{ticker}")
+async def get_etf_profile(ticker: str):
+    """Get ETF sector + country breakdown + asset class weights.
+
+    Combines FMP sector/country data with yfinance asset-class breakdown.
+    Falls back to yfinance sectors when FMP returns nothing.
+    Example: GET /api/instruments/etf-profile/SPY
+    """
+    t = ticker.upper()
+    try:
+        results = await asyncio.gather(
+            _fmp.get_etf_sectors(t),
+            _fmp.get_etf_countries(t),
+            provider.get_etf_profile(t),
+            return_exceptions=True,
+        )
+        sectors   = results[0] if not isinstance(results[0], Exception) else []
+        countries = results[1] if not isinstance(results[1], Exception) else []
+        yf_data   = results[2] if not isinstance(results[2], Exception) else {}
+        return {
+            "ticker":             t,
+            "sector_weightings":  sectors or yf_data.get("sector_weightings", []),
+            "country_weightings": countries,
+            "asset_classes":      yf_data.get("asset_classes", {}),
+        }
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
 
