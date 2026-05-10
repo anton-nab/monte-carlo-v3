@@ -171,13 +171,19 @@ async def get_etf_profile(ticker: str):
 
 @router.get("/etf-holdings/{ticker}")
 async def get_etf_holdings(ticker: str):
-    """Get ETF top holdings via yfinance.
+    """Get ETF top holdings.
 
+    Tries FMP /etf-holder first (free tier), then falls back to yfinance funds_data.
     Returns top holdings with weight % for ETFs (SPY, QQQ, VTI, etc.)
     Example: GET /api/instruments/etf-holdings/SPY
     """
+    t = ticker.upper()
     try:
-        result = await provider.get_etf_holdings(ticker.upper())
-        return result
+        # FMP is more reliable for holdings data
+        fmp_result = await _fmp.get_etf_holdings(t)
+        if fmp_result:
+            return fmp_result
+        # Fallback: yfinance funds_data
+        return await provider.get_etf_holdings(t)
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))

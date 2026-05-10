@@ -159,19 +159,34 @@ class YFinanceProvider(BaseInstrumentProvider):
                 if fd is not None:
                     holdings_df = getattr(fd, "top_holdings", None)
                     if holdings_df is not None and not holdings_df.empty:
+                        # Symbol is the DataFrame index in newer yfinance versions
+                        holdings_df = holdings_df.reset_index()
                         for _, row in holdings_df.iterrows():
-                            sym = str(row.get("Symbol") or row.get("symbol") or "").strip()
-                            name = str(row.get("holdingName") or row.get("name") or sym).strip()
-                            pct = row.get("holdingPercent") or row.get("percent") or 0
-                            result.append({
-                                "ticker": sym,
-                                "name": name,
-                                "weight_pct": round(float(pct) * 100, 3) if float(pct) < 1 else round(float(pct), 3),
-                            })
+                            # Column names vary across yfinance versions
+                            sym = str(
+                                row.get("Symbol") or row.get("symbol") or
+                                row.get("Ticker") or row.get("ticker") or ""
+                            ).strip()
+                            name = str(
+                                row.get("holdingName") or row.get("name") or
+                                row.get("Name") or sym
+                            ).strip()
+                            pct_raw = (
+                                row.get("holdingPercent") or row.get("percent") or
+                                row.get("Percent") or row.get("Weight") or 0
+                            )
+                            try:
+                                pct = float(pct_raw)
+                                # yfinance returns values 0–1 (fraction); multiply by 100 for %
+                                weight_pct = round(pct * 100, 3) if pct < 1 else round(pct, 3)
+                            except (TypeError, ValueError):
+                                weight_pct = 0.0
+                            if sym:
+                                result.append({"ticker": sym, "name": name, "weight_pct": weight_pct})
                         if result:
                             return result
-            except Exception:
-                pass
+            except Exception as exc:
+                print(f"[YF] funds_data.top_holdings failed for {ticker}: {exc}")
 
             # Fallback: info dict (some ETFs expose holdings there)
             info = t.info
@@ -180,14 +195,16 @@ class YFinanceProvider(BaseInstrumentProvider):
                 sym = h.get("symbol", "")
                 name = h.get("holdingName", sym)
                 pct = h.get("holdingPercent", 0)
-                result.append({
-                    "ticker": sym,
-                    "name": name,
-                    "weight_pct": round(float(pct) * 100, 3) if float(pct) < 1 else round(float(pct), 3),
-                })
+                try:
+                    pct_f = float(pct)
+                    weight_pct = round(pct_f * 100, 3) if pct_f < 1 else round(pct_f, 3)
+                except (TypeError, ValueError):
+                    weight_pct = 0.0
+                if sym:
+                    result.append({"ticker": sym, "name": name, "weight_pct": weight_pct})
             return result
         except Exception as exc:
-            print(f"ETF holdings fetch failed for {ticker}: {exc}")
+            print(f"[YF] ETF holdings fetch failed for {ticker}: {exc}")
             return []
 
     async def get_etf_profile(self, ticker: str) -> Dict[str, Any]:

@@ -277,7 +277,7 @@ export default function InstrumentPage() {
     tickerStr ? `${API_URL}/api/instruments/news/${tickerStr}` : null,
     fetcher, { revalidateOnFocus: false, dedupingInterval: 300_000 });
 
-  const { data: etfHoldings = [] } = useSWR<EtfHolding[]>(
+  const { data: etfHoldings = [], isLoading: isLoadingHoldings } = useSWR<EtfHolding[]>(
     tickerStr ? `${API_URL}/api/instruments/etf-holdings/${tickerStr}` : null,
     fetcher, { revalidateOnFocus: false, dedupingInterval: 86_400_000 });
 
@@ -488,6 +488,7 @@ export default function InstrumentPage() {
             profile={etfProfile}
             monthlyData={monthlyChart?.data ?? []}
             isLoading={isLoadingEtf}
+            isLoadingHoldings={isLoadingHoldings}
           />
         )}
       </div>
@@ -921,11 +922,12 @@ function PriceTargetBar({ low, mean, high, current }: { low: number|null; mean: 
 // ETF Tab
 // ─────────────────────────────────────────────────────────────────────────────
 
-function EtfTab({ holdings, profile, monthlyData, isLoading }: {
+function EtfTab({ holdings, profile, monthlyData, isLoading, isLoadingHoldings }: {
   holdings: EtfHolding[];
   profile: EtfProfile | undefined;
   monthlyData: HistoricalPoint[];
   isLoading: boolean;
+  isLoadingHoldings: boolean;
 }) {
   // Compute all monthly/annual return stats once, pass to children
   const returnStats = useMemo(() => {
@@ -961,29 +963,31 @@ function EtfTab({ holdings, profile, monthlyData, isLoading }: {
   return (
     <div className="space-y-6">
       {/* Holdings */}
-      <HoldingsPanel holdings={holdings} />
+      {isLoadingHoldings
+        ? <SkeletonBlock className="h-48 w-full" />
+        : <HoldingsPanel holdings={holdings} />
+      }
 
       {/* Sector + Country */}
       {isLoading ? (
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
           <SkeletonBlock className="h-64 w-full" /><SkeletonBlock className="h-64 w-full" />
         </div>
-      ) : profile ? (
+      ) : (
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
           <BreakdownChart
             title="Sector Breakdown"
             infoText="Portfolio weight by industry sector. Source: FMP / Yahoo Finance."
-            items={profile.sector_weightings.map(s => ({ name: s.sector, value: s.weight_pct }))}
+            items={(profile?.sector_weightings ?? []).map(s => ({ name: s.sector, value: s.weight_pct }))}
             colorFn={(name, idx) => sectorColor(name, idx)}
           />
-          <BreakdownChart
+          <GeoBreakdownChart
             title="Geographic Breakdown"
-            infoText="Portfolio weight by country of domicile."
-            items={profile.country_weightings.map(c => ({ name: c.country, value: c.weight_pct }))}
-            colorFn={(_, idx) => PIE_PALETTE[idx % PIE_PALETTE.length]}
+            infoText="Portfolio weight by country of domicile. Source: Financial Modeling Prep."
+            items={(profile?.country_weightings ?? []).map(c => ({ name: c.country, value: c.weight_pct }))}
           />
         </div>
-      ) : null}
+      )}
 
       {/* Monthly returns heatmap */}
       {monthlyData.length < 2 ? (
@@ -1050,7 +1054,7 @@ function HoldingsPanel({ holdings }: { holdings: EtfHolding[] }) {
   );
 }
 
-// ── Sector / Country donut + bar breakdown ────────────────────────────────────
+// ── Sector breakdown — donut + horizontal bars ────────────────────────────────
 function BreakdownChart({ items, colorFn, title, infoText }: {
   items: { name: string; value: number }[];
   colorFn: (name: string, idx: number) => string;
@@ -1092,6 +1096,50 @@ function BreakdownChart({ items, colorFn, title, infoText }: {
             </div>
           ))}
         </div>
+      </div>
+    </div>
+  );
+}
+
+// ── Geographic breakdown — bars only (no donut) ───────────────────────────────
+function GeoBreakdownChart({ items, title, infoText }: {
+  items: { name: string; value: number }[];
+  title: string;
+  infoText: string;
+}) {
+  if (!items.length) return (
+    <div className="bg-terminal-surface border border-terminal-border rounded p-4">
+      <h3 className="text-sm font-semibold text-terminal-textMuted uppercase tracking-wider mb-3">
+        {title} <InfoTip text={infoText} dir="bottom" />
+      </h3>
+      <p className="text-xs text-terminal-textDim">Geographic data not available for this ETF.</p>
+    </div>
+  );
+  const TOP_N = 15;
+  const top = items.slice(0, TOP_N);
+  const otherW = items.slice(TOP_N).reduce((s, i) => s + i.value, 0);
+  if (otherW > 0.1) top.push({ name: 'Other', value: Math.round(otherW * 10) / 10 });
+  const maxVal = Math.max(...top.map(i => i.value));
+  return (
+    <div className="bg-terminal-surface border border-terminal-border rounded p-4">
+      <h3 className="text-sm font-semibold text-terminal-textMuted uppercase tracking-wider mb-4">
+        {title} <InfoTip text={infoText} dir="bottom" />
+      </h3>
+      <div className="space-y-2">
+        {top.map((item, idx) => {
+          const color = PIE_PALETTE[idx % PIE_PALETTE.length];
+          return (
+            <div key={item.name}>
+              <div className="flex items-center justify-between mb-0.5">
+                <span className="text-xs text-terminal-textMuted truncate max-w-[200px]">{item.name}</span>
+                <span className="text-xs num font-semibold text-terminal-text ml-3 shrink-0">{item.value.toFixed(1)}%</span>
+              </div>
+              <div className="h-2 bg-terminal-bg rounded-full overflow-hidden">
+                <div className="h-full rounded-full transition-all" style={{ width: `${(item.value / maxVal) * 100}%`, background: color }} />
+              </div>
+            </div>
+          );
+        })}
       </div>
     </div>
   );
