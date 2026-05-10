@@ -1,244 +1,393 @@
 /**
- * Home / landing page — Phase 1.5 redesign.
+ * Home — MSN Finance-style terminal dashboard (Phase 5)
  *
- * Style trading desk: header global avec search bar, status backend en haut,
- * quick links vers les modules disponibles + roadmap visible.
+ * Layout :
+ *  1. Ticker tape défilant (prix + Δ% des principaux marchés)
+ *  2. Grille indices clés
+ *  3. Movers du jour (top 5 gainers + top 5 losers)
+ *  4. Actualités financières
+ *  5. Navigation rapide vers les modules
  */
 
 import { useEffect, useState } from 'react';
 import Head from 'next/head';
 import Link from 'next/link';
-
 import { Header } from '@/components/Header';
-import { apiFetch, ApiError } from '@/lib/api';
+import { apiFetch } from '@/lib/api';
 
-interface ApiHealth {
-  status: 'checking' | 'connected' | 'disconnected';
-  message: string;
-  version?: string;
+// ─────────────────────────────────────────────────────────────────────────────
+// Types
+// ─────────────────────────────────────────────────────────────────────────────
+
+interface TapeItem {
+  ticker: string;
+  label:  string;
+  price:  number;
+  change_pct: number;
 }
 
-interface PhaseInfo {
-  num: string;
-  name: string;
-  status: 'done' | 'next' | 'planned';
-  href?: string;
-  description: string;
+interface Mover {
+  ticker:     string;
+  price:      number;
+  change_pct: number;
 }
 
-const PHASES: PhaseInfo[] = [
-  { num: '0', name: 'Foundation', status: 'done', description: 'Cloud deployment, Vercel + Railway' },
-  { num: '1', name: 'Global Macro', status: 'done', href: '/dashboard', description: '17 indicators via FRED API' },
-  { num: '2', name: 'Instruments', status: 'done', href: '/instrument', description: 'yfinance, search, fundamentals, news, ETF holdings' },
-  { num: '2.5', name: 'Global Indices', status: 'done', href: '/indices', description: '16 indices : heatmap, table, donut sectoriel' },
-  { num: '2.6', name: 'Data & Perf', status: 'done', description: 'GitHub CSV SP500, SWR caching, two-phase loading' },
-  { num: '3', name: 'Monte Carlo', status: 'next', href: '/simulate', description: 'GBM / Merton / Heston / GARCH — calibration auto yfinance' },
-  { num: '4', name: 'Portfolio', status: 'planned', description: 'Markowitz, frontière efficiente, Sharpe, corrélations' },
-  { num: '5', name: 'Backtesting', status: 'planned', description: 'Rolling VaR, couverture empirique, diagnostic de calibration' },
-  { num: '6', name: 'User Features', status: 'planned', description: 'Watchlists, auth, PostgreSQL persistence' },
-];
+interface NewsItem {
+  title:     string;
+  publisher: string;
+  link:      string;
+  published: string;
+}
 
-export default function Home() {
-  const [health, setHealth] = useState<ApiHealth>({
-    status: 'checking',
-    message: 'Checking API connection…',
-  });
+interface MarketData {
+  tape:    TapeItem[];
+  indices: TapeItem[];
+  gainers: Mover[];
+  losers:  Mover[];
+  news:    NewsItem[];
+  cached_at: string;
+}
 
-  useEffect(() => {
-    let cancelled = false;
-    apiFetch<{ status: string; version: string }>('/health')
-      .then((data) => {
-        if (cancelled) return;
-        setHealth({
-          status: 'connected',
-          message: 'Online',
-          version: data.version,
-        });
-      })
-      .catch((err) => {
-        if (cancelled) return;
-        setHealth({
-          status: 'disconnected',
-          message: err instanceof ApiError ? `API ${err.status}` : 'Cannot reach API',
-        });
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, []);
+// ─────────────────────────────────────────────────────────────────────────────
+// Helpers
+// ─────────────────────────────────────────────────────────────────────────────
 
-  const statusColor =
-    health.status === 'connected'
-      ? 'bg-bull text-terminal-bg'
-      : health.status === 'checking'
-      ? 'bg-warn text-terminal-bg'
-      : 'bg-bear text-white';
+const fmtPrice = (v: number) => {
+  if (v >= 10_000) return v.toLocaleString('en-US', { maximumFractionDigits: 0 });
+  if (v >= 1_000)  return v.toLocaleString('en-US', { maximumFractionDigits: 1 });
+  if (v >= 100)    return v.toLocaleString('en-US', { maximumFractionDigits: 2 });
+  if (v >= 1)      return v.toLocaleString('en-US', { maximumFractionDigits: 4 });
+  return v.toFixed(6);
+};
+
+const clrPct = (pct: number) =>
+  pct > 0 ? 'text-bull' : pct < 0 ? 'text-bear' : 'text-terminal-textMuted';
+
+const signPct = (pct: number) => `${pct >= 0 ? '+' : ''}${pct.toFixed(2)}%`;
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Ticker Tape
+// ─────────────────────────────────────────────────────────────────────────────
+
+function TickerTape({ items }: { items: TapeItem[] }) {
+  if (!items.length) return null;
+  // Duplicate for seamless loop
+  const doubled = [...items, ...items];
 
   return (
-    <>
-      <Head>
-        <title>Monte Carlo v3 — Bloomberg-lite global terminal</title>
-      </Head>
-
-      <Header />
-
-      <main className="max-w-7xl mx-auto px-4 py-8">
-        {/* Hero */}
-        <section className="mb-10">
-          <div className="flex items-baseline gap-3 mb-2">
-            <h1 className="text-3xl font-bold text-terminal-text">Monte Carlo v3</h1>
-            <span className="text-2xs uppercase tracking-wider text-terminal-textDim num">
-              Phase 1.5 / 11
+    <div className="overflow-hidden bg-terminal-bg border-b border-terminal-border py-1.5 select-none">
+      <div className="ticker-track">
+        {doubled.map((item, i) => (
+          <span
+            key={i}
+            className="inline-flex items-center gap-2 px-5 text-xs whitespace-nowrap border-r border-terminal-border last:border-0"
+          >
+            <span className="text-terminal-textDim font-mono">{item.label}</span>
+            <span className="num font-semibold text-terminal-text">{fmtPrice(item.price)}</span>
+            <span className={`num font-semibold ${clrPct(item.change_pct)}`}>
+              {signPct(item.change_pct)}
             </span>
-          </div>
-          <p className="text-terminal-textMuted">
-            Bloomberg-lite global terminal — macro, instruments, simulations, sentiment, all in one place.
-          </p>
-
-          {/* API status pill */}
-          <div className="mt-4 inline-flex items-center gap-2 text-xs">
-            <span className="text-terminal-textDim uppercase tracking-wider">API:</span>
-            <span className={`px-2 py-0.5 rounded text-2xs font-semibold uppercase ${statusColor} num`}>
-              ● {health.message}
-            </span>
-            {health.version && (
-              <span className="text-terminal-textDim num">v{health.version}</span>
-            )}
-          </div>
-        </section>
-
-        {/* Quick links — modules disponibles */}
-        <section className="mb-10">
-          <h2 className="text-xs uppercase tracking-wider text-terminal-textDim mb-3">
-            Available modules
-          </h2>
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-            <ModuleCard
-              href="/dashboard"
-              emoji="📊"
-              title="Macro Dashboard"
-              description="17 indicators × 4 countries"
-              enabled
-            />
-            <ModuleCard
-              href="#"
-              emoji="🔥"
-              title="Discover"
-              description="Trending stocks, ETFs, bonds"
-              badge="Phase 2.7"
-              enabled={false}
-            />
-            <ModuleCard
-              href="#"
-              emoji="📈"
-              title="Instruments"
-              description="Stocks, ETFs, bonds, FX, crypto"
-              badge="Phase 2"
-              enabled={false}
-            />
-          </div>
-        </section>
-
-        {/* Roadmap */}
-        <section>
-          <h2 className="text-xs uppercase tracking-wider text-terminal-textDim mb-3">
-            Roadmap
-          </h2>
-          <div className="card-terminal divide-y divide-terminal-border">
-            {PHASES.map((p) => (
-              <div
-                key={p.num}
-                className="px-4 py-3 flex items-center gap-4 hover:bg-terminal-surfaceHi transition"
-              >
-                <span className="num text-terminal-textDim text-sm w-12 shrink-0">P{p.num}</span>
-                <div className="flex-1 min-w-0">
-                  <div className="flex items-center gap-2">
-                    {p.href && p.status === 'done' ? (
-                      <Link href={p.href} className="text-terminal-text hover:text-terminal-cyan font-medium">
-                        {p.name}
-                      </Link>
-                    ) : (
-                      <span className="text-terminal-text font-medium">{p.name}</span>
-                    )}
-                    <PhaseBadge status={p.status} />
-                  </div>
-                  <p className="text-xs text-terminal-textMuted mt-0.5">{p.description}</p>
-                </div>
-              </div>
-            ))}
-          </div>
-        </section>
-      </main>
-
-      <footer className="border-t border-terminal-border mt-12 px-4 py-4 text-center text-2xs text-terminal-textDim num">
-        Monte Carlo v3 · Built with FastAPI + Next.js · Free-tier APIs (FRED, OECD, yfinance, OpenFIGI…)
-      </footer>
-    </>
+          </span>
+        ))}
+      </div>
+    </div>
   );
 }
 
-interface ModuleCardProps {
-  href: string;
-  emoji: string;
-  title: string;
-  description: string;
-  enabled: boolean;
-  badge?: string;
+// ─────────────────────────────────────────────────────────────────────────────
+// Index card
+// ─────────────────────────────────────────────────────────────────────────────
+
+function IndexCard({ item }: { item: TapeItem }) {
+  const up = item.change_pct > 0;
+  const down = item.change_pct < 0;
+  return (
+    <div className={`bg-terminal-surface border rounded-lg p-3 flex flex-col gap-1 ${
+      up ? 'border-bull-border' : down ? 'border-bear-border' : 'border-terminal-border'
+    }`}>
+      <div className="text-2xs text-terminal-textDim uppercase tracking-wider font-mono">
+        {item.label}
+      </div>
+      <div className="num text-terminal-text font-semibold text-base leading-tight">
+        {fmtPrice(item.price)}
+      </div>
+      <div className={`num text-sm font-bold ${clrPct(item.change_pct)}`}>
+        {signPct(item.change_pct)}
+      </div>
+    </div>
+  );
 }
 
-function ModuleCard({ href, emoji, title, description, enabled, badge }: ModuleCardProps) {
-  if (!enabled) {
-    return (
-      <div className="card-terminal p-4 opacity-60 cursor-not-allowed">
-        <div className="flex items-start justify-between mb-2">
-          <span className="text-2xl">{emoji}</span>
-          {badge && (
-            <span className="text-2xs uppercase tracking-wider text-terminal-textDim border border-terminal-border rounded px-1.5 py-0.5 num">
-              {badge}
-            </span>
-          )}
-        </div>
-        <h3 className="font-medium text-terminal-text">{title}</h3>
-        <p className="text-xs text-terminal-textMuted mt-1">{description}</p>
-      </div>
-    );
-  }
+// ─────────────────────────────────────────────────────────────────────────────
+// Mover row
+// ─────────────────────────────────────────────────────────────────────────────
 
+function MoverRow({ mover, type }: { mover: Mover; type: 'gain' | 'loss' }) {
   return (
-    <Link
-      href={href}
-      className="card-terminal p-4 cursor-pointer block group"
-    >
-      <div className="flex items-start justify-between mb-2">
-        <span className="text-2xl">{emoji}</span>
-        <span className="text-bull text-2xs uppercase tracking-wider num">● Live</span>
+    <Link href={`/instrument/${mover.ticker}`}
+      className="flex items-center justify-between px-3 py-2 hover:bg-terminal-surfaceHi transition rounded border border-transparent hover:border-terminal-border">
+      <div className="flex items-center gap-3">
+        <span className={`text-xs w-1.5 h-1.5 rounded-full ${type === 'gain' ? 'bg-bull' : 'bg-bear'}`} />
+        <span className="font-mono font-semibold text-terminal-cyan text-sm">{mover.ticker}</span>
       </div>
-      <h3 className="font-medium text-terminal-text group-hover:text-terminal-cyan transition">
-        {title} →
-      </h3>
-      <p className="text-xs text-terminal-textMuted mt-1">{description}</p>
+      <div className="flex items-center gap-3">
+        <span className="num text-xs text-terminal-textMuted">${fmtPrice(mover.price)}</span>
+        <span className={`num text-sm font-bold min-w-[60px] text-right ${type === 'gain' ? 'text-bull' : 'text-bear'}`}>
+          {signPct(mover.change_pct)}
+        </span>
+      </div>
     </Link>
   );
 }
 
-function PhaseBadge({ status }: { status: PhaseInfo['status'] }) {
-  if (status === 'done') {
-    return (
-      <span className="text-2xs uppercase tracking-wider px-1.5 py-0.5 rounded bg-bull-bg text-bull border border-bull-border num">
-        ✓ Done
-      </span>
-    );
-  }
-  if (status === 'next') {
-    return (
-      <span className="text-2xs uppercase tracking-wider px-1.5 py-0.5 rounded bg-terminal-cyan/15 text-terminal-cyan border border-terminal-cyan/40 num">
-        ◆ In progress
-      </span>
-    );
-  }
+// ─────────────────────────────────────────────────────────────────────────────
+// News card
+// ─────────────────────────────────────────────────────────────────────────────
+
+function NewsCard({ item }: { item: NewsItem }) {
   return (
-    <span className="text-2xs uppercase tracking-wider px-1.5 py-0.5 rounded text-terminal-textDim border border-terminal-border num">
-      Planned
-    </span>
+    <a href={item.link} target="_blank" rel="noopener noreferrer"
+      className="block bg-terminal-surface border border-terminal-border rounded-lg p-3 hover:bg-terminal-surfaceHi hover:border-terminal-cyanDim transition group">
+      <p className="text-sm text-terminal-text font-medium leading-snug group-hover:text-terminal-cyan transition line-clamp-3">
+        {item.title}
+      </p>
+      <div className="flex items-center gap-2 mt-2 text-2xs text-terminal-textDim">
+        <span className="font-semibold text-terminal-textMuted">{item.publisher}</span>
+        {item.published && (
+          <>
+            <span>·</span>
+            <span className="num">{item.published}</span>
+          </>
+        )}
+      </div>
+    </a>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Module quick-access cards
+// ─────────────────────────────────────────────────────────────────────────────
+
+const MODULES = [
+  { href: '/dashboard', emoji: '📊', title: 'Macro',      desc: '17 indicateurs — Fed, BCE, OCDE, FRED',           color: '#00d9ff' },
+  { href: '/indices',   emoji: '🗂️', title: 'Indices',    desc: 'SP500, NASDAQ, DAX, Nikkei — heatmap sectorielle', color: '#26a69a' },
+  { href: '/simulate',  emoji: '⚡', title: 'Simulate',   desc: 'GBM · Merton · Heston · GARCH — calibration auto', color: '#ffa726' },
+  { href: '/compare',   emoji: '🔬', title: 'Compare',    desc: '4 modèles simultanés + stress géopolitique',       color: '#ce93d8' },
+  { href: '/portfolio', emoji: '💼', title: 'Portfolio',  desc: 'Markowitz · frontière efficiente · Monte Carlo',   color: '#81c784' },
+];
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Skeleton
+// ─────────────────────────────────────────────────────────────────────────────
+
+function Skeleton({ className }: { className?: string }) {
+  return <div className={`animate-pulse bg-terminal-surface rounded ${className ?? ''}`} />;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Page
+// ─────────────────────────────────────────────────────────────────────────────
+
+export default function Home() {
+  const [data,    setData]    = useState<MarketData | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error,   setError]   = useState<string | null>(null);
+  const [lastUpdate, setLastUpdate] = useState<string>('');
+
+  useEffect(() => {
+    let cancelled = false;
+    setLoading(true);
+    apiFetch<MarketData>('/api/home/market')
+      .then((d) => {
+        if (cancelled) return;
+        setData(d);
+        setLastUpdate(new Date().toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' }));
+      })
+      .catch((e) => {
+        if (cancelled) return;
+        setError(e instanceof Error ? e.message : 'Erreur de chargement');
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+
+    // Rafraîchissement toutes les 5 minutes
+    const interval = setInterval(() => {
+      apiFetch<MarketData>('/api/home/market').then((d) => {
+        if (!cancelled) {
+          setData(d);
+          setLastUpdate(new Date().toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' }));
+        }
+      }).catch(() => {});
+    }, 5 * 60 * 1000);
+
+    return () => {
+      cancelled = true;
+      clearInterval(interval);
+    };
+  }, []);
+
+  return (
+    <>
+      <Head>
+        <title>Monte Carlo v3 — Marchés & Simulations</title>
+      </Head>
+
+      <Header />
+
+      {/* ── Ticker tape ─────────────────────────────────────────── */}
+      {data?.tape ? (
+        <TickerTape items={data.tape} />
+      ) : (
+        <div className="h-8 bg-terminal-bg border-b border-terminal-border animate-pulse" />
+      )}
+
+      <main className="max-w-7xl mx-auto px-4 py-5 space-y-6">
+
+        {/* ── En-tête + status ────────────────────────────────── */}
+        <div className="flex items-center justify-between flex-wrap gap-2">
+          <div>
+            <h1 className="text-xl font-bold text-terminal-text">
+              Marchés <span className="text-terminal-cyan">·</span> Actualités
+            </h1>
+            <p className="text-xs text-terminal-textDim mt-0.5">
+              Données Yahoo Finance · mise à jour toutes les 5 min
+            </p>
+          </div>
+          {lastUpdate && (
+            <div className="flex items-center gap-2 text-xs text-terminal-textDim num">
+              <span className="inline-block w-1.5 h-1.5 rounded-full bg-bull animate-pulse" />
+              Mis à jour {lastUpdate}
+            </div>
+          )}
+          {error && (
+            <div className="text-xs text-bear bg-bear bg-opacity-10 border border-bear border-opacity-30 rounded px-3 py-1.5">
+              ⚠ {error}
+            </div>
+          )}
+        </div>
+
+        {/* ── Indices clés ─────────────────────────────────────── */}
+        <section>
+          <h2 className="text-2xs uppercase tracking-widest text-terminal-textDim mb-2">
+            Marchés mondiaux
+          </h2>
+          {loading ? (
+            <div className="grid grid-cols-3 sm:grid-cols-5 lg:grid-cols-9 gap-2">
+              {Array.from({ length: 9 }).map((_, i) => <Skeleton key={i} className="h-20" />)}
+            </div>
+          ) : (
+            <div className="grid grid-cols-3 sm:grid-cols-5 lg:grid-cols-9 gap-2">
+              {(data?.indices ?? []).map((item) => (
+                <IndexCard key={item.ticker} item={item} />
+              ))}
+            </div>
+          )}
+        </section>
+
+        {/* ── Movers + News ─────────────────────────────────────── */}
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-5">
+
+          {/* Gainers */}
+          <div className="bg-terminal-surface border border-terminal-border rounded-lg p-4">
+            <h2 className="text-2xs uppercase tracking-widest text-terminal-textDim mb-3 flex items-center gap-2">
+              <span className="inline-block w-2 h-2 rounded-full bg-bull" />
+              Meilleures performances
+            </h2>
+            {loading ? (
+              <div className="space-y-2">
+                {Array.from({ length: 5 }).map((_, i) => <Skeleton key={i} className="h-10" />)}
+              </div>
+            ) : data?.gainers?.length ? (
+              <div className="space-y-1">
+                {data.gainers.map((m) => <MoverRow key={m.ticker} mover={m} type="gain" />)}
+              </div>
+            ) : (
+              <p className="text-xs text-terminal-textDim">Marché fermé ou données indisponibles</p>
+            )}
+          </div>
+
+          {/* Losers */}
+          <div className="bg-terminal-surface border border-terminal-border rounded-lg p-4">
+            <h2 className="text-2xs uppercase tracking-widest text-terminal-textDim mb-3 flex items-center gap-2">
+              <span className="inline-block w-2 h-2 rounded-full bg-bear" />
+              Plus fortes baisses
+            </h2>
+            {loading ? (
+              <div className="space-y-2">
+                {Array.from({ length: 5 }).map((_, i) => <Skeleton key={i} className="h-10" />)}
+              </div>
+            ) : data?.losers?.length ? (
+              <div className="space-y-1">
+                {data.losers.map((m) => <MoverRow key={m.ticker} mover={m} type="loss" />)}
+              </div>
+            ) : (
+              <p className="text-xs text-terminal-textDim">Données indisponibles</p>
+            )}
+          </div>
+
+          {/* News column */}
+          <div className="bg-terminal-surface border border-terminal-border rounded-lg p-4">
+            <h2 className="text-2xs uppercase tracking-widest text-terminal-textDim mb-3">
+              Actualités financières
+            </h2>
+            {loading ? (
+              <div className="space-y-2">
+                {Array.from({ length: 4 }).map((_, i) => <Skeleton key={i} className="h-20" />)}
+              </div>
+            ) : data?.news?.length ? (
+              <div className="space-y-2">
+                {data.news.slice(0, 5).map((item, i) => (
+                  <NewsCard key={i} item={item} />
+                ))}
+              </div>
+            ) : (
+              <p className="text-xs text-terminal-textDim">Actualités indisponibles</p>
+            )}
+          </div>
+        </div>
+
+        {/* ── Actualités détaillées (ligne du bas) ───────────────── */}
+        {!loading && data?.news && data.news.length > 5 && (
+          <section>
+            <h2 className="text-2xs uppercase tracking-widest text-terminal-textDim mb-3">
+              Plus d'actualités
+            </h2>
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+              {data.news.slice(5, 9).map((item, i) => (
+                <NewsCard key={i} item={item} />
+              ))}
+            </div>
+          </section>
+        )}
+
+        {/* ── Modules ────────────────────────────────────────────── */}
+        <section>
+          <h2 className="text-2xs uppercase tracking-widest text-terminal-textDim mb-3">
+            Modules d'analyse
+          </h2>
+          <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-3">
+            {MODULES.map((m) => (
+              <Link key={m.href} href={m.href}
+                className="bg-terminal-surface border border-terminal-border rounded-lg p-3 hover:bg-terminal-surfaceHi hover:border-terminal-cyanDim transition group block">
+                <div className="flex items-start justify-between mb-2">
+                  <span className="text-xl">{m.emoji}</span>
+                  <span className="text-2xs font-semibold" style={{ color: m.color }}>● Live</span>
+                </div>
+                <div className="font-semibold text-sm text-terminal-text group-hover:text-terminal-cyan transition">
+                  {m.title} →
+                </div>
+                <p className="text-2xs text-terminal-textMuted mt-1 leading-snug">{m.desc}</p>
+              </Link>
+            ))}
+          </div>
+        </section>
+
+      </main>
+
+      <footer className="border-t border-terminal-border mt-8 px-4 py-3 text-center text-2xs text-terminal-textDim num">
+        Monte Carlo v3 · FastAPI + Next.js · Données : Yahoo Finance (yfinance), FRED API, OECD
+      </footer>
+    </>
   );
 }

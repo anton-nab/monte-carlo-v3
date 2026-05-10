@@ -31,6 +31,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from datetime import datetime
 
 # Routers
+from api.home import router as home_router
 from api.macro import router as macro_router
 from api.instruments import router as instruments_router
 from api.search import router as search_router
@@ -77,6 +78,7 @@ app.add_middleware(
 # Chaque module dans api/ definit un router prefixe.
 # Cela evite que main.py grossisse a chaque nouvelle phase.
 
+app.include_router(home_router)            # /api/home/*          (Phase 5)
 app.include_router(macro_router)           # /api/macro/*         (Phase 1)
 app.include_router(instruments_router)     # /api/instruments/*   (Phase 2)
 app.include_router(search_router)          # /api/search/*        (Phase 2)

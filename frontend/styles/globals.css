@@ -60,4 +60,20 @@
   .card-terminal:hover {
     @apply bg-terminal-surfaceHi border-terminal-cyanDim;
   }
+
+  /* Ticker tape scrolling animation */
+  .ticker-track {
+    display: flex;
+    width: max-content;
+    animation: ticker-scroll 60s linear infinite;
+  }
+
+  .ticker-track:hover {
+    animation-play-state: paused;
+  }
+
+  @keyframes ticker-scroll {
+    0%   { transform: translateX(0); }
+    100% { transform: translateX(-50%); }
+  }
 }

@@ -1,7 +1,8 @@
 /**
  * Header — global navigation bar.
  *
- * Phase 2: Global search is now functional with autocomplete.
+ * Phase 4.5: search bar fixed (min-w), Instruments removed,
+ * disabled items hidden from nav (they're in the home roadmap).
  */
 
 import Link from 'next/link';
@@ -12,21 +13,15 @@ interface NavItem {
   href: string;
   label: string;
   emoji: string;
-  enabled: boolean;
-  badge?: string;
 }
 
 const NAV_ITEMS: NavItem[] = [
-  { href: '/', label: 'Home', emoji: '⌂', enabled: true },
-  { href: '/dashboard', label: 'Macro', emoji: '📊', enabled: true },
-  { href: '/indices', label: 'Indices', emoji: '🗂️', enabled: true },
-  { href: '/discover', label: 'Discover', emoji: '🔥', enabled: false, badge: 'P2.7' },
-  { href: '/instrument', label: 'Instruments', emoji: '📈', enabled: true },
-  { href: '/simulate', label: 'Simulate', emoji: '⚡', enabled: true },
-  { href: '/compare',  label: 'Compare',  emoji: '🔬', enabled: true },
-  { href: '/portfolio', label: 'Portfolio', emoji: '💼', enabled: true },
-  { href: '/sentiment', label: 'Sentiment', emoji: '🌡️', enabled: false, badge: 'P5' },
-  { href: '/bonds', label: 'Bonds', emoji: '🏦', enabled: false, badge: 'P6' },
+  { href: '/',          label: 'Home',      emoji: '⌂'  },
+  { href: '/dashboard', label: 'Macro',     emoji: '📊' },
+  { href: '/indices',   label: 'Indices',   emoji: '🗂️' },
+  { href: '/simulate',  label: 'Simulate',  emoji: '⚡' },
+  { href: '/compare',   label: 'Compare',   emoji: '🔬' },
+  { href: '/portfolio', label: 'Portfolio', emoji: '💼' },
 ];
 
 export function Header() {
@@ -34,59 +29,52 @@ export function Header() {
 
   return (
     <header className="border-b border-terminal-border bg-terminal-surface sticky top-0 z-20 backdrop-blur-md bg-opacity-95">
-      <div className="max-w-7xl mx-auto px-4 h-14 flex items-center gap-6">
-        {/* Logo */}
+      <div className="max-w-7xl mx-auto px-4 h-14 flex items-center gap-4">
+
+        {/* Logo — shrink-0 pour ne jamais être écrasé */}
         <Link
           href="/"
           className="flex items-center gap-2 text-terminal-text font-semibold whitespace-nowrap shrink-0"
         >
           <span className="text-terminal-cyan text-lg">▲</span>
-          <span>Monte Carlo v3</span>
+          <span className="hidden sm:inline">Monte Carlo v3</span>
+          <span className="sm:hidden text-terminal-cyan">MC3</span>
         </Link>
 
-        {/* Search bar */}
-        <GlobalSearch />
+        {/* Search bar — flex-1 avec min-width garanti */}
+        <div className="flex-1 min-w-0">
+          <GlobalSearch />
+        </div>
 
-        {/* Nav links */}
-        <nav className="hidden md:flex items-center gap-1 text-sm">
+        {/* Nav links — shrink-0 pour qu'ils ne compressent pas la search */}
+        <nav className="hidden lg:flex items-center gap-0.5 text-sm shrink-0">
           {NAV_ITEMS.map((item) => {
             const isActive =
               item.href === '/'
                 ? router.pathname === '/'
                 : router.pathname.startsWith(item.href);
 
-            if (!item.enabled) {
-              return (
-                <span
-                  key={item.href}
-                  className="px-2 py-1 text-terminal-textDim cursor-not-allowed flex items-center gap-1"
-                  title={`Coming in ${item.badge}`}
-                >
-                  <span className="opacity-60">{item.emoji}</span>
-                  <span className="opacity-60">{item.label}</span>
-                  <span className="text-2xs text-terminal-textDim border border-terminal-border rounded px-1 num">
-                    {item.badge}
-                  </span>
-                </span>
-              );
-            }
-
             return (
               <Link
                 key={item.href}
                 href={item.href}
-                className={`px-2 py-1 rounded transition flex items-center gap-1 ${
+                className={`px-2.5 py-1.5 rounded transition flex items-center gap-1 whitespace-nowrap ${
                   isActive
                     ? 'text-terminal-cyan bg-terminal-surfaceHi'
                     : 'text-terminal-textMuted hover:text-terminal-text hover:bg-terminal-surfaceHi'
                 }`}
               >
-                <span>{item.emoji}</span>
+                <span className="text-xs">{item.emoji}</span>
                 <span>{item.label}</span>
               </Link>
             );
           })}
         </nav>
+
+        {/* Mobile hamburger placeholder */}
+        <div className="lg:hidden shrink-0">
+          <button className="text-terminal-textDim text-xl px-1">☰</button>
+        </div>
       </div>
     </header>
   );
