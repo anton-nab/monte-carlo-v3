@@ -4,6 +4,7 @@
  * Supports:
  * - Line/area chart (single value per point)
  * - Candlestick chart (OHLC per point)
+ * - Intraday mode: Unix-second timestamps + time axis label
  *
  * Doc lib: https://tradingview.github.io/lightweight-charts/
  */
@@ -53,10 +54,30 @@ interface TradingViewChartProps {
   /** Show price scale on right (default true) */
   showAxes?: boolean;
   /**
+   * When true: dates are ISO datetime strings (e.g. "2024-01-15T14:30:00+00:00").
+   * They will be converted to Unix seconds. Time axis label will show H:MM.
+   * When false (default): dates are "YYYY-MM-DD" strings.
+   */
+  isIntraday?: boolean;
+  /**
    * Plage de dates initialement visibles. Si fournie, le chart cadre dessus
    * mais TOUTES les donnees restent dans le chart.
+   * Ignored when isIntraday=true (data already covers the exact window).
    */
   visibleRange?: { from: string; to: string };
+}
+
+/**
+ * Convert a date string to a lightweight-charts Time value.
+ * - Daily: "YYYY-MM-DD" string (lightweight-charts native format)
+ * - Intraday: ISO datetime → Unix seconds (number)
+ */
+function toChartTime(dateStr: string, isIntraday: boolean): Time {
+  if (isIntraday) {
+    return Math.floor(new Date(dateStr).getTime() / 1000) as Time;
+  }
+  // Trim any time/timezone suffix: "2024-01-15T00:00:00+00:00" → "2024-01-15"
+  return dateStr.split('T')[0] as Time;
 }
 
 export function TradingViewChart({
@@ -67,6 +88,7 @@ export function TradingViewChart({
   height = 240,
   color = '#26a69a',
   showAxes = true,
+  isIntraday = false,
   visibleRange,
 }: TradingViewChartProps) {
   // Resolve chartType from explicit prop or legacy fill prop
@@ -76,7 +98,7 @@ export function TradingViewChart({
   const chartRef = useRef<IChartApi | null>(null);
   const seriesRef = useRef<ISeriesApi<'Area' | 'Line' | 'Candlestick'> | null>(null);
 
-  // Init chart on mount and when chartType/color changes
+  // Init chart on mount and when chartType/color/isIntraday changes
   useEffect(() => {
     if (!containerRef.current) return;
 
@@ -100,7 +122,7 @@ export function TradingViewChart({
       timeScale: {
         visible: showAxes,
         borderColor: '#2a3040',
-        timeVisible: false,
+        timeVisible: isIntraday,
         secondsVisible: false,
       },
       crosshair: {
@@ -158,7 +180,7 @@ export function TradingViewChart({
       seriesRef.current = null;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [height, color, showAxes, resolvedChartType]);
+  }, [height, color, showAxes, resolvedChartType, isIntraday]);
 
   // Update data when it changes
   useEffect(() => {
@@ -166,7 +188,7 @@ export function TradingViewChart({
 
     if (resolvedChartType === 'candle' && ohlcData) {
       const formatted: CandlestickData[] = ohlcData.map((p) => ({
-        time: p.date as Time,
+        time: toChartTime(p.date, isIntraday),
         open: p.open,
         high: p.high,
         low: p.low,
@@ -177,14 +199,14 @@ export function TradingViewChart({
       const formatted: (LineData | AreaData)[] = data
         .filter((p) => Number.isFinite(p.value))
         .map((p) => ({
-          time: p.date as Time,
+          time: toChartTime(p.date, isIntraday),
           value: p.value,
         }));
       (seriesRef.current as ISeriesApi<'Line' | 'Area'>).setData(formatted);
     }
 
-    // Apply visible range if provided
-    if (visibleRange) {
+    // Apply visible range only for non-intraday with explicit range
+    if (!isIntraday && visibleRange) {
       chartRef.current.timeScale().setVisibleRange({
         from: visibleRange.from as Time,
         to: visibleRange.to as Time,
@@ -192,7 +214,7 @@ export function TradingViewChart({
     } else {
       chartRef.current.timeScale().fitContent();
     }
-  }, [data, ohlcData, resolvedChartType, visibleRange]);
+  }, [data, ohlcData, resolvedChartType, isIntraday, visibleRange]);
 
   return <div ref={containerRef} style={{ width: '100%', height }} />;
 }

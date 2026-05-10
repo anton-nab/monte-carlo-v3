@@ -20,6 +20,21 @@ interface Suggestion {
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
 
+/** Well-known index tickers that should route to /indices/[symbol] */
+const INDEX_TICKERS = new Set([
+  '^GSPC', '^NDX', '^DJI', '^VIX', '^RUT', '^FTSE', '^N225',
+  '^TNX', '^HSI', '^GDAXI', '^FCHI', '^STOXX50E', '^AXJO',
+  '^BVSP', '^MXX', '^NSEI', '^STI', '^KS11',
+]);
+
+function isIndexTicker(ticker: string, type?: string): boolean {
+  return (
+    ticker.startsWith('^') ||
+    INDEX_TICKERS.has(ticker.toUpperCase()) ||
+    (type?.toLowerCase().includes('index') ?? false)
+  );
+}
+
 export function GlobalSearch() {
   const router = useRouter();
   const [query, setQuery] = useState('');
@@ -69,8 +84,8 @@ export function GlobalSearch() {
   const handleKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
     if (!isOpen || suggestions.length === 0) {
       if (e.key === 'Enter' && query.trim()) {
-        // Search for exact match or use first result
-        router.push(`/instrument/${query.toUpperCase()}`);
+        const sym = query.trim().toUpperCase();
+        router.push(isIndexTicker(sym) ? `/indices/${sym}` : `/instrument/${sym}`);
       }
       return;
     }
@@ -103,7 +118,10 @@ export function GlobalSearch() {
   };
 
   const selectSuggestion = (suggestion: Suggestion) => {
-    router.push(`/instrument/${suggestion.ticker}`);
+    const route = isIndexTicker(suggestion.ticker, suggestion.type)
+      ? `/indices/${suggestion.ticker}`
+      : `/instrument/${suggestion.ticker}`;
+    router.push(route);
     setQuery('');
     setIsOpen(false);
     setSuggestions([]);

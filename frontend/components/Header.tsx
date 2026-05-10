@@ -18,7 +18,6 @@ interface NavItem {
 const NAV_ITEMS: NavItem[] = [
   { href: '/',          label: 'Home',      emoji: '⌂'  },
   { href: '/dashboard', label: 'Macro',     emoji: '📊' },
-  { href: '/indices',   label: 'Indices',   emoji: '🗂️' },
   { href: '/simulate',  label: 'Simulate',  emoji: '⚡' },
   { href: '/compare',   label: 'Compare',   emoji: '🔬' },
   { href: '/portfolio', label: 'Portfolio', emoji: '💼' },

@@ -25,6 +25,7 @@ import {
   Legend,
 } from 'recharts';
 import { fetcher } from '../../lib/fetcher';
+import { TradingViewChart, ChartType } from '../../components/TradingViewChart';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Types
@@ -63,8 +64,52 @@ interface IndexData {
   last_updated: string;
 }
 
-type ViewMode = 'heatmap' | 'table' | 'sectors';
+type ViewMode = 'chart' | 'heatmap' | 'table' | 'sectors';
 type SortKey = 'ticker' | 'name' | 'sector' | 'price' | 'change_pct';
+
+// ── Timeframe config (same as instrument page) ───────────────────────────────
+interface Timeframe {
+  label: string;
+  group: 'intraday' | 'daily';
+  fetchPeriod: string;
+  fetchInterval: string;
+  isIntraday: boolean;
+  resampleHours?: number;
+  visibleDays?: number;
+}
+
+const TIMEFRAMES: Timeframe[] = [
+  { label: '5m',  group: 'intraday', fetchPeriod: '5d',  fetchInterval: '5m',  isIntraday: true },
+  { label: '15m', group: 'intraday', fetchPeriod: '15d', fetchInterval: '15m', isIntraday: true },
+  { label: '30m', group: 'intraday', fetchPeriod: '60d', fetchInterval: '30m', isIntraday: true },
+  { label: '1H',  group: 'intraday', fetchPeriod: '60d', fetchInterval: '1h',  isIntraday: true },
+  { label: '4H',  group: 'intraday', fetchPeriod: '2y',  fetchInterval: '1h',  isIntraday: true, resampleHours: 4 },
+  { label: 'D',   group: 'daily', fetchPeriod: 'max', fetchInterval: '1d',  isIntraday: false },
+  { label: '1M',  group: 'daily', fetchPeriod: 'max', fetchInterval: '1d',  isIntraday: false, visibleDays: 30 },
+  { label: '3M',  group: 'daily', fetchPeriod: 'max', fetchInterval: '1d',  isIntraday: false, visibleDays: 90 },
+  { label: '6M',  group: 'daily', fetchPeriod: 'max', fetchInterval: '1d',  isIntraday: false, visibleDays: 180 },
+  { label: '1Y',  group: 'daily', fetchPeriod: 'max', fetchInterval: '1d',  isIntraday: false, visibleDays: 365 },
+  { label: '5Y',  group: 'daily', fetchPeriod: 'max', fetchInterval: '1wk', isIntraday: false },
+  { label: 'Max', group: 'daily', fetchPeriod: 'max', fetchInterval: '1d',  isIntraday: false },
+];
+
+interface HistoricalPoint {
+  date: string; open: number; high: number; low: number; close: number; volume: number;
+}
+interface ChartResponse { ticker: string; period: string; data: HistoricalPoint[]; }
+
+function resampleToNHour(data: HistoricalPoint[], n: number): HistoricalPoint[] {
+  const bars = new Map<string, HistoricalPoint>();
+  for (const p of data) {
+    const dt = new Date(p.date);
+    const bucket = Math.floor(dt.getUTCHours() / n) * n;
+    const key = new Date(Date.UTC(dt.getUTCFullYear(), dt.getUTCMonth(), dt.getUTCDate(), bucket, 0, 0)).toISOString();
+    const e = bars.get(key);
+    if (!e) bars.set(key, { date: key, open: p.open, high: p.high, low: p.low, close: p.close, volume: p.volume ?? 0 });
+    else { e.high = Math.max(e.high, p.high); e.low = Math.min(e.low, p.low); e.close = p.close; e.volume += (p.volume ?? 0); }
+  }
+  return Array.from(bars.values()).sort((a, b) => a.date.localeCompare(b.date));
+}
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
 
@@ -132,10 +177,14 @@ export default function IndexPage() {
   const router = useRouter();
   const { symbol } = router.query as { symbol?: string };
 
-  const [view, setView] = useState<ViewMode>('heatmap');
+  const [view, setView] = useState<ViewMode>('chart');
   const [sortKey, setSortKey] = useState<SortKey>('change_pct');
   const [sortDesc, setSortDesc] = useState(true);
   const [sectorFilter, setSectorFilter] = useState<string>('All');
+  const [selectedLabel, setSelectedLabel] = useState('1Y');
+  const [chartType, setChartType] = useState<ChartType>('area');
+
+  const tf = TIMEFRAMES.find((t) => t.label === selectedLabel) ?? TIMEFRAMES[9];
 
   // ── Phase 1: fast — constituents without prices (FMP cache ~1-2s) ──
   const {
@@ -160,6 +209,31 @@ export default function IndexPage() {
       dedupingInterval: 60_000 * 15,  // 15 min dedupe matches backend cache
     }
   );
+
+  // ── Chart data for the index itself ──
+  const { data: chartResponse, isLoading: isLoadingChart } = useSWR<ChartResponse>(
+    symbol
+      ? `${API_URL}/api/instruments/chart/${encodeURIComponent(symbol)}?period=${tf.fetchPeriod}&interval=${tf.fetchInterval}`
+      : null,
+    fetcher,
+    { revalidateOnFocus: false, dedupingInterval: 60_000 * 5 }
+  );
+
+  const rawHistorical = chartResponse?.data ?? [];
+  const historical = useMemo(() => {
+    if (tf.resampleHours && rawHistorical.length > 0) return resampleToNHour(rawHistorical, tf.resampleHours);
+    return rawHistorical;
+  }, [rawHistorical, tf.resampleHours]);
+
+  const lineData = useMemo(() => historical.map((p) => ({ date: p.date, value: p.close })), [historical]);
+  const ohlcData  = useMemo(() => historical.map((p) => ({ date: p.date, open: p.open, high: p.high, low: p.low, close: p.close })), [historical]);
+
+  const visibleRange = useMemo(() => {
+    if (tf.isIntraday || !tf.visibleDays || historical.length === 0) return undefined;
+    const lastDate = historical[historical.length - 1].date.split('T')[0];
+    const fromDate = new Date(new Date(lastDate).getTime() - tf.visibleDays * 86_400_000).toISOString().split('T')[0];
+    return { from: fromDate, to: lastDate };
+  }, [historical, tf.isIntraday, tf.visibleDays]);
 
   // Use full data (with prices) when available, else fast data (no prices)
   const data = fullData || fastData;
@@ -260,8 +334,8 @@ export default function IndexPage() {
             )}
 
             {/* ── View tabs ── */}
-            <div className="flex gap-1 mb-6 border-b border-terminal-border pb-4">
-              {(['heatmap', 'table', 'sectors'] as ViewMode[]).map((v) => (
+            <div className="flex gap-1 mb-6 border-b border-terminal-border pb-4 flex-wrap">
+              {(['chart', 'heatmap', 'table', 'sectors'] as ViewMode[]).map((v) => (
                 <button
                   key={v}
                   onClick={() => setView(v)}
@@ -271,7 +345,7 @@ export default function IndexPage() {
                       : 'text-terminal-textMuted hover:text-terminal-text hover:bg-terminal-surfaceHi'
                   }`}
                 >
-                  {v === 'heatmap' ? '🔥 Heatmap' : v === 'table' ? '📋 Table' : '🥧 Sectors'}
+                  {v === 'chart' ? '📈 Chart' : v === 'heatmap' ? '🔥 Heatmap' : v === 'table' ? '📋 Table' : '🥧 Sectors'}
                 </button>
               ))}
 
@@ -287,6 +361,82 @@ export default function IndexPage() {
                 </div>
               )}
             </div>
+
+            {/* ── CHART VIEW ── */}
+            {view === 'chart' && (
+              <div className="bg-terminal-surface border border-terminal-border rounded p-4">
+                <div className="mb-3 flex items-center justify-between flex-wrap gap-3">
+                  {/* Chart type toggle */}
+                  <div className="flex items-center gap-3">
+                    <h3 className="text-sm font-semibold text-terminal-textMuted uppercase tracking-wider">Price History</h3>
+                    <div className="flex border border-terminal-border rounded overflow-hidden">
+                      {(['area', 'candle'] as ChartType[]).map((ct) => (
+                        <button
+                          key={ct}
+                          onClick={() => setChartType(ct)}
+                          className={`px-2 py-1 text-xs transition border-l first:border-l-0 border-terminal-border ${
+                            chartType === ct
+                              ? 'bg-terminal-cyan text-terminal-bg font-semibold'
+                              : 'text-terminal-textMuted hover:text-terminal-text'
+                          }`}
+                        >
+                          {ct === 'area' ? 'Line' : 'Candle'}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                  {/* Timeframe buttons */}
+                  <div className="flex items-center gap-1 flex-wrap">
+                    {TIMEFRAMES.filter((t) => t.group === 'intraday').map((t) => (
+                      <button
+                        key={t.label}
+                        onClick={() => setSelectedLabel(t.label)}
+                        className={`px-2.5 py-1 text-xs rounded transition num ${
+                          selectedLabel === t.label
+                            ? 'bg-terminal-cyan text-terminal-bg font-semibold'
+                            : 'border border-terminal-border text-terminal-textMuted hover:text-terminal-text hover:border-terminal-cyan'
+                        }`}
+                      >{t.label}</button>
+                    ))}
+                    <span className="text-terminal-border text-xs mx-0.5">│</span>
+                    {TIMEFRAMES.filter((t) => t.group === 'daily').map((t) => (
+                      <button
+                        key={t.label}
+                        onClick={() => setSelectedLabel(t.label)}
+                        className={`px-2.5 py-1 text-xs rounded transition num ${
+                          selectedLabel === t.label
+                            ? 'bg-terminal-cyan text-terminal-bg font-semibold'
+                            : 'border border-terminal-border text-terminal-textMuted hover:text-terminal-text hover:border-terminal-cyan'
+                        }`}
+                      >{t.label}</button>
+                    ))}
+                  </div>
+                </div>
+                <div className="bg-terminal-bg rounded p-2">
+                  {isLoadingChart ? (
+                    <div className="h-80 bg-terminal-border/20 animate-pulse rounded" />
+                  ) : historical.length > 0 ? (
+                    <TradingViewChart
+                      data={lineData}
+                      ohlcData={ohlcData}
+                      chartType={chartType}
+                      height={360}
+                      color={isPositiveIndex ? '#26a69a' : '#ef5350'}
+                      showAxes={true}
+                      isIntraday={tf.isIntraday}
+                      visibleRange={visibleRange}
+                    />
+                  ) : (
+                    <div className="h-80 flex items-center justify-center text-terminal-textMuted text-sm">
+                      No chart data available for {symbol}
+                    </div>
+                  )}
+                </div>
+                <p className="text-2xs text-terminal-textDim mt-2">
+                  {tf.isIntraday ? `${tf.label} candles · scroll/wheel to zoom` : 'Scroll/drag to see full history'}
+                </p>
+              </div>
+            )}
 
             {/* ── HEATMAP VIEW ── */}
             {view === 'heatmap' && (
