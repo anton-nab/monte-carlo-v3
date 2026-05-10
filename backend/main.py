@@ -36,6 +36,7 @@ from api.instruments import router as instruments_router
 from api.search import router as search_router
 from api.indices import router as indices_router
 from api.simulate import router as simulate_router
+from api.compare import router as compare_router
 from api.portfolio import router as portfolio_router
 
 # ===========================================================================
@@ -81,6 +82,7 @@ app.include_router(instruments_router)     # /api/instruments/*   (Phase 2)
 app.include_router(search_router)          # /api/search/*        (Phase 2)
 app.include_router(indices_router)         # /api/indices/*       (Phase 2.5)
 app.include_router(simulate_router)        # /api/simulate        (Phase 3)
+app.include_router(compare_router)        # /api/simulate/compare (Phase 4.5)
 app.include_router(portfolio_router)      # /api/portfolio/*     (Phase 4)
 
 # ===========================================================================
