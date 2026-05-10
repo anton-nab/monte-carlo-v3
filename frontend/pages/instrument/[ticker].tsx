@@ -208,11 +208,11 @@ function computeFomoScore(
 }
 
 function getFomoMeta(score: number) {
-  if (score >= 80) return { emoji: '🚀', label: 'FOMO',     ringColor: '#ef4444', textColor: 'text-red-400',    bgColor: 'bg-red-500/10'    };
-  if (score >= 60) return { emoji: '🔥', label: 'Chaud',    ringColor: '#f97316', textColor: 'text-orange-400', bgColor: 'bg-orange-500/10' };
-  if (score >= 40) return { emoji: '📈', label: 'Momentum', ringColor: '#eab308', textColor: 'text-yellow-400', bgColor: 'bg-yellow-500/10' };
-  if (score >= 20) return { emoji: '😐', label: 'Neutre',   ringColor: '#6b7280', textColor: 'text-gray-400',   bgColor: 'bg-gray-500/10'   };
-  return              { emoji: '❄️', label: 'Froid',    ringColor: '#3b82f6', textColor: 'text-blue-400',   bgColor: 'bg-blue-500/10'   };
+  if (score >= 80) return { label: 'FOMO',     ringColor: '#ef4444', textColor: 'text-red-400',    bgColor: 'bg-red-500/10'    };
+  if (score >= 60) return { label: 'Chaud',    ringColor: '#f97316', textColor: 'text-orange-400', bgColor: 'bg-orange-500/10' };
+  if (score >= 40) return { label: 'Momentum', ringColor: '#eab308', textColor: 'text-yellow-400', bgColor: 'bg-yellow-500/10' };
+  if (score >= 20) return { label: 'Neutre',   ringColor: '#6b7280', textColor: 'text-gray-400',   bgColor: 'bg-gray-500/10'   };
+  return              { label: 'Froid',    ringColor: '#3b82f6', textColor: 'text-blue-400',   bgColor: 'bg-blue-500/10'   };
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -275,6 +275,11 @@ export default function InstrumentPage() {
     tickerStr ? `${API_URL}/api/instruments/chart/${tickerStr}?period=6mo&interval=1d` : null,
     fetcher, { revalidateOnFocus: false, dedupingInterval: 3_600_000 }
   );
+  // Always-active financials for FOMO — never lazy, so badge is consistent on all tabs
+  const { data: fomoFinancials } = useSWR<FinancialsData>(
+    tickerStr ? `${API_URL}/api/instruments/financials/${tickerStr}?period=annual` : null,
+    fetcher, { revalidateOnFocus: false, dedupingInterval: 3_600_000 }
+  );
 
   // ── Chart data processing ──────────────────────────────────────────────────
   const rawHistorical = chartResponse?.data ?? [];
@@ -292,10 +297,10 @@ export default function InstrumentPage() {
     return { from: fromDate, to: lastDate };
   }, [historical, tf.isIntraday, tf.visibleDays]);
 
-  // ── FOMO score ─────────────────────────────────────────────────────────────
+  // ── FOMO score — uses dedicated always-loaded fetches for consistency ────────
   const fomoResult = useMemo(
-    () => computeFomoScore(fomoChart?.data ?? [], quote?.volume, financials),
-    [fomoChart, quote?.volume, financials]
+    () => computeFomoScore(fomoChart?.data ?? [], quote?.volume, fomoFinancials),
+    [fomoChart, quote?.volume, fomoFinancials]
   );
 
   if (!tickerStr) return (
@@ -537,10 +542,13 @@ function TfBtn({ label, active, onClick }: { label: string; active: boolean; onC
 
 /** Small inline FOMO badge for the header stats row */
 function FomoBadge({ score }: { score: number }) {
-  const { emoji, label, textColor, bgColor } = getFomoMeta(score);
+  const { label, ringColor, textColor, bgColor } = getFomoMeta(score);
   return (
-    <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-bold border border-current/20 ${textColor} ${bgColor}`}>
-      {emoji} {score} · {label}
+    <span className={`inline-flex items-center gap-2 px-2 py-0.5 rounded text-xs font-bold border border-current/20 ${textColor} ${bgColor}`}>
+      <span className="w-10 h-1.5 rounded-full overflow-hidden bg-black/30 inline-block align-middle shrink-0">
+        <span className="h-full block rounded-full" style={{ width: `${score}%`, background: ringColor }} />
+      </span>
+      {score} · {label}
     </span>
   );
 }
@@ -917,6 +925,96 @@ function AnalysisTab({
   );
 }
 
+// ── FOMO Semicircular Gauge ───────────────────────────────────────────────────
+function FomoGauge({ score }: { score: number }) {
+  const W = 220, H = 128;
+  const cx = W / 2;   // 110
+  const cy = H - 13;  // 115 — pivot sits near bottom
+  const R  = 90;
+  const SW = 18;      // track stroke width
+
+  // Angle in standard math convention (0=right, π=left, CCW positive)
+  const toAngle = (s: number) => Math.PI * (1 - s / 100);
+  const ptOnArc = (s: number, r: number) => ({
+    x: +(cx + r * Math.cos(toAngle(s))).toFixed(2),
+    y: +(cy - r * Math.sin(toAngle(s))).toFixed(2),
+  });
+
+  const start = ptOnArc(0, R);    // left arc tip  (20, 115)
+  const end   = ptOnArc(100, R);  // right arc tip (200, 115)
+  const sPt   = ptOnArc(Math.min(score, 99.9), R); // active arc end
+
+  // SVG arc: sweep-flag=1 → clockwise in SVG = goes over the top ✓
+  const bgArc     = `M ${start.x} ${start.y} A ${R} ${R} 0 0 1 ${end.x} ${end.y}`;
+  const activeArc = score <= 0 ? null
+    : score >= 100 ? bgArc
+    : `M ${start.x} ${start.y} A ${R} ${R} 0 0 1 ${sPt.x} ${sPt.y}`;
+
+  // Needle tip (slightly inside the track centre-line)
+  const needleLen = R - SW / 2 - 3;
+  const nPt = ptOnArc(score, needleLen);
+
+  const { label, ringColor } = getFomoMeta(score);
+
+  return (
+    <svg viewBox={`0 0 ${W} ${H}`} width={W} height={H} style={{ display: 'block' }}>
+      <defs>
+        {/* Full-brightness gradient (blue→gray→yellow→orange→red) */}
+        <linearGradient id="fg-active" x1="0%" y1="0%" x2="100%" y2="0%">
+          <stop offset="0%"   stopColor="#3b82f6" />
+          <stop offset="25%"  stopColor="#6b7280" />
+          <stop offset="50%"  stopColor="#eab308" />
+          <stop offset="75%"  stopColor="#f97316" />
+          <stop offset="100%" stopColor="#ef4444" />
+        </linearGradient>
+        {/* Dim version — shows the full scale as background */}
+        <linearGradient id="fg-dim" x1="0%" y1="0%" x2="100%" y2="0%">
+          <stop offset="0%"   stopColor="#3b82f6" stopOpacity="0.18" />
+          <stop offset="25%"  stopColor="#6b7280" stopOpacity="0.18" />
+          <stop offset="50%"  stopColor="#eab308" stopOpacity="0.18" />
+          <stop offset="75%"  stopColor="#f97316" stopOpacity="0.18" />
+          <stop offset="100%" stopColor="#ef4444" stopOpacity="0.18" />
+        </linearGradient>
+      </defs>
+
+      {/* Dark border track */}
+      <path d={bgArc} fill="none" stroke="#080c14" strokeWidth={SW + 6} strokeLinecap="round" />
+
+      {/* Dim full-range arc — the "dial background" */}
+      <path d={bgArc} fill="none" stroke="url(#fg-dim)" strokeWidth={SW} strokeLinecap="round" />
+
+      {/* Active arc — lights up from 0 to score */}
+      {activeArc && (
+        <path d={activeArc} fill="none" stroke="url(#fg-active)" strokeWidth={SW} strokeLinecap="round" />
+      )}
+
+      {/* Needle */}
+      <line x1={cx} y1={cy} x2={nPt.x} y2={nPt.y}
+        stroke="white" strokeWidth={2.5} strokeLinecap="round" opacity={0.9} />
+      {/* Needle pivot */}
+      <circle cx={cx} cy={cy} r={5}   fill="white" opacity={0.9} />
+      <circle cx={cx} cy={cy} r={2.5} fill="#080c14" />
+
+      {/* Score number */}
+      <text x={cx} y={cy - 24} textAnchor="middle"
+        fill="white" fontSize={30} fontWeight="bold" fontFamily="'Courier New', monospace">
+        {score}
+      </text>
+      {/* Label */}
+      <text x={cx} y={cy - 8} textAnchor="middle"
+        fill={ringColor} fontSize={11} fontWeight="700" fontFamily="sans-serif">
+        {label}
+      </text>
+
+      {/* Scale end labels */}
+      <text x={start.x + 2} y={start.y} dominantBaseline="hanging"
+        textAnchor="start" fill="#374151" fontSize={9} fontFamily="sans-serif">0</text>
+      <text x={end.x - 2} y={end.y} dominantBaseline="hanging"
+        textAnchor="end" fill="#374151" fontSize={9} fontFamily="sans-serif">100</text>
+    </svg>
+  );
+}
+
 // ── FOMO Indicator Card ───────────────────────────────────────────────────────
 function FomoCard({ fomoResult }: { fomoResult: FomoResult | null }) {
   if (!fomoResult) {
@@ -931,78 +1029,65 @@ function FomoCard({ fomoResult }: { fomoResult: FomoResult | null }) {
   }
 
   const { score, breakdown } = fomoResult;
-  const { emoji, label, ringColor, textColor, bgColor } = getFomoMeta(score);
+  const { ringColor, bgColor } = getFomoMeta(score);
 
   const items: { key: keyof FomoResult['breakdown']; label: string; max: number; info: string }[] = [
     { key: 'momentum', label: 'Price Momentum 30d', max: 30, info: 'Price change over last 30 days. +20% → max 30pts' },
-    { key: 'volume',   label: 'Volume Surge',       max: 20, info: 'Today\'s volume vs 20-day average. 2× avg → max 20pts' },
+    { key: 'volume',   label: 'Volume Surge',       max: 20, info: "Today's volume vs 20-day average. 2× avg → max 20pts" },
     { key: 'analyst',  label: 'Analyst Consensus',  max: 25, info: 'Weighted bullish analyst rating (Strong Buy weighted more). Max 25pts' },
     { key: 'eps',      label: 'EPS Beat History',   max: 25, info: 'Average EPS surprise over last 4 quarters. +10% avg → max 25pts' },
   ];
 
   return (
     <div className={`bg-terminal-surface border border-terminal-border rounded p-4 ${bgColor}`}>
-      {/* Header row */}
-      <div className="flex items-start justify-between mb-4">
-        <h3 className="text-sm font-semibold text-terminal-textMuted uppercase tracking-wider">
-          FOMO Indicator
-          <InfoTip
-            text="Composite momentum score 0–100. Components: price momentum (30pts), volume surge (20pts), analyst consensus (25pts), EPS beat history (25pts)."
-            dir="bottom"
-          />
-        </h3>
-        <div className={`flex items-center gap-3 ${textColor}`}>
-          <span className="text-3xl leading-none">{emoji}</span>
-          <div className="text-right">
-            <div className="text-3xl font-bold num leading-none">
-              {score}
-              <span className="text-sm font-normal text-terminal-textMuted ml-0.5">/100</span>
-            </div>
-            <div className="text-sm font-bold mt-0.5">{label}</div>
+      {/* Title */}
+      <h3 className="text-sm font-semibold text-terminal-textMuted uppercase tracking-wider mb-4">
+        FOMO Indicator
+        <InfoTip
+          text="Composite momentum score 0–100. Components: price momentum (30pts), volume surge (20pts), analyst consensus (25pts), EPS beat history (25pts)."
+          dir="bottom"
+        />
+      </h3>
+
+      {/* Gauge + breakdown side by side on larger screens */}
+      <div className="flex flex-col sm:flex-row items-center gap-6">
+        {/* Semicircular gauge */}
+        <div className="shrink-0">
+          <FomoGauge score={score} />
+          {/* Colour scale legend */}
+          <div className="flex justify-between mt-1 px-1 text-[9px]">
+            <span className="text-blue-400/60">Froid</span>
+            <span className="text-gray-400/60">Neutre</span>
+            <span className="text-yellow-400/60">Momentum</span>
+            <span className="text-orange-400/60">Chaud</span>
+            <span className="text-red-400/60">FOMO</span>
           </div>
         </div>
-      </div>
 
-      {/* Score bar */}
-      <div className="h-2.5 bg-terminal-bg rounded-full mb-5 overflow-hidden">
-        <div
-          className="h-full rounded-full transition-all"
-          style={{ width: `${score}%`, background: ringColor }}
-        />
-      </div>
-
-      {/* Breakdown rows */}
-      <div className="space-y-2.5">
-        {items.map(({ key, label: itemLabel, max, info }) => {
-          const pts = breakdown[key];
-          const pct = (pts / max) * 100;
-          return (
-            <div key={key} className="flex items-center gap-3">
-              <span className="text-xs text-terminal-textMuted w-40 shrink-0 inline-flex items-center">
-                {itemLabel}
-                <InfoTip text={info} />
-              </span>
-              <div className="flex-1 h-1.5 bg-terminal-bg rounded-full overflow-hidden">
-                <div
-                  className="h-full rounded-full"
-                  style={{ width: `${pct}%`, background: ringColor + 'bb' }}
-                />
+        {/* Breakdown bars */}
+        <div className="flex-1 w-full space-y-3">
+          {items.map(({ key, label: itemLabel, max, info }) => {
+            const pts = breakdown[key];
+            const pct = (pts / max) * 100;
+            return (
+              <div key={key}>
+                <div className="flex items-center justify-between mb-1">
+                  <span className="text-xs text-terminal-textMuted inline-flex items-center">
+                    {itemLabel}
+                    <InfoTip text={info} />
+                  </span>
+                  <span className="text-xs num font-semibold text-terminal-text">
+                    {pts}<span className="text-terminal-textDim">/{max}</span>
+                  </span>
+                </div>
+                <div className="h-1.5 bg-terminal-bg rounded-full overflow-hidden">
+                  <div className="h-full rounded-full"
+                    style={{ width: `${pct}%`, background: ringColor + 'cc' }} />
+                </div>
               </div>
-              <span className="text-xs num font-semibold text-terminal-text w-12 text-right shrink-0">
-                {pts}<span className="text-terminal-textDim">/{max}</span>
-              </span>
-            </div>
-          );
-        })}
-      </div>
-
-      {/* Scale legend */}
-      <div className="flex items-center justify-between mt-4 pt-3 border-t border-terminal-border/40 text-[10px] text-terminal-textDim">
-        <span>❄️ Froid (0–20)</span>
-        <span>😐 Neutre (20–40)</span>
-        <span>📈 Momentum (40–60)</span>
-        <span>🔥 Chaud (60–80)</span>
-        <span>🚀 FOMO (80–100)</span>
+            );
+          })}
+        </div>
       </div>
     </div>
   );
