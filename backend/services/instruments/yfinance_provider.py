@@ -23,25 +23,47 @@ class YFinanceProvider(BaseInstrumentProvider):
             raise ValueError(f"Failed to fetch quote for {ticker}: {str(e)}")
 
     def _fetch_quote(self, ticker: str) -> Dict[str, Any]:
-        """Sync helper to fetch quote."""
-        stock = yf.Ticker(ticker)
-        info = stock.info
+        """Sync helper to fetch quote.
 
-        # Handle different keys Yahoo returns
-        price = info.get("currentPrice") or info.get("regularMarketPrice", 0)
-        prev_close = info.get("previousClose") or info.get("regularMarketPreviousClose", 0)
-        change = price - prev_close
+        Uses fast_info as primary (works for ETFs and equities alike),
+        falls back to info dict for any missing fields.
+        """
+        stock = yf.Ticker(ticker)
+
+        # fast_info is lightweight and works for all asset types
+        price = prev_close = volume = market_cap = 0.0
+        try:
+            fi = stock.fast_info
+            price      = float(getattr(fi, "last_price",           0) or 0)
+            prev_close = float(getattr(fi, "previous_close",       0) or 0)
+            volume     = int(  getattr(fi, "three_month_average_volume", 0) or 0)
+            market_cap = float(getattr(fi, "market_cap",           0) or 0)
+        except Exception:
+            pass
+
+        # Fallback to info for any zeros (some fields only in info)
+        if not price:
+            try:
+                info = stock.info or {}
+                price      = float(info.get("currentPrice") or info.get("regularMarketPrice", 0) or 0)
+                prev_close = float(info.get("previousClose") or info.get("regularMarketPreviousClose", 0) or 0)
+                volume     = int(info.get("volume", 0) or 0)
+                market_cap = float(info.get("marketCap", 0) or 0)
+            except Exception:
+                pass
+
+        change     = price - prev_close
         change_pct = (change / prev_close * 100) if prev_close else 0
 
         return {
-            "ticker": ticker,
-            "price": float(price) if price else 0,
-            "previous_close": float(prev_close) if prev_close else 0,
-            "change": float(change),
-            "change_pct": float(change_pct),
-            "volume": int(info.get("volume", 0)),
-            "market_cap": float(info.get("marketCap", 0)) if info.get("marketCap") else None,
-            "timestamp": datetime.now().isoformat(),
+            "ticker":         ticker,
+            "price":          price,
+            "previous_close": prev_close,
+            "change":         change,
+            "change_pct":     change_pct,
+            "volume":         volume,
+            "market_cap":     market_cap or None,
+            "timestamp":      datetime.now().isoformat(),
         }
 
     async def get_fundamentals(self, ticker: str) -> Dict[str, Any]:
@@ -54,12 +76,37 @@ class YFinanceProvider(BaseInstrumentProvider):
             raise ValueError(f"Failed to fetch fundamentals for {ticker}: {str(e)}")
 
     def _fetch_fundamentals(self, ticker: str) -> Dict[str, Any]:
-        """Sync helper to fetch fundamentals."""
+        """Sync helper to fetch fundamentals.
+
+        For ETFs, Yahoo Finance's quoteSummary endpoint returns 404 for
+        stock-specific modules (assetProfile, defaultKeyStatistics, etc.).
+        We fall back to fast_info + basic ETF fields in that case.
+        """
         stock = yf.Ticker(ticker)
-        info = stock.info
+
+        # Try full info — works for equities; may 404 for ETFs
+        info: dict = {}
+        try:
+            info = stock.info or {}
+        except Exception as exc:
+            print(f"[YF] {ticker} info failed ({exc}), trying fast_info")
+            try:
+                fi = stock.fast_info
+                # fast_info is a SimpleNamespace-like object
+                info = {
+                    "quoteType":            getattr(fi, "quote_type",        "ETF"),
+                    "longName":             getattr(fi, "regular_market_name", ticker),
+                    "marketCap":            getattr(fi, "market_cap",         None),
+                    "fiftyTwoWeekHigh":     getattr(fi, "year_high",          None),
+                    "fiftyTwoWeekLow":      getattr(fi, "year_low",           None),
+                    "dividendYield":        getattr(fi, "last_dividend_value", None),
+                }
+            except Exception as exc2:
+                print(f"[YF] {ticker} fast_info also failed: {exc2}")
+                info = {"quoteType": "ETF", "longName": ticker}
 
         # Normalize quoteType → simple type string
-        quote_type = info.get("quoteType", "").upper()
+        quote_type = str(info.get("quoteType", "")).upper()
         type_map = {
             "EQUITY": "equity", "ETF": "etf", "MUTUALFUND": "mutual_fund",
             "INDEX": "index", "CRYPTOCURRENCY": "crypto",
@@ -67,24 +114,31 @@ class YFinanceProvider(BaseInstrumentProvider):
         }
         instrument_type = type_map.get(quote_type, quote_type.lower() or "equity")
 
+        def _f(key: str):
+            v = info.get(key)
+            try:
+                return float(v) if v else None
+            except (TypeError, ValueError):
+                return None
+
         return {
             "ticker": ticker,
             "type": instrument_type,
-            "name": info.get("longName", ""),
+            "name": info.get("longName") or info.get("shortName", ""),
             "sector": info.get("sector", ""),
             "industry": info.get("industry", ""),
-            "market_cap": float(info.get("marketCap", 0)) if info.get("marketCap") else None,
-            "pe_ratio": float(info.get("trailingPE", 0)) if info.get("trailingPE") else None,
-            "pb_ratio": float(info.get("priceToBook", 0)) if info.get("priceToBook") else None,
-            "dividend_yield": float(info.get("dividendYield", 0)) if info.get("dividendYield") else None,
-            "roe": float(info.get("returnOnEquity", 0)) if info.get("returnOnEquity") else None,
-            "debt_to_equity": float(info.get("debtToEquity", 0)) if info.get("debtToEquity") else None,
-            "revenue_ttm": float(info.get("totalRevenue", 0)) if info.get("totalRevenue") else None,
-            "gross_margin": float(info.get("grossMargins", 0)) if info.get("grossMargins") else None,
-            "eps": float(info.get("trailingEps", 0)) if info.get("trailingEps") else None,
-            "52_week_high": float(info.get("fiftyTwoWeekHigh", 0)) if info.get("fiftyTwoWeekHigh") else None,
-            "52_week_low": float(info.get("fiftyTwoWeekLow", 0)) if info.get("fiftyTwoWeekLow") else None,
-            "beta": float(info.get("beta", 0)) if info.get("beta") else None,
+            "market_cap":      _f("marketCap"),
+            "pe_ratio":        _f("trailingPE"),
+            "pb_ratio":        _f("priceToBook"),
+            "dividend_yield":  _f("dividendYield"),
+            "roe":             _f("returnOnEquity"),
+            "debt_to_equity":  _f("debtToEquity"),
+            "revenue_ttm":     _f("totalRevenue"),
+            "gross_margin":    _f("grossMargins"),
+            "eps":             _f("trailingEps"),
+            "52_week_high":    _f("fiftyTwoWeekHigh"),
+            "52_week_low":     _f("fiftyTwoWeekLow"),
+            "beta":            _f("beta"),
         }
 
     async def get_news(self, ticker: str) -> List[Dict[str, Any]]:
