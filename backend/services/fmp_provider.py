@@ -93,15 +93,20 @@ class FMPProvider:
             return cached
 
         raw = await self._get(f"/etf-holder/{ticker.upper()}")
-        result = [
-            {
-                "ticker": (item.get("asset") or "").strip(),
-                "name": item.get("name") or (item.get("asset") or ""),
-                "weight_pct": round(float(item.get("weightPercentage") or 0), 3),
-            }
-            for item in raw
-            if (item.get("asset") or "").strip()
-        ]
+        result = []
+        for item in raw:
+            sym = (item.get("asset") or "").strip()
+            if not sym:
+                continue
+            raw_pct = float(item.get("weightPercentage") or 0)
+            # FMP returns fractions (0.063 = 6.3%) — multiply by 100
+            # Guard: if already a percentage (> 1), keep as-is
+            weight_pct = round(raw_pct * 100, 3) if raw_pct <= 1 else round(raw_pct, 3)
+            result.append({
+                "ticker": sym,
+                "name": item.get("name") or sym,
+                "weight_pct": weight_pct,
+            })
         result.sort(key=lambda x: x["weight_pct"], reverse=True)
         result = result[:25]
 
