@@ -27,17 +27,25 @@ export function Header() {
   const router = useRouter();
 
   return (
-    <header className="border-b border-terminal-border bg-terminal-surface sticky top-0 z-20 backdrop-blur-md bg-opacity-95">
+    <header className="border-b border-terminal-border bg-terminal-surface/95 sticky top-0 z-20 backdrop-blur-sm shadow-sm">
       <div className="max-w-7xl mx-auto px-4 h-14 flex items-center gap-4">
 
-        {/* Logo — shrink-0 pour ne jamais être écrasé */}
+        {/* Logo */}
         <Link
           href="/"
-          className="flex items-center gap-2 text-terminal-text font-semibold whitespace-nowrap shrink-0"
+          className="flex items-center gap-2 whitespace-nowrap shrink-0 group"
         >
-          <span className="text-terminal-cyan text-lg">▲</span>
-          <span className="hidden sm:inline">Monte Carlo v3</span>
-          <span className="sm:hidden text-terminal-cyan">MC3</span>
+          <span
+            className="w-7 h-7 rounded flex items-center justify-center text-white text-xs font-bold shrink-0"
+            style={{ background: 'var(--color-primary)' }}
+          >
+            MC
+          </span>
+          <span className="hidden sm:inline font-serif text-base font-normal text-terminal-text group-hover:text-terminal-cyan transition-colors">
+            Monte Carlo
+          </span>
+          <span className="hidden sm:inline text-xs text-terminal-textDim font-mono">v3</span>
+          <span className="sm:hidden font-serif text-sm text-terminal-text">MC3</span>
         </Link>
 
         {/* Search bar — flex-1 avec min-width garanti */}

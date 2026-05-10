@@ -1,67 +1,180 @@
 /**
- * Global Styles — Phase 1.5 (Polish v1)
- * =====================================
+ * Global Styles — TintScale light theme
+ * =======================================
  *
- * Terminal aesthetic: deep navy background, Inter sans + JetBrains Mono.
- * Tailwind classes do most of the work; this file just sets the base.
+ * Design: warm light premium (cream backgrounds, crimson accents,
+ * DM Serif Display headings, DM Sans body, JetBrains Mono numbers).
  */
 
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
 
+/* ── TintScale design tokens ────────────────────────────────────────── */
+:root {
+  /* Text shades */
+  --color-text-950: #0d0a0a;
+  --color-text-900: #1b1616;
+  --color-text-800: #2b2424;
+  --color-text-700: #473d3d;
+  --color-text-600: #5a4f4f;
+  --color-text-500: #7b7070;
+  --color-text-400: #a79e9e;
+  --color-text-300: #d8d3d3;
+  --color-text-200: #e7e4e4;
+  --color-text-100: #f6f5f5;
+  --color-text-50:  #fbfafa;
+
+  /* Background shades */
+  --color-bg-950: #0c0a08;
+  --color-bg-900: #1a1713;
+  --color-bg-800: #2a2521;
+  --color-bg-700: #453f39;
+  --color-bg-600: #57514b;
+  --color-bg-500: #78726c;
+  --color-bg-400: #a5a09b;
+  --color-bg-300: #d7d3d0;
+  --color-bg-200: #e7e5e3;
+  --color-bg-100: #f6f5f4;
+  --color-bg-50:  #fafaf9;
+
+  /* Primary shades — crimson */
+  --color-primary-950: #200000;
+  --color-primary-900: #3a0000;
+  --color-primary-800: #550000;
+  --color-primary-700: #840000;
+  --color-primary-600: #a20000;
+  --color-primary-500: #b92e25;
+  --color-primary-400: #eb7c6e;
+  --color-primary-300: #ffbfb4;
+  --color-primary-200: #ffdad3;
+  --color-primary-100: #ffefec;
+  --color-primary-50:  #fff8f6;
+
+  /* Secondary shades — teal */
+  --color-secondary-950: #000f0f;
+  --color-secondary-900: #001e1d;
+  --color-secondary-800: #00302e;
+  --color-secondary-700: #004d4b;
+  --color-secondary-600: #006260;
+  --color-secondary-500: #00afab;
+  --color-secondary-400: #50b3af;
+  --color-secondary-300: #a9e1de;
+  --color-secondary-200: #ceecea;
+  --color-secondary-100: #e9f9f8;
+  --color-secondary-50:  #f5fcfb;
+
+  /* Accent shades — green */
+  --color-accent-950: #001007;
+  --color-accent-900: #002012;
+  --color-accent-800: #003120;
+  --color-accent-700: #004f37;
+  --color-accent-600: #006548;
+  --color-accent-500: #009371;
+  --color-accent-400: #60b497;
+  --color-accent-300: #b0e1ce;
+  --color-accent-200: #d2ede2;
+  --color-accent-100: #ebf9f3;
+  --color-accent-50:  #f6fcf9;
+
+  /* Semantic aliases */
+  --color-text:            #1b1616;
+  --color-text-secondary:  #a79e9e;
+  --color-background:      #fafaf9;
+  --color-surface:         #f6f5f4;
+  --color-border:          #e7e5e3;
+  --color-primary:         #b92e25;
+  --color-primary-dark:    #840000;
+  --color-primary-light:   #ffdad3;
+  --color-secondary:       #00afab;
+  --color-accent:          #009371;
+
+  /* Typography */
+  --font-heading:              "DM Serif Display", ui-serif, Georgia, serif;
+  --font-body:                 "DM Sans", ui-sans-serif, system-ui, sans-serif;
+
+  /* Type Scale */
+  --font-size-small: 0.8rem;
+  --font-size-body:  1rem;
+  --font-size-h6:    1.25rem;
+  --font-size-h5:    1.563rem;
+  --font-size-h4:    1.953rem;
+  --font-size-h3:    2.441rem;
+  --font-size-h2:    3.052rem;
+  --font-size-h1:    3.815rem;
+  --heading-line-height:    1.2;
+  --body-line-height:       1.5;
+  --heading-letter-spacing: 0em;
+  --body-letter-spacing:    0em;
+}
+
+@media (max-width: 768px) {
+  :root {
+    --font-size-small: 0.729rem;
+    --font-size-body:  0.875rem;
+    --font-size-h6:    1.05rem;
+    --font-size-h5:    1.26rem;
+    --font-size-h4:    1.512rem;
+    --font-size-h3:    1.814rem;
+    --font-size-h2:    2.177rem;
+    --font-size-h1:    2.613rem;
+  }
+}
+
+/* ── Base ───────────────────────────────────────────────────────────── */
 @layer base {
   html,
   body,
   #__next {
-    width: 100%;
+    width:  100%;
     height: 100%;
   }
 
   body {
     @apply bg-terminal-bg text-terminal-text antialiased;
+    font-family: var(--font-dm-sans), 'DM Sans', ui-sans-serif, system-ui, sans-serif;
+    line-height: var(--body-line-height);
+    color: var(--color-text);
+    background-color: var(--color-background);
   }
 
-  /* Numbers should always be monospace and tabular for clean column alignment */
+  /* Serif headings */
+  h1, h2 {
+    font-family: var(--font-dm-serif), 'DM Serif Display', ui-serif, Georgia, serif;
+    line-height: var(--heading-line-height);
+    letter-spacing: var(--heading-letter-spacing);
+  }
+
+  /* Numbers → monospace tabular for column alignment */
   .num,
   .tabular {
-    font-family: var(--font-jetbrains), 'JetBrains Mono', monospace;
+    font-family: var(--font-jetbrains), 'JetBrains Mono', 'IBM Plex Mono', monospace;
     font-variant-numeric: tabular-nums;
     letter-spacing: -0.01em;
   }
 
-  /* Smoother scrollbar (terminal style) */
-  ::-webkit-scrollbar {
-    width: 10px;
-    height: 10px;
-  }
-
-  ::-webkit-scrollbar-track {
-    background: #0a0e1a;
-  }
-
-  ::-webkit-scrollbar-thumb {
-    background: #2a3040;
-    border-radius: 5px;
-  }
-
-  ::-webkit-scrollbar-thumb:hover {
-    background: #3a4050;
-  }
+  /* Light-theme scrollbar */
+  ::-webkit-scrollbar        { width: 8px; height: 8px; }
+  ::-webkit-scrollbar-track  { background: #f6f5f4; }
+  ::-webkit-scrollbar-thumb  { background: #d7d3d0; border-radius: 4px; }
+  ::-webkit-scrollbar-thumb:hover { background: #a5a09b; }
 }
 
+/* ── Components ─────────────────────────────────────────────────────── */
 @layer components {
-  /* Reusable card style for the trading desk feel */
+  /* Premium card */
   .card-terminal {
-    @apply bg-terminal-surface border border-terminal-border rounded-md;
-    @apply transition-colors duration-150;
+    @apply bg-terminal-surface border border-terminal-border rounded-lg;
+    @apply transition-all duration-150;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.06);
   }
 
   .card-terminal:hover {
-    @apply bg-terminal-surfaceHi border-terminal-cyanDim;
+    @apply bg-terminal-surfaceHi;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.08);
   }
 
-  /* Ticker tape scrolling animation */
+  /* Ticker tape scrolling */
   .ticker-track {
     display: flex;
     width: max-content;

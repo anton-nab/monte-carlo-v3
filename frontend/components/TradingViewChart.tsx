@@ -107,28 +107,28 @@ export function TradingViewChart({
       height,
       layout: {
         background: { type: ColorType.Solid, color: 'transparent' },
-        textColor: '#7a8294',
+        textColor: '#5a4f4f',
         fontFamily: 'JetBrains Mono, monospace',
         fontSize: 11,
       },
       grid: {
-        vertLines: { color: 'rgba(42,48,64,0.3)' },
-        horzLines: { color: 'rgba(42,48,64,0.3)' },
+        vertLines: { color: 'rgba(231,229,227,0.8)' },
+        horzLines: { color: 'rgba(231,229,227,0.8)' },
       },
       rightPriceScale: {
         visible: showAxes,
-        borderColor: '#2a3040',
+        borderColor: '#e7e5e3',
       },
       timeScale: {
         visible: showAxes,
-        borderColor: '#2a3040',
+        borderColor: '#e7e5e3',
         timeVisible: isIntraday,
         secondsVisible: false,
       },
       crosshair: {
         mode: 1,
-        vertLine: { color: '#00d9ff', width: 1, style: 2 },
-        horzLine: { color: '#00d9ff', width: 1, style: 2 },
+        vertLine: { color: '#b92e25', width: 1, style: 2 },
+        horzLine: { color: '#b92e25', width: 1, style: 2 },
       },
       handleScroll: showAxes,
       handleScale: showAxes,
@@ -136,12 +136,12 @@ export function TradingViewChart({
 
     if (resolvedChartType === 'candle') {
       const series = chart.addSeries(CandlestickSeries, {
-        upColor: '#26a69a',
-        downColor: '#ef5350',
-        borderUpColor: '#26a69a',
-        borderDownColor: '#ef5350',
-        wickUpColor: '#26a69a',
-        wickDownColor: '#ef5350',
+        upColor:        '#009371',
+        downColor:      '#b92e25',
+        borderUpColor:  '#009371',
+        borderDownColor:'#b92e25',
+        wickUpColor:    '#009371',
+        wickDownColor:  '#b92e25',
       });
       seriesRef.current = series;
     } else if (resolvedChartType === 'area') {
