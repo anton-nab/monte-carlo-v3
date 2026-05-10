@@ -20,19 +20,14 @@ interface Suggestion {
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
 
-/** Well-known index tickers that should route to /indices/[symbol] */
-const INDEX_TICKERS = new Set([
-  '^GSPC', '^NDX', '^DJI', '^VIX', '^RUT', '^FTSE', '^N225',
-  '^TNX', '^HSI', '^GDAXI', '^FCHI', '^STOXX50E', '^AXJO',
-  '^BVSP', '^MXX', '^NSEI', '^STI', '^KS11',
-]);
-
-function isIndexTicker(ticker: string, type?: string): boolean {
-  return (
-    ticker.startsWith('^') ||
-    INDEX_TICKERS.has(ticker.toUpperCase()) ||
-    (type?.toLowerCase().includes('index') ?? false)
-  );
+/**
+ * Route to /indices/[symbol] only if the ticker starts with '^'.
+ * All real market indices in Yahoo Finance use the ^ prefix (^GSPC, ^FCHI, etc.).
+ * Checking the `type` field is intentionally avoided — it can return unexpected
+ * values for ordinary stocks (e.g. AI.PA / Air Liquide) and cause wrong routing.
+ */
+function isIndexTicker(ticker: string): boolean {
+  return ticker.startsWith('^');
 }
 
 export function GlobalSearch() {
@@ -118,7 +113,7 @@ export function GlobalSearch() {
   };
 
   const selectSuggestion = (suggestion: Suggestion) => {
-    const route = isIndexTicker(suggestion.ticker, suggestion.type)
+    const route = isIndexTicker(suggestion.ticker)
       ? `/indices/${suggestion.ticker}`
       : `/instrument/${suggestion.ticker}`;
     router.push(route);
