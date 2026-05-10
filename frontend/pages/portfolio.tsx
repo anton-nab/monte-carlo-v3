@@ -406,6 +406,131 @@ function PortfolioCard({
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// Portfolio templates (roulette)
+// ─────────────────────────────────────────────────────────────────────────────
+
+interface PortfolioTemplate {
+  id: string;
+  name: string;
+  description: string;
+  tag: string;
+  color: string;
+  assets: { ticker: string; weight: string }[];
+}
+
+const PORTFOLIO_TEMPLATES: PortfolioTemplate[] = [
+  {
+    id: 'tech',
+    name: 'Tech Giants',
+    description: 'Big Tech US — semi-conducteurs inclus',
+    tag: '🚀',
+    color: '#00d9ff',
+    assets: [
+      { ticker: 'AAPL',  weight: '20' },
+      { ticker: 'MSFT',  weight: '20' },
+      { ticker: 'NVDA',  weight: '20' },
+      { ticker: 'GOOGL', weight: '15' },
+      { ticker: 'META',  weight: '15' },
+      { ticker: 'AMZN',  weight: '10' },
+    ],
+  },
+  {
+    id: 'value',
+    name: 'Value & Dividendes',
+    description: 'P/E faible, dividendes élevés, faible volatilité',
+    tag: '💎',
+    color: '#f9a825',
+    assets: [
+      { ticker: 'BRK-B', weight: '25' },
+      { ticker: 'JPM',   weight: '20' },
+      { ticker: 'JNJ',   weight: '20' },
+      { ticker: 'PG',    weight: '20' },
+      { ticker: 'KO',    weight: '15' },
+    ],
+  },
+  {
+    id: 'allweather',
+    name: 'All Weather',
+    description: 'Stratégie Ray Dalio — résistant à tous les cycles',
+    tag: '⛅',
+    color: '#26a69a',
+    assets: [
+      { ticker: 'SPY', weight: '30' },
+      { ticker: 'TLT', weight: '40' },
+      { ticker: 'GLD', weight: '15' },
+      { ticker: 'IEF', weight: '15' },
+    ],
+  },
+  {
+    id: '6040',
+    name: '60/40 Classique',
+    description: '60 % actions US / 40 % obligations — traditionnel',
+    tag: '⚖️',
+    color: '#9c27b0',
+    assets: [
+      { ticker: 'SPY', weight: '60' },
+      { ticker: 'AGG', weight: '40' },
+    ],
+  },
+  {
+    id: 'global',
+    name: 'ETF Mondial',
+    description: 'Diversification globale via ETF indiciels',
+    tag: '🌍',
+    color: '#4caf50',
+    assets: [
+      { ticker: 'VTI',  weight: '30' },
+      { ticker: 'VXUS', weight: '25' },
+      { ticker: 'BND',  weight: '20' },
+      { ticker: 'GLD',  weight: '15' },
+      { ticker: 'VNQ',  weight: '10' },
+    ],
+  },
+  {
+    id: 'sante',
+    name: 'Santé & Biotech',
+    description: 'Pharma, medtech et biotech',
+    tag: '🧬',
+    color: '#ef6c00',
+    assets: [
+      { ticker: 'UNH',  weight: '25' },
+      { ticker: 'JNJ',  weight: '25' },
+      { ticker: 'ABBV', weight: '20' },
+      { ticker: 'LLY',  weight: '20' },
+      { ticker: 'BMY',  weight: '10' },
+    ],
+  },
+  {
+    id: 'energie',
+    name: 'Énergie & Transition',
+    description: 'Mix fossile + renouvelable',
+    tag: '⚡',
+    color: '#ff5722',
+    assets: [
+      { ticker: 'XOM',  weight: '25' },
+      { ticker: 'CVX',  weight: '20' },
+      { ticker: 'NEE',  weight: '20' },
+      { ticker: 'ENPH', weight: '20' },
+      { ticker: 'FSLR', weight: '15' },
+    ],
+  },
+  {
+    id: 'crypto',
+    name: 'Crypto + Actions',
+    description: 'Exposition crypto via ETF + tech',
+    tag: '₿',
+    color: '#ff9800',
+    assets: [
+      { ticker: 'IBIT',  weight: '20' },
+      { ticker: 'COIN',  weight: '15' },
+      { ticker: 'MSTR',  weight: '15' },
+      { ticker: 'NVDA',  weight: '25' },
+      { ticker: 'MSFT',  weight: '25' },
+    ],
+  },
+];
+
+// ─────────────────────────────────────────────────────────────────────────────
 // Horizons / NSims options
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -439,9 +564,37 @@ export default function PortfolioPage() {
   const [initialInvestment, setInitialInvestment] = useState('10000');
 
   // ── État ─────────────────────────────────────────────────────────────────
-  const [result,  setResult]  = useState<PortfolioResult | null>(null);
-  const [running, setRunning] = useState(false);
-  const [error,   setError]   = useState<string | null>(null);
+  const [result,       setResult]       = useState<PortfolioResult | null>(null);
+  const [running,      setRunning]      = useState(false);
+  const [error,        setError]        = useState<string | null>(null);
+  const [spinning,     setSpinning]     = useState(false);
+  const [activeTemplate, setActiveTemplate] = useState<string | null>(null);
+
+  // ── Load template ────────────────────────────────────────────────────────
+  const loadTemplate = useCallback((tpl: PortfolioTemplate) => {
+    setActiveTemplate(tpl.id);
+    setAssets(tpl.assets.map((a) => ({ id: _nextId++, ticker: a.ticker, weight: a.weight })));
+    setResult(null);
+    setError(null);
+  }, []);
+
+  const spinRoulette = useCallback(() => {
+    setSpinning(true);
+    let count = 0;
+    const total = 12; // number of flickers
+    const interval = setInterval(() => {
+      const random = PORTFOLIO_TEMPLATES[Math.floor(Math.random() * PORTFOLIO_TEMPLATES.length)];
+      setActiveTemplate(random.id);
+      count++;
+      if (count >= total) {
+        clearInterval(interval);
+        setSpinning(false);
+        // Final pick
+        const final = PORTFOLIO_TEMPLATES[Math.floor(Math.random() * PORTFOLIO_TEMPLATES.length)];
+        loadTemplate(final);
+      }
+    }, 80);
+  }, [loadTemplate]);
 
   // ── Gestion du builder ──────────────────────────────────────────────────
   const addAsset = () => {
@@ -543,6 +696,79 @@ export default function PortfolioPage() {
           <span className="text-xs text-terminal-textDim bg-terminal-surface border border-terminal-border px-2 py-0.5 rounded">
             Phase 4 · Markowitz
           </span>
+        </div>
+
+        {/* ── Disclaimer ──────────────────────────────────────────── */}
+        <div className="flex items-start gap-3 bg-amber-950/30 border border-amber-700/40 rounded-lg px-4 py-3">
+          <span className="text-amber-400 text-lg shrink-0 mt-0.5">⚠️</span>
+          <p className="text-xs text-amber-200/80 leading-relaxed">
+            <strong className="text-amber-300">Avertissement — usage théorique uniquement.</strong>{' '}
+            Les simulations Monte Carlo sont un outil d&apos;analyse probabiliste basé sur des données historiques.
+            Elles ne constituent <strong>pas des conseils en investissement</strong> et ne préjugent en aucun cas des performances futures.
+            Tout investissement comporte un risque de perte en capital.
+            Les portefeuilles types ci-dessous sont fournis à titre <strong>illustratif uniquement</strong>.
+          </p>
+        </div>
+
+        {/* ── Roulette / Templates ─────────────────────────────────── */}
+        <div className="bg-terminal-surface border border-terminal-border rounded-lg p-5 space-y-4">
+          <div className="flex items-center justify-between flex-wrap gap-3">
+            <SectionTitle>Portefeuilles types</SectionTitle>
+            <button
+              onClick={spinRoulette}
+              disabled={spinning}
+              className={`flex items-center gap-2 px-4 py-2 rounded border text-sm font-semibold transition ${
+                spinning
+                  ? 'border-terminal-cyan text-terminal-cyan bg-terminal-cyan/10 cursor-wait'
+                  : 'border-terminal-border text-terminal-textMuted hover:border-terminal-cyan hover:text-terminal-cyan'
+              }`}
+            >
+              <span className={spinning ? 'animate-spin' : ''} style={{ display: 'inline-block' }}>🎲</span>
+              {spinning ? 'Tirage…' : 'Portefeuille aléatoire'}
+            </button>
+          </div>
+
+          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-2">
+            {PORTFOLIO_TEMPLATES.map((tpl) => {
+              const isActive = activeTemplate === tpl.id;
+              return (
+                <button
+                  key={tpl.id}
+                  onClick={() => loadTemplate(tpl)}
+                  className={`text-left p-3 rounded border transition group ${
+                    isActive
+                      ? 'border-2 bg-terminal-surfaceHi'
+                      : 'border-terminal-border hover:border-terminal-textMuted bg-terminal-bg'
+                  }`}
+                  style={isActive ? { borderColor: tpl.color } : undefined}
+                >
+                  <div className="flex items-center gap-1.5 mb-1">
+                    <span className="text-base">{tpl.tag}</span>
+                    <span className="text-xs font-semibold text-terminal-text truncate">{tpl.name}</span>
+                  </div>
+                  <p className="text-[10px] text-terminal-textDim leading-tight">{tpl.description}</p>
+                  <div className="flex flex-wrap gap-1 mt-2">
+                    {tpl.assets.map((a) => (
+                      <span
+                        key={a.ticker}
+                        className="text-[9px] font-mono px-1 py-0.5 rounded"
+                        style={{
+                          background: isActive ? `${tpl.color}22` : 'rgba(255,255,255,0.04)',
+                          color: isActive ? tpl.color : '#6b7280',
+                        }}
+                      >
+                        {a.ticker}
+                      </span>
+                    ))}
+                  </div>
+                </button>
+              );
+            })}
+          </div>
+          <p className="text-[10px] text-terminal-textDim">
+            Cliquer sur un modèle charge automatiquement les actifs dans le constructeur ci-dessous.
+            Les poids peuvent être modifiés librement avant l&apos;analyse.
+          </p>
         </div>
 
         {/* ── Constructeur ────────────────────────────────────────── */}
@@ -732,7 +958,7 @@ export default function PortfolioPage() {
           <div className="border border-dashed border-terminal-border rounded-lg p-12 text-center text-terminal-textDim">
             <div className="text-4xl mb-3">💼</div>
             <p className="text-sm">
-              Ajoutez vos actifs, configurez les poids, puis cliquez sur{' '}
+              Choisissez un portefeuille type ou construisez le vôtre, puis cliquez sur{' '}
               <strong className="text-terminal-text">▶ Analyser le portefeuille</strong>
             </p>
             <p className="text-xs mt-1">
@@ -1119,6 +1345,18 @@ export default function PortfolioPage() {
                   </span>
                 ))}
               </div>
+            </div>
+
+            {/* ── Disclaimer résultats ───────────────────────────────── */}
+            <div className="flex items-start gap-3 border border-terminal-border/50 rounded-lg px-4 py-3 bg-terminal-surface/50">
+              <span className="text-terminal-textDim text-sm shrink-0">ℹ️</span>
+              <p className="text-[11px] text-terminal-textDim leading-relaxed">
+                <strong className="text-terminal-textMuted">Ces résultats sont purement théoriques.</strong>{' '}
+                Le modèle GBM (Geometric Brownian Motion) suppose une distribution log-normale des rendements et une volatilité constante,
+                hypothèses qui ne reflètent pas la réalité des marchés (queues épaisses, crises, corrélations dynamiques).
+                Les performances passées ne présagent pas des performances futures.
+                <strong className="text-terminal-textMuted"> Ce n&apos;est pas un conseil en investissement.</strong>
+              </p>
             </div>
           </>
         )}
