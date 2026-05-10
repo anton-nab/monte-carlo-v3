@@ -272,6 +272,198 @@ class YFinanceProvider(BaseInstrumentProvider):
 
         return result
 
+    # ─────────────────────────────────────────────────────────────────────────
+    # Phase 6 — Financial Statements + Earnings + Analyst
+    # ─────────────────────────────────────────────────────────────────────────
+
+    async def get_financials_data(self, ticker: str, period: str = "annual") -> Dict[str, Any]:
+        """Income Statement + Balance Sheet + Cash Flow + Earnings + Analyst."""
+        loop = asyncio.get_event_loop()
+        return await loop.run_in_executor(None, self._fetch_financials, ticker, period)
+
+    def _safe_val(self, series, col) -> float | None:
+        """Extract a single float value from a Series, handling NaN."""
+        if series is None:
+            return None
+        try:
+            v = series.get(col) if hasattr(series, "get") else series[col]
+            f = float(v)
+            return None if f != f else round(f, 2)  # NaN → None
+        except Exception:
+            return None
+
+    def _row(self, df, *names):
+        """Find first matching row in a DataFrame (tries multiple names)."""
+        if df is None or df.empty:
+            return None
+        for name in names:
+            if name in df.index:
+                return df.loc[name]
+        return None
+
+    def _df_to_records(self, df, metric_map: dict) -> list:
+        """
+        Convert a yfinance financial DataFrame to list of {date, metric1, ...}.
+        df: rows = metric names, columns = Timestamps (most recent first).
+        metric_map: {output_key: [possible_row_names, ...]}
+        Returns records sorted oldest → newest.
+        """
+        if df is None or df.empty:
+            return []
+
+        records = []
+        for col in df.columns:
+            date_str = col.strftime("%Y-%m-%d") if hasattr(col, "strftime") else str(col)[:10]
+            rec = {"date": date_str}
+            for key, names in metric_map.items():
+                series = self._row(df, *names)
+                rec[key] = self._safe_val(series, col)
+            records.append(rec)
+
+        # Sort oldest → newest
+        records.sort(key=lambda r: r["date"])
+        return records
+
+    def _fetch_financials(self, ticker: str, period: str) -> Dict[str, Any]:
+        """Sync: fetch all financial statements for a ticker."""
+        stock = yf.Ticker(ticker)
+        quarterly = period == "quarterly"
+
+        # ── Income Statement ─────────────────────────────────────────────────
+        is_df = stock.quarterly_financials if quarterly else stock.financials
+        income = self._df_to_records(is_df, {
+            "revenue":          ["Total Revenue"],
+            "gross_profit":     ["Gross Profit"],
+            "ebitda":           ["EBITDA", "Normalized EBITDA"],
+            "operating_income": ["Operating Income", "EBIT"],
+            "net_income":       ["Net Income", "Net Income Common Stockholders",
+                                 "Net Income Including Noncontrolling Interests"],
+            "rd_expense":       ["Research And Development"],
+            "sga_expense":      ["Selling General And Administration"],
+        })
+        # Add margin ratios
+        for row in income:
+            rev = row.get("revenue")
+            if rev and rev != 0:
+                gp  = row.get("gross_profit")
+                oi  = row.get("operating_income")
+                ni  = row.get("net_income")
+                row["gross_margin"]     = round(gp / rev, 4)  if gp  is not None else None
+                row["operating_margin"] = round(oi / rev, 4)  if oi  is not None else None
+                row["net_margin"]       = round(ni / rev, 4)  if ni  is not None else None
+            else:
+                row["gross_margin"] = row["operating_margin"] = row["net_margin"] = None
+
+        # ── Balance Sheet ────────────────────────────────────────────────────
+        bs_df = stock.quarterly_balance_sheet if quarterly else stock.balance_sheet
+        balance = self._df_to_records(bs_df, {
+            "total_assets":      ["Total Assets"],
+            "total_liabilities": ["Total Liabilities Net Minority Interest", "Total Liab"],
+            "equity":            ["Common Stock Equity", "Stockholders Equity",
+                                  "Total Equity Gross Minority Interest"],
+            "cash":              ["Cash And Cash Equivalents",
+                                  "Cash Cash Equivalents And Short Term Investments"],
+            "total_debt":        ["Total Debt"],
+            "net_debt":          ["Net Debt"],
+        })
+        # Compute net_debt if missing
+        for row in balance:
+            if row.get("net_debt") is None:
+                td = row.get("total_debt")
+                ca = row.get("cash")
+                if td is not None and ca is not None:
+                    row["net_debt"] = round(td - ca, 2)
+
+        # ── Cash Flow ────────────────────────────────────────────────────────
+        cf_df = stock.quarterly_cashflow if quarterly else stock.cashflow
+        cashflow = self._df_to_records(cf_df, {
+            "operating_cf":   ["Operating Cash Flow",
+                               "Cash Flow From Continuing Operating Activities"],
+            "investing_cf":   ["Investing Cash Flow",
+                               "Cash Flow From Continuing Investing Activities"],
+            "financing_cf":   ["Financing Cash Flow",
+                               "Cash Flow From Continuing Financing Activities"],
+            "capex":          ["Capital Expenditure"],
+            "free_cf":        ["Free Cash Flow"],
+        })
+        # Compute free_cf if missing
+        for row in cashflow:
+            if row.get("free_cf") is None:
+                op = row.get("operating_cf")
+                cx = row.get("capex")
+                if op is not None and cx is not None:
+                    row["free_cf"] = round(op + cx, 2)  # capex is negative
+
+        # ── Earnings History ─────────────────────────────────────────────────
+        earnings = []
+        try:
+            eh = stock.earnings_history
+            if eh is not None and not eh.empty:
+                for idx, row in eh.iterrows():
+                    date_str = idx.strftime("%Y-%m-%d") if hasattr(idx, "strftime") else str(idx)[:10]
+                    actual   = row.get("epsActual")
+                    estimate = row.get("epsEstimate")
+                    surprise = row.get("surprisePercent")
+                    period_lbl = row.get("period", "")
+                    earnings.append({
+                        "date":         date_str,
+                        "period":       str(period_lbl),
+                        "eps_actual":   float(actual)   if actual   == actual   else None,
+                        "eps_estimate": float(estimate) if estimate == estimate else None,
+                        "surprise_pct": float(surprise) * 100 if (surprise == surprise and surprise is not None) else None,
+                    })
+                earnings.sort(key=lambda r: r["date"])
+                earnings = earnings[-8:]  # keep last 8 quarters
+        except Exception:
+            pass
+
+        # ── Analyst Recommendations ──────────────────────────────────────────
+        analyst = {"recommendations": None, "price_targets": None}
+        try:
+            rec_summary = getattr(stock, "recommendations_summary", None)
+            if rec_summary is not None and not rec_summary.empty:
+                # Period '0m' = current month
+                row0 = rec_summary[rec_summary["period"] == "0m"] if "period" in rec_summary.columns else rec_summary.iloc[:1]
+                if not row0.empty:
+                    r = row0.iloc[0]
+                    analyst["recommendations"] = {
+                        "strong_buy":   int(r.get("strongBuy", 0)   or 0),
+                        "buy":          int(r.get("buy", 0)          or 0),
+                        "hold":         int(r.get("hold", 0)         or 0),
+                        "sell":         int(r.get("sell", 0)         or 0),
+                        "strong_sell":  int(r.get("strongSell", 0)   or 0),
+                    }
+        except Exception:
+            pass
+
+        try:
+            pt = stock.analyst_price_targets
+            if pt is not None:
+                # pt may be a dict or a Series
+                pt_dict = pt if isinstance(pt, dict) else pt.to_dict()
+                def _fv(k):
+                    v = pt_dict.get(k)
+                    return float(v) if v is not None and str(v) != "nan" else None
+                analyst["price_targets"] = {
+                    "low":    _fv("low"),
+                    "mean":   _fv("mean"),
+                    "high":   _fv("high"),
+                    "median": _fv("median"),
+                    "count":  int(pt_dict.get("numberOfAnalysts", 0) or 0),
+                }
+        except Exception:
+            pass
+
+        return {
+            "ticker":           ticker,
+            "period":           period,
+            "income_statement": income,
+            "balance_sheet":    balance,
+            "cash_flow":        cashflow,
+            "earnings":         earnings,
+            "analyst":          analyst,
+        }
+
     async def search(self, query: str, limit: int = 10) -> List[Dict[str, Any]]:
         """Search for instruments (basic implementation).
 

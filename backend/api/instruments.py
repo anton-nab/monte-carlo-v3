@@ -123,6 +123,22 @@ async def get_news(ticker: str):
         raise HTTPException(status_code=400, detail=str(e))
 
 
+@router.get("/financials/{ticker}")
+async def get_financials(
+    ticker: str,
+    period: str = Query("annual", description="'annual' or 'quarterly'"),
+):
+    """Get full financial statements (IS + BS + CF) + earnings history + analyst data.
+
+    Example: GET /api/instruments/financials/AAPL?period=annual
+    """
+    try:
+        result = await service.get_financials(ticker.upper(), period)
+        return result
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
 @router.get("/etf-holdings/{ticker}")
 async def get_etf_holdings(ticker: str):
     """Get ETF top holdings via yfinance.

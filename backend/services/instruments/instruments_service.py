@@ -39,6 +39,10 @@ class InstrumentsService:
             "fetched_at": datetime.now().isoformat(),
         }
 
+    async def get_financials(self, ticker: str, period: str = "annual") -> Dict[str, Any]:
+        """Get full financial statements + earnings + analyst data."""
+        return await self.provider.get_financials_data(ticker, period)
+
     async def get_intraday_chart(
         self,
         ticker: str,
