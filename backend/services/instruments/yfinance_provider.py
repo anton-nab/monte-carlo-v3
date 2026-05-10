@@ -153,55 +153,71 @@ class YFinanceProvider(BaseInstrumentProvider):
             t = yf.Ticker(ticker)
             result = []
 
-            # Try modern funds_data API (yfinance >= 0.2.40)
+            # ── Path 1: funds_data.top_holdings (yfinance >= 0.2.36) ──
             try:
                 fd = t.funds_data
                 if fd is not None:
                     holdings_df = getattr(fd, "top_holdings", None)
                     if holdings_df is not None and not holdings_df.empty:
-                        # Symbol is the DataFrame index in newer yfinance versions
-                        holdings_df = holdings_df.reset_index()
-                        for _, row in holdings_df.iterrows():
-                            # Column names vary across yfinance versions
-                            sym = str(
-                                row.get("Symbol") or row.get("symbol") or
-                                row.get("Ticker") or row.get("ticker") or ""
-                            ).strip()
-                            name = str(
-                                row.get("holdingName") or row.get("name") or
-                                row.get("Name") or sym
-                            ).strip()
-                            pct_raw = (
-                                row.get("holdingPercent") or row.get("percent") or
-                                row.get("Percent") or row.get("Weight") or 0
-                            )
+                        # Flatten index so Symbol becomes a regular column
+                        df = holdings_df.reset_index()
+                        # Log actual columns for debugging
+                        print(f"[YF] {ticker} top_holdings columns: {list(df.columns)}, index: {df.index.name}")
+                        for _, row in df.iterrows():
+                            # Handle all known column-name variants (yfinance changes these)
+                            sym = None
+                            for key in ("Symbol", "symbol", "Ticker", "ticker"):
+                                val = row.get(key)
+                                if val and str(val).strip() not in ("", "nan", "None"):
+                                    sym = str(val).strip()
+                                    break
+                            if not sym:
+                                continue
+                            name = None
+                            for key in ("holdingName", "longName", "name", "Name"):
+                                val = row.get(key)
+                                if val and str(val).strip() not in ("", "nan", "None"):
+                                    name = str(val).strip()
+                                    break
+                            name = name or sym
+                            pct_raw = None
+                            for key in ("holdingPercent", "percent", "Percent", "Weight", "weight"):
+                                val = row.get(key)
+                                if val is not None and str(val).strip() not in ("", "nan", "None"):
+                                    pct_raw = val
+                                    break
                             try:
-                                pct = float(pct_raw)
-                                # yfinance returns values 0–1 (fraction); multiply by 100 for %
-                                weight_pct = round(pct * 100, 3) if pct < 1 else round(pct, 3)
+                                pct = float(pct_raw) if pct_raw is not None else 0.0
+                                weight_pct = round(pct * 100, 3) if pct <= 1 else round(pct, 3)
                             except (TypeError, ValueError):
                                 weight_pct = 0.0
-                            if sym:
-                                result.append({"ticker": sym, "name": name, "weight_pct": weight_pct})
+                            result.append({"ticker": sym, "name": name, "weight_pct": weight_pct})
                         if result:
+                            print(f"[YF] {ticker} top_holdings: {len(result)} rows, sample weight={result[0]['weight_pct']}")
                             return result
             except Exception as exc:
                 print(f"[YF] funds_data.top_holdings failed for {ticker}: {exc}")
 
-            # Fallback: info dict (some ETFs expose holdings there)
-            info = t.info
-            holdings = info.get("holdings") or []
-            for h in holdings:
-                sym = h.get("symbol", "")
-                name = h.get("holdingName", sym)
-                pct = h.get("holdingPercent", 0)
-                try:
-                    pct_f = float(pct)
-                    weight_pct = round(pct_f * 100, 3) if pct_f < 1 else round(pct_f, 3)
-                except (TypeError, ValueError):
-                    weight_pct = 0.0
-                if sym:
-                    result.append({"ticker": sym, "name": name, "weight_pct": weight_pct})
+            # ── Path 2: info dict (older yfinance / some ETFs) ──
+            try:
+                info = t.info
+                holdings = info.get("holdings") or []
+                print(f"[YF] {ticker} info holdings: {len(holdings)} rows")
+                for h in holdings:
+                    sym = h.get("symbol") or h.get("ticker") or ""
+                    if not sym:
+                        continue
+                    name = h.get("holdingName") or h.get("name") or sym
+                    pct_raw = h.get("holdingPercent") or h.get("percent") or 0
+                    try:
+                        pct_f = float(pct_raw)
+                        weight_pct = round(pct_f * 100, 3) if pct_f <= 1 else round(pct_f, 3)
+                    except (TypeError, ValueError):
+                        weight_pct = 0.0
+                    result.append({"ticker": str(sym), "name": str(name), "weight_pct": weight_pct})
+            except Exception as exc:
+                print(f"[YF] info holdings failed for {ticker}: {exc}")
+
             return result
         except Exception as exc:
             print(f"[YF] ETF holdings fetch failed for {ticker}: {exc}")

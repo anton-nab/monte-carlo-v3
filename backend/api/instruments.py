@@ -179,11 +179,20 @@ async def get_etf_holdings(ticker: str):
     """
     t = ticker.upper()
     try:
-        # FMP is more reliable for holdings data
+        # Try yfinance first — funds_data.top_holdings has accurate weights
+        yf_result = await provider.get_etf_holdings(t)
+        if yf_result and any(h["weight_pct"] > 0 for h in yf_result):
+            print(f"[holdings] {t}: yfinance OK ({len(yf_result)} positions)")
+            return yf_result
+
+        # FMP fallback — free tier may return 0 weights, but worth trying
         fmp_result = await _fmp.get_etf_holdings(t)
-        if fmp_result:
+        if fmp_result and any(h["weight_pct"] > 0 for h in fmp_result):
+            print(f"[holdings] {t}: FMP OK ({len(fmp_result)} positions)")
             return fmp_result
-        # Fallback: yfinance funds_data
-        return await provider.get_etf_holdings(t)
+
+        # Last resort: return yfinance tickers even with 0 weight rather than nothing
+        print(f"[holdings] {t}: no valid weights found (yf={len(yf_result)}, fmp={len(fmp_result) if fmp_result else 0})")
+        return yf_result or fmp_result or []
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
