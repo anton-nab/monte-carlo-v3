@@ -181,7 +181,7 @@ class YFinanceProvider(BaseInstrumentProvider):
                                     break
                             name = name or sym
                             pct_raw = None
-                            for key in ("holdingPercent", "percent", "Percent", "Weight", "weight"):
+                            for key in ("Holding Percent", "holdingPercent", "percent", "Percent", "Weight", "weight"):
                                 val = row.get(key)
                                 if val is not None and str(val).strip() not in ("", "nan", "None"):
                                     pct_raw = val
