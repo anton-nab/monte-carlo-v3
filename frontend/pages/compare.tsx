@@ -834,7 +834,7 @@ export default function ComparePage() {
 
               <ResponsiveContainer width="100%" height={340}>
                 <ComposedChart data={mergedFan} margin={{ top: 4, right: 12, bottom: 0, left: 16 }}>
-                  <CartesianGrid strokeDasharray="3 3" stroke="var(--chart-grid)" />
+                  <CartesianGrid strokeDasharray="2 6" stroke="var(--chart-grid)" />
                   <XAxis dataKey="day" tick={{ fill: 'var(--chart-tooltip-muted)', fontSize: 11 }} tickFormatter={(v) => `J${v}`}
                     interval={Math.floor(mergedFan.length / 6)} />
                   <YAxis tick={{ fill: 'var(--chart-tooltip-muted)', fontSize: 11 }} tickFormatter={(v) => `$${Number(v).toFixed(0)}`} width={64} />
@@ -904,7 +904,7 @@ export default function ComparePage() {
                 </SectionTitle>
                 <ResponsiveContainer width="100%" height={280}>
                   <BarChart data={result.histogram_overlay} margin={{ top: 4, right: 8, bottom: 0, left: 8 }} barCategoryGap={0} barGap={0}>
-                    <CartesianGrid strokeDasharray="3 3" stroke="var(--chart-grid)" vertical={false} />
+                    <CartesianGrid strokeDasharray="2 6" stroke="var(--chart-grid)" vertical={false} />
                     <XAxis dataKey="price" tick={{ fill: 'var(--chart-tooltip-muted)', fontSize: 9 }}
                       tickFormatter={(v) => `$${Number(v).toFixed(0)}`}
                       interval={Math.floor(result.histogram_overlay.length / 6)} />

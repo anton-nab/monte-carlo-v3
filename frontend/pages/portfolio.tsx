@@ -1011,7 +1011,7 @@ export default function PortfolioPage() {
                 </SectionTitle>
                 <ResponsiveContainer width="100%" height={280}>
                   <ScatterChart margin={{ top: 4, right: 10, bottom: 20, left: 10 }}>
-                    <CartesianGrid strokeDasharray="3 3" stroke="var(--chart-grid)" />
+                    <CartesianGrid strokeDasharray="2 6" stroke="var(--chart-grid)" />
                     <XAxis
                       type="number"
                       dataKey="volatility"
@@ -1168,7 +1168,7 @@ export default function PortfolioPage() {
               </SectionTitle>
               <ResponsiveContainer width="100%" height={320}>
                 <ComposedChart data={stackedFan} margin={{ top: 4, right: 12, bottom: 0, left: 12 }}>
-                  <CartesianGrid strokeDasharray="3 3" stroke="var(--chart-grid)" />
+                  <CartesianGrid strokeDasharray="2 6" stroke="var(--chart-grid)" />
                   <XAxis
                     dataKey="day"
                     tick={{ fill: 'var(--chart-tooltip-muted)', fontSize: 11 }}
@@ -1215,7 +1215,7 @@ export default function PortfolioPage() {
                 <SectionTitle>Distribution des valeurs finales</SectionTitle>
                 <ResponsiveContainer width="100%" height={240}>
                   <BarChart data={result.histogram} margin={{ top: 4, right: 8, bottom: 0, left: 8 }}>
-                    <CartesianGrid strokeDasharray="3 3" stroke="var(--chart-grid)" vertical={false} />
+                    <CartesianGrid strokeDasharray="2 6" stroke="var(--chart-grid)" vertical={false} />
                     <XAxis
                       dataKey="price"
                       tick={{ fill: 'var(--chart-tooltip-muted)', fontSize: 10 }}

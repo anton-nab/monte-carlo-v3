@@ -16,9 +16,12 @@ import { useWebSocket, lookupPrice } from '../../hooks/useWebSocket';
 import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
   PieChart, Pie, Cell, ReferenceLine,
+  ComposedChart, Line,
 } from 'recharts';
-import { TradingViewChart, ChartType } from '../../components/TradingViewChart';
+import { TradingViewChart, ChartType, OverlayLine, VolumePoint } from '../../components/TradingViewChart';
 import { fetcher } from '../../lib/fetcher';
+import { Header } from '../../components/Header';
+import { ema, rsi as computeRsi, macd as computeMacd, bollinger } from '../../lib/indicators';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Types
@@ -259,6 +262,16 @@ export default function InstrumentPage() {
   const [fsPeriod, setFsPeriod]           = useState<'annual' | 'quarterly'>('annual');
   const [fsTab, setFsTab]                 = useState<'income' | 'balance' | 'cashflow'>('income');
 
+  // ── Technical indicators state ─────────────────────────────────────────────
+  type IndicatorKey = 'volume' | 'ema50' | 'ema100' | 'ema200' | 'bb' | 'rsi' | 'macd';
+  const [activeIndicators, setActiveIndicators] = useState<Set<IndicatorKey>>(new Set());
+  const toggleIndicator = (k: IndicatorKey) =>
+    setActiveIndicators(prev => {
+      const next = new Set(prev);
+      next.has(k) ? next.delete(k) : next.add(k);
+      return next;
+    });
+
   const tf = TIMEFRAMES.find(t => t.label === selectedLabel) ?? TIMEFRAMES[9];
 
   // ── Live price via WebSocket (Phase 7) ─────────────────────────────────────
@@ -337,6 +350,81 @@ export default function InstrumentPage() {
     return { from: fromDate, to: lastDate };
   }, [historical, tf.isIntraday, tf.visibleDays]);
 
+  // ── Technical indicator values ──────────────────────────────────────────────
+  const closes = useMemo(() => historical.map(p => p.close), [historical]);
+  const dates  = useMemo(() => historical.map(p => p.date),  [historical]);
+
+  const ema50Vals  = useMemo(() => ema(closes, 50),  [closes]);
+  const ema100Vals = useMemo(() => ema(closes, 100), [closes]);
+  const ema200Vals = useMemo(() => ema(closes, 200), [closes]);
+  const bbVals     = useMemo(() => bollinger(closes, 20, 2), [closes]);
+  const rsiVals    = useMemo(() => computeRsi(closes, 14),   [closes]);
+  const macdVals   = useMemo(() => computeMacd(closes),      [closes]);
+
+  // Helper: zip dates + nullabe values into { date, value }[]
+  const toOverlay = (vals: (number | null)[]): { date: string; value: number }[] =>
+    dates.reduce<{ date: string; value: number }[]>((acc, d, i) => {
+      if (vals[i] !== null) acc.push({ date: d, value: vals[i] as number });
+      return acc;
+    }, []);
+
+  // Overlay lines for TradingViewChart
+  const tvOverlays = useMemo((): OverlayLine[] => {
+    const lines: OverlayLine[] = [];
+    if (activeIndicators.has('ema50'))  lines.push({ data: toOverlay(ema50Vals),  color: '#ffa726', lineWidth: 1 });
+    if (activeIndicators.has('ema100')) lines.push({ data: toOverlay(ema100Vals), color: '#42a5f5', lineWidth: 1 });
+    if (activeIndicators.has('ema200')) lines.push({ data: toOverlay(ema200Vals), color: '#ef5350', lineWidth: 1 });
+    if (activeIndicators.has('bb')) {
+      lines.push({ data: toOverlay(bbVals.upper),  color: '#ab47bc', lineWidth: 1, lineStyle: 2 });
+      lines.push({ data: toOverlay(bbVals.middle), color: '#ab47bc', lineWidth: 1, lineStyle: 1 });
+      lines.push({ data: toOverlay(bbVals.lower),  color: '#ab47bc', lineWidth: 1, lineStyle: 2 });
+    }
+    return lines;
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeIndicators, ema50Vals, ema100Vals, ema200Vals, bbVals]);
+
+  // Volume data for TradingViewChart
+  const tvVolumeData = useMemo((): VolumePoint[] | undefined => {
+    if (!activeIndicators.has('volume')) return undefined;
+    return historical.map(p => ({
+      date:  p.date,
+      value: p.volume ?? 0,
+      color: p.close >= p.open ? '#00937155' : '#b92e2555',
+    }));
+  }, [activeIndicators, historical]);
+
+  // Sub-panel data: windowed to visible range for readability
+  const visibleStart = useMemo(() => {
+    if (!tf.visibleDays) return 0;
+    return Math.max(0, historical.length - tf.visibleDays);
+  }, [historical.length, tf.visibleDays]);
+
+  const rsiPanelData = useMemo(() =>
+    activeIndicators.has('rsi')
+      ? dates.slice(visibleStart).map((d, i) => {
+          const idx = visibleStart + i;
+          const v = rsiVals[idx];
+          return { date: d.split('T')[0], rsi: v !== null ? +v.toFixed(2) : undefined };
+        }).filter(p => p.rsi !== undefined)
+      : [],
+  [activeIndicators, dates, rsiVals, visibleStart]);
+
+  const macdPanelData = useMemo(() =>
+    activeIndicators.has('macd')
+      ? dates.slice(visibleStart).map((d, i) => {
+          const idx = visibleStart + i;
+          const h = macdVals.hist[idx];
+          if (h === null) return null;
+          return {
+            date:   d.split('T')[0],
+            macd:   macdVals.macd[idx]   !== null ? +(macdVals.macd[idx]   as number).toFixed(4) : undefined,
+            signal: macdVals.signal[idx] !== null ? +(macdVals.signal[idx] as number).toFixed(4) : undefined,
+            hist:   +(h as number).toFixed(4),
+          };
+        }).filter(Boolean) as { date: string; macd?: number; signal?: number; hist: number }[]
+      : [],
+  [activeIndicators, dates, macdVals, visibleStart]);
+
   // ── FOMO ───────────────────────────────────────────────────────────────────
   const fomoResult = useMemo(
     () => computeFomoScore(fomoChart?.data ?? [], quote?.volume, fomoFinancials),
@@ -364,7 +452,10 @@ export default function InstrumentPage() {
   return (
     <div className="min-h-screen bg-terminal-bg text-terminal-text">
 
-      {/* ── Header ── */}
+      {/* ── Global nav ── */}
+      <Header />
+
+      {/* ── Instrument header (ticker + price + stats) ── */}
       <div className="border-b border-terminal-border bg-terminal-surface">
         <div className="max-w-7xl mx-auto px-4 py-4">
           <div className="flex items-end justify-between mb-3">
@@ -424,7 +515,8 @@ export default function InstrumentPage() {
         {activeTab === 'chart' && (
           <div className="space-y-6">
             <div className="bg-terminal-surface border border-terminal-border rounded p-4">
-              <div className="mb-3 flex items-center justify-between flex-wrap gap-3">
+              {/* ── Row 1: chart type + timeframe buttons ── */}
+              <div className="mb-2 flex items-center justify-between flex-wrap gap-3">
                 <div className="flex items-center gap-3">
                   <h2 className="text-lg font-semibold">Price Chart</h2>
                   <div className="flex border border-terminal-border rounded overflow-hidden">
@@ -448,6 +540,32 @@ export default function InstrumentPage() {
                   ))}
                 </div>
               </div>
+
+              {/* ── Row 2: indicator chips ── */}
+              <div className="mb-3 flex flex-wrap gap-1.5">
+                {([
+                  { key: 'volume',  label: 'Vol',       color: '#26a69a' },
+                  { key: 'ema50',   label: 'EMA 50',    color: '#ffa726' },
+                  { key: 'ema100',  label: 'EMA 100',   color: '#42a5f5' },
+                  { key: 'ema200',  label: 'EMA 200',   color: '#ef5350' },
+                  { key: 'bb',      label: 'Bollinger', color: '#ab47bc' },
+                  { key: 'rsi',     label: 'RSI 14',    color: '#00d9ff' },
+                  { key: 'macd',    label: 'MACD',      color: '#f9a825' },
+                ] as { key: IndicatorKey; label: string; color: string }[]).map(({ key, label, color }) => {
+                  const on = activeIndicators.has(key);
+                  return (
+                    <button key={key} onClick={() => toggleIndicator(key)}
+                      className={`px-2.5 py-0.5 text-2xs font-mono rounded border transition ${
+                        on ? 'bg-terminal-surfaceHi font-semibold' : 'border-terminal-border text-terminal-textMuted hover:text-terminal-text hover:border-terminal-cyan/50'
+                      }`}
+                      style={on ? { borderColor: color, color } : undefined}>
+                      {label}
+                    </button>
+                  );
+                })}
+              </div>
+
+              {/* ── Chart ── */}
               <div className="bg-terminal-bg rounded p-2">
                 {chartError ? (
                   <div className="h-80 flex items-center justify-center text-red-500 text-sm">Failed to load chart data</div>
@@ -455,11 +573,61 @@ export default function InstrumentPage() {
                   <SkeletonBlock className="h-96 w-full" />
                 ) : historical.length > 0 ? (
                   <TradingViewChart data={lineData} ohlcData={ohlcData} chartType={chartType}
-                    height={400} color={lineColor} showAxes isIntraday={tf.isIntraday} visibleRange={visibleRange} />
+                    height={400} color={lineColor} showAxes isIntraday={tf.isIntraday}
+                    visibleRange={visibleRange}
+                    overlays={tvOverlays.length ? tvOverlays : undefined}
+                    volumeData={tvVolumeData} />
                 ) : (
                   <div className="h-96 flex items-center justify-center text-terminal-textMuted">No chart data</div>
                 )}
               </div>
+
+              {/* ── RSI sub-panel ── */}
+              {activeIndicators.has('rsi') && rsiPanelData.length > 0 && (
+                <div className="mt-2 bg-terminal-bg rounded p-2">
+                  <div className="text-2xs text-terminal-textDim mb-1 font-mono">RSI (14)</div>
+                  <ResponsiveContainer width="100%" height={110}>
+                    <ComposedChart data={rsiPanelData} margin={{ top: 2, right: 12, bottom: 0, left: 12 }}>
+                      <CartesianGrid strokeDasharray="2 6" stroke="rgba(42,48,64,0.4)" vertical={false} />
+                      <XAxis dataKey="date" hide />
+                      <YAxis domain={[0, 100]} tick={{ fill: '#9ca3af', fontSize: 9 }} width={24} tickCount={3} />
+                      <Tooltip contentStyle={{ background: '#1a2035', border: '1px solid #2a3040', borderRadius: 4, fontSize: 10 }}
+                        labelStyle={{ color: '#7a8294' }} formatter={(v: unknown) => [typeof v === 'number' ? v.toFixed(1) : '—', 'RSI']} />
+                      <ReferenceLine y={70} stroke="#ef5350" strokeDasharray="3 3" strokeOpacity={0.6} />
+                      <ReferenceLine y={30} stroke="#26a69a" strokeDasharray="3 3" strokeOpacity={0.6} />
+                      <ReferenceLine y={50} stroke="#4b5563" strokeDasharray="2 4" strokeOpacity={0.4} />
+                      <Line type="monotone" dataKey="rsi" stroke="#00d9ff" strokeWidth={1.5} dot={false}
+                        isAnimationActive={false} />
+                    </ComposedChart>
+                  </ResponsiveContainer>
+                </div>
+              )}
+
+              {/* ── MACD sub-panel ── */}
+              {activeIndicators.has('macd') && macdPanelData.length > 0 && (
+                <div className="mt-2 bg-terminal-bg rounded p-2">
+                  <div className="text-2xs text-terminal-textDim mb-1 font-mono">MACD (12, 26, 9)</div>
+                  <ResponsiveContainer width="100%" height={110}>
+                    <ComposedChart data={macdPanelData} margin={{ top: 2, right: 12, bottom: 0, left: 12 }}>
+                      <CartesianGrid strokeDasharray="2 6" stroke="rgba(42,48,64,0.4)" vertical={false} />
+                      <XAxis dataKey="date" hide />
+                      <YAxis tick={{ fill: '#9ca3af', fontSize: 9 }} width={40} tickFormatter={v => v.toFixed(2)} />
+                      <Tooltip contentStyle={{ background: '#1a2035', border: '1px solid #2a3040', borderRadius: 4, fontSize: 10 }}
+                        labelStyle={{ color: '#7a8294' }}
+                        formatter={(v: unknown, name: unknown) => [typeof v === 'number' ? v.toFixed(4) : '—', name === 'hist' ? 'Hist' : name === 'macd' ? 'MACD' : 'Signal']} />
+                      <ReferenceLine y={0} stroke="#4b5563" strokeOpacity={0.5} />
+                      <Bar dataKey="hist" isAnimationActive={false}
+                        fill="#26a69a"
+                        // Color each bar: positive = bull, negative = bear
+                        label={false}
+                      />
+                      <Line type="monotone" dataKey="macd"   stroke="#00d9ff" strokeWidth={1.5} dot={false} isAnimationActive={false} />
+                      <Line type="monotone" dataKey="signal" stroke="#ffa726" strokeWidth={1}   dot={false} isAnimationActive={false} />
+                    </ComposedChart>
+                  </ResponsiveContainer>
+                </div>
+              )}
+
               <p className="text-2xs text-terminal-textDim mt-2">
                 {tf.isIntraday ? `${tf.label} candles · scroll to zoom` : 'Scroll/drag to see full history'}
               </p>
@@ -651,7 +819,7 @@ function FinChart({ data, keys, colors, title }: { data: Record<string,string|nu
       <p className="text-xs text-terminal-textMuted uppercase tracking-wider mb-4">{title}</p>
       <ResponsiveContainer width="100%" height={220}>
         <BarChart data={data} barCategoryGap="30%" barGap={2}>
-          <CartesianGrid strokeDasharray="3 3" stroke="rgba(42,48,64,0.4)" />
+          <CartesianGrid strokeDasharray="2 6" stroke="rgba(42,48,64,0.4)" />
           <XAxis dataKey="date" tick={{ fill: '#7a8294', fontSize: 11 }} tickLine={false} axisLine={false} />
           <YAxis tick={{ fill: '#7a8294', fontSize: 10 }} tickLine={false} axisLine={false} tickFormatter={v => fmtBig(v as number, '')} width={52} />
           <Tooltip {...TOOLTIP_STYLE} formatter={(v: unknown) => fmtBig(typeof v === 'number' ? v : null)} />
@@ -736,7 +904,7 @@ function AnalysisTab({ financials, isLoading, quote, fomoResult }: {
           </h3>
           <ResponsiveContainer width="100%" height={220}>
             <BarChart data={earningsData} barCategoryGap="30%" barGap={4}>
-              <CartesianGrid strokeDasharray="3 3" stroke="rgba(42,48,64,0.4)" />
+              <CartesianGrid strokeDasharray="2 6" stroke="rgba(42,48,64,0.4)" />
               <XAxis dataKey="label" tick={{ fill: '#7a8294', fontSize: 11 }} tickLine={false} axisLine={false} />
               <YAxis tick={{ fill: '#7a8294', fontSize: 10 }} tickLine={false} axisLine={false} width={44} />
               <Tooltip {...TOOLTIP_STYLE} formatter={(v: unknown) => [`$${typeof v === 'number' ? v.toFixed(2) : String(v)}`]} />
@@ -1339,7 +1507,7 @@ function PerformanceSummary({ monthlyData, annualReturns }: {
           <div className="mt-4">
             <ResponsiveContainer width="100%" height={180}>
               <BarChart data={barData} barCategoryGap="20%" barGap={2}>
-                <CartesianGrid strokeDasharray="3 3" stroke="rgba(42,48,64,0.4)" />
+                <CartesianGrid strokeDasharray="2 6" stroke="rgba(42,48,64,0.4)" />
                 <XAxis dataKey="year" tick={{ fill: '#7a8294', fontSize: 10 }} tickLine={false} axisLine={false} />
                 <YAxis tick={{ fill: '#7a8294', fontSize: 10 }} tickLine={false} axisLine={false} width={40}
                   tickFormatter={v => `${(v as number) >= 0 ? '+' : ''}${(v as number).toFixed(0)}%`} />

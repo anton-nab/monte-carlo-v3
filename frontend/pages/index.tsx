@@ -79,16 +79,17 @@ function TickerTape({ items }: { items: TapeItem[] }) {
     <div className="overflow-hidden bg-terminal-bg border-b border-terminal-border py-1.5 select-none">
       <div className="ticker-track">
         {doubled.map((item, i) => (
-          <span
+          <Link
             key={i}
-            className="inline-flex items-center gap-2 px-5 text-xs whitespace-nowrap border-r border-terminal-border last:border-0"
+            href={`/instrument/${encodeURIComponent(item.ticker)}`}
+            className="inline-flex items-center gap-2 px-5 text-xs whitespace-nowrap border-r border-terminal-border last:border-0 hover:bg-terminal-surfaceHi transition-colors cursor-pointer"
           >
             <span className="text-terminal-textDim font-mono">{item.label}</span>
             <span className="num font-semibold text-terminal-text">{fmtPrice(item.price)}</span>
             <span className={`num font-semibold ${clrPct(item.change_pct)}`}>
               {signPct(item.change_pct)}
             </span>
-          </span>
+          </Link>
         ))}
       </div>
     </div>
@@ -103,9 +104,12 @@ function IndexCard({ item }: { item: TapeItem }) {
   const up = item.change_pct > 0;
   const down = item.change_pct < 0;
   return (
-    <div className={`bg-terminal-surface border rounded-lg p-3 flex flex-col gap-1 ${
-      up ? 'border-bull-border' : down ? 'border-bear-border' : 'border-terminal-border'
-    }`}>
+    <Link
+      href={`/instrument/${encodeURIComponent(item.ticker)}`}
+      className={`bg-terminal-surface border rounded-lg p-3 flex flex-col gap-1 transition hover:bg-terminal-surfaceHi cursor-pointer ${
+        up ? 'border-bull-border hover:border-bull' : down ? 'border-bear-border hover:border-bear' : 'border-terminal-border hover:border-terminal-cyan'
+      }`}
+    >
       <div className="text-2xs text-terminal-textDim uppercase tracking-wider font-mono">
         {item.label}
       </div>
@@ -115,7 +119,7 @@ function IndexCard({ item }: { item: TapeItem }) {
       <div className={`num text-sm font-bold ${clrPct(item.change_pct)}`}>
         {signPct(item.change_pct)}
       </div>
-    </div>
+    </Link>
   );
 }
 
