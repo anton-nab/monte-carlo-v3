@@ -39,6 +39,7 @@ from api.indices import router as indices_router
 from api.simulate import router as simulate_router
 from api.compare import router as compare_router
 from api.portfolio import router as portfolio_router
+from api.ws import router as ws_router           # Phase 7: WebSocket
 
 # ===========================================================================
 # 1. CRÉER L'APPLICATION FASTAPI
@@ -86,6 +87,7 @@ app.include_router(indices_router)         # /api/indices/*       (Phase 2.5)
 app.include_router(simulate_router)        # /api/simulate        (Phase 3)
 app.include_router(compare_router)        # /api/simulate/compare (Phase 4.5)
 app.include_router(portfolio_router)      # /api/portfolio/*     (Phase 4)
+app.include_router(ws_router)             # /ws/quotes           (Phase 7)
 
 # ===========================================================================
 # 3. ROUTES (Endpoints API)
@@ -270,10 +272,13 @@ async def startup_event():
     print("[*] All systems operational")
     # Diagnostic: show which API keys are configured
     fred_key = os.getenv("FRED_API_KEY", "")
-    print(f"[*] FRED_API_KEY: {'SET (' + fred_key[:6] + '...)' if fred_key else 'NOT SET'}")
+    td_key   = os.getenv("TWELVE_DATA_API_KEY", "")
+    print(f"[*] FRED_API_KEY:        {'SET (' + fred_key[:6] + '...)' if fred_key else 'NOT SET'}")
+    print(f"[*] TWELVE_DATA_API_KEY: {'SET (' + td_key[:6] + '...)' if td_key else 'NOT SET — yfinance fallback active'}")
     print("[*] SP500 source : GitHub CSV (datasets/s-and-p-500-companies)")
     print("[*] NDX/DJI source: hardcoded")
     print("[*] Simulation : GBM / Merton / Heston / GARCH (POST /api/simulate)")
+    print("[*] WebSocket  : /ws/quotes (Twelve Data live prices)")
 
 
 @app.on_event("shutdown")

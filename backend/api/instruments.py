@@ -1,15 +1,61 @@
+"""
+api/instruments.py
+------------------
+Instrument data endpoints.
+
+Provider hierarchy (Phase 7):
+  Primary:  Twelve Data   — quote, chart, intraday, news, search
+  Fallback: yfinance       — fundamentals (TD requires paid plan),
+                             ETF holdings, ETF profile, financial statements
+"""
+import os
 import asyncio
 from fastapi import APIRouter, HTTPException, Query
-from services.instruments import YFinanceProvider, InstrumentsService
+from services.instruments import YFinanceProvider, TwelveDataProvider, InstrumentsService
 from services.fmp_provider import get_fmp_provider
 
 router = APIRouter(prefix="/api/instruments", tags=["instruments"])
 
-# Initialize services
-provider = YFinanceProvider()
-service = InstrumentsService(provider)
+# ─────────────────────────────────────────────────────────────────────────────
+# Provider initialisation
+# ─────────────────────────────────────────────────────────────────────────────
+
+_td_key = os.getenv("TWELVE_DATA_API_KEY", "")
+_td_provider = TwelveDataProvider(_td_key) if _td_key else None
+_yf_provider = YFinanceProvider()
+
+# Service uses Twelve Data as primary when available, yfinance otherwise
+_primary = _td_provider or _yf_provider
+service = InstrumentsService(_primary)
 _fmp = get_fmp_provider()
 
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Helpers
+# ─────────────────────────────────────────────────────────────────────────────
+
+async def _get_fundamentals_with_fallback(ticker: str):
+    """Try Twelve Data /statistics, fall back to yfinance on failure."""
+    if _td_provider:
+        try:
+            return await _td_provider.get_fundamentals(ticker)
+        except Exception as e:
+            print(f"[instruments] TD fundamentals failed for {ticker}: {e}, falling back to yfinance")
+    return await _yf_provider.get_fundamentals(ticker)
+
+
+async def _get_news_with_fallback(ticker: str):
+    """Try Twelve Data /news, fall back to yfinance on failure."""
+    if _td_provider:
+        result = await _td_provider.get_news(ticker)
+        if result:
+            return result
+    return await _yf_provider.get_news(ticker)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Endpoints
+# ─────────────────────────────────────────────────────────────────────────────
 
 @router.get("/snapshot/{ticker}")
 async def get_instrument_snapshot(ticker: str):
@@ -18,8 +64,14 @@ async def get_instrument_snapshot(ticker: str):
     Example: GET /api/instruments/snapshot/AAPL
     """
     try:
-        result = await service.get_instrument_snapshot(ticker)
-        return result
+        quote = await _primary.get_quote(ticker)
+        fundamentals = await _get_fundamentals_with_fallback(ticker)
+        return {
+            "ticker":        ticker,
+            "quote":         quote,
+            "fundamentals":  fundamentals,
+            "snapshot_time": quote.get("timestamp", ""),
+        }
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
 
@@ -39,12 +91,12 @@ async def get_quote(ticker: str):
 
 @router.get("/fundamentals/{ticker}")
 async def get_fundamentals(ticker: str):
-    """Get company fundamentals.
+    """Get company fundamentals (TD primary, yfinance fallback).
 
     Example: GET /api/instruments/fundamentals/GOOGL
     """
     try:
-        result = await provider.get_fundamentals(ticker)
+        result = await _get_fundamentals_with_fallback(ticker)
         return result
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
@@ -91,7 +143,10 @@ async def batch_quotes(tickers: list[str]):
     Body: ["AAPL", "MSFT", "GOOGL"]
     """
     try:
-        result = await service.batch_get_quotes(tickers)
+        if _td_provider:
+            result = await _td_provider.get_batch_quotes(tickers)
+        else:
+            result = await service.batch_get_quotes(tickers)
         return result
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
@@ -112,13 +167,13 @@ async def get_price(ticker: str):
 
 @router.get("/news/{ticker}")
 async def get_news(ticker: str):
-    """Get latest news for a ticker.
+    """Get latest news for a ticker (TD primary, yfinance fallback).
 
-    Returns up to 15 news items from Yahoo Finance.
+    Returns up to 15 news items.
     Example: GET /api/instruments/news/AAPL
     """
     try:
-        result = await provider.get_news(ticker.upper())
+        result = await _get_news_with_fallback(ticker.upper())
         return result
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
@@ -131,10 +186,11 @@ async def get_financials(
 ):
     """Get full financial statements (IS + BS + CF) + earnings history + analyst data.
 
+    Uses yfinance — Twelve Data financial statements require paid plan.
     Example: GET /api/instruments/financials/AAPL?period=annual
     """
     try:
-        result = await service.get_financials(ticker.upper(), period)
+        result = await _yf_provider.get_financials_data(ticker.upper(), period)
         return result
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
@@ -145,7 +201,6 @@ async def get_etf_profile(ticker: str):
     """Get ETF sector + country breakdown + asset class weights.
 
     Combines FMP sector/country data with yfinance asset-class breakdown.
-    Falls back to yfinance sectors when FMP returns nothing.
     Example: GET /api/instruments/etf-profile/SPY
     """
     t = ticker.upper()
@@ -153,7 +208,7 @@ async def get_etf_profile(ticker: str):
         results = await asyncio.gather(
             _fmp.get_etf_sectors(t),
             _fmp.get_etf_countries(t),
-            provider.get_etf_profile(t),
+            _yf_provider.get_etf_profile(t),
             return_exceptions=True,
         )
         sectors   = results[0] if not isinstance(results[0], Exception) else []
@@ -173,26 +228,22 @@ async def get_etf_profile(ticker: str):
 async def get_etf_holdings(ticker: str):
     """Get ETF top holdings.
 
-    Tries FMP /etf-holder first (free tier), then falls back to yfinance funds_data.
-    Returns top holdings with weight % for ETFs (SPY, QQQ, VTI, etc.)
+    Uses yfinance funds_data (most accurate weights) with FMP fallback.
     Example: GET /api/instruments/etf-holdings/SPY
     """
     t = ticker.upper()
     try:
-        # Try yfinance first — funds_data.top_holdings has accurate weights
-        yf_result = await provider.get_etf_holdings(t)
+        yf_result = await _yf_provider.get_etf_holdings(t)
         if yf_result and any(h["weight_pct"] > 0 for h in yf_result):
             print(f"[holdings] {t}: yfinance OK ({len(yf_result)} positions)")
             return yf_result
 
-        # FMP fallback — free tier may return 0 weights, but worth trying
         fmp_result = await _fmp.get_etf_holdings(t)
         if fmp_result and any(h["weight_pct"] > 0 for h in fmp_result):
             print(f"[holdings] {t}: FMP OK ({len(fmp_result)} positions)")
             return fmp_result
 
-        # Last resort: return yfinance tickers even with 0 weight rather than nothing
-        print(f"[holdings] {t}: no valid weights found (yf={len(yf_result)}, fmp={len(fmp_result) if fmp_result else 0})")
+        print(f"[holdings] {t}: no valid weights found")
         return yf_result or fmp_result or []
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))

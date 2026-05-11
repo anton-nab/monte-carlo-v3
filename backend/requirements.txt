@@ -34,6 +34,9 @@ rapidfuzz>=3.6.0              # Fuzzy string matching for search
 lxml>=5.1.0                   # HTML parser for pandas.read_html (Wikipedia scraping)
 html5lib>=1.1                 # Fallback HTML parser (required when lxml fails on some pages)
 
+# PHASE 7: Real-Time Streaming
+websockets>=13.0              # WebSocket client (Twelve Data WS connection)
+
 # ===================================================================
 # NOTES
 # ===================================================================

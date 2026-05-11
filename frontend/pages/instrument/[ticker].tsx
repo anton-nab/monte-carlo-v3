@@ -12,6 +12,7 @@
 import { useRouter } from 'next/router';
 import { useState, useMemo } from 'react';
 import useSWR from 'swr';
+import { useWebSocket, lookupPrice } from '../../hooks/useWebSocket';
 import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
   PieChart, Pie, Cell, ReferenceLine,
@@ -260,10 +261,25 @@ export default function InstrumentPage() {
 
   const tf = TIMEFRAMES.find(t => t.label === selectedLabel) ?? TIMEFRAMES[9];
 
+  // ── Live price via WebSocket (Phase 7) ─────────────────────────────────────
+  const wsSymbols = useMemo(
+    () => (tickerStr ? [tickerStr] : []),
+    [tickerStr],
+  );
+  const livePrices = useWebSocket(wsSymbols);
+  const livePrice  = tickerStr ? lookupPrice(livePrices, tickerStr) : undefined;
+
   // ── SWR fetches ────────────────────────────────────────────────────────────
-  const { data: quote } = useSWR<QuoteData>(
+  const { data: quoteRaw } = useSWR<QuoteData>(
     tickerStr ? `${API_URL}/api/instruments/quote/${tickerStr}` : null,
     fetcher, { refreshInterval: 30_000, dedupingInterval: 10_000 });
+
+  // Merge WS live price into quote (keep change/change_pct from REST, update price from WS)
+  const quote: QuoteData | undefined = useMemo(() => {
+    if (!quoteRaw) return undefined;
+    if (!livePrice) return quoteRaw;
+    return { ...quoteRaw, price: livePrice.price };
+  }, [quoteRaw, livePrice]);
 
   const { data: fundamentals } = useSWR<FundamentalsData>(
     tickerStr ? `${API_URL}/api/instruments/fundamentals/${tickerStr}` : null,
@@ -360,7 +376,14 @@ export default function InstrumentPage() {
             </div>
             {quote ? (
               <div className={`text-right ${changeBgColor} rounded px-4 py-2`}>
-                <div className="text-2xl font-bold num">${quote.price.toFixed(2)}</div>
+                <div className="flex items-baseline justify-end gap-2">
+                  <div className="text-2xl font-bold num">${quote.price.toFixed(2)}</div>
+                  {livePrice && (
+                    <span className="text-2xs font-mono text-terminal-cyan px-1 py-0.5 border border-terminal-cyan/40 rounded tracking-wider">
+                      LIVE
+                    </span>
+                  )}
+                </div>
                 <div className={`text-sm font-semibold num ${changeColor}`}>
                   {isPositive ? '+' : ''}{quote.change.toFixed(2)} ({quote.change_pct.toFixed(2)}%)
                 </div>

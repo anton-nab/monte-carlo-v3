@@ -9,11 +9,12 @@
  *  5. Navigation rapide vers les modules
  */
 
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useMemo } from 'react';
 import Head from 'next/head';
 import Link from 'next/link';
 import { Header } from '@/components/Header';
 import { apiFetch } from '@/lib/api';
+import { useWebSocket, lookupPrice } from '@/hooks/useWebSocket';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Types
@@ -188,11 +189,38 @@ function Skeleton({ className }: { className?: string }) {
 // Page
 // ─────────────────────────────────────────────────────────────────────────────
 
+// Tape tickers for WebSocket subscription
+const TAPE_WS_SYMBOLS = [
+  '^GSPC', '^NDX', '^DJI', '^VIX', '^RUT', '^FTSE', '^N225',
+  'GC=F', 'CL=F', 'BTC-USD', 'ETH-USD', 'EURUSD=X', '^TNX',
+  'AAPL', 'NVDA', 'MSFT',
+];
+
 export default function Home() {
   const [data,    setData]    = useState<MarketData | null>(null);
   const [loading, setLoading] = useState(true);
   const [error,   setError]   = useState<string | null>(null);
   const [lastUpdate, setLastUpdate] = useState<string>('');
+
+  // Live price feed via WebSocket
+  const liveWs = useWebSocket(TAPE_WS_SYMBOLS);
+
+  // Merge WS prices into tape / indices (keep change_pct from REST, update price from WS)
+  const liveTape = useMemo(() => {
+    if (!data?.tape) return [];
+    return data.tape.map(item => {
+      const live = lookupPrice(liveWs, item.ticker);
+      return live ? { ...item, price: live.price } : item;
+    });
+  }, [data?.tape, liveWs]);
+
+  const liveIndices = useMemo(() => {
+    if (!data?.indices) return [];
+    return data.indices.map(item => {
+      const live = lookupPrice(liveWs, item.ticker);
+      return live ? { ...item, price: live.price } : item;
+    });
+  }, [data?.indices, liveWs]);
 
   useEffect(() => {
     let cancelled = false;
@@ -236,7 +264,9 @@ export default function Home() {
       <Header />
 
       {/* ── Ticker tape ─────────────────────────────────────────── */}
-      {data?.tape ? (
+      {liveTape.length > 0 ? (
+        <TickerTape items={liveTape} />
+      ) : data?.tape ? (
         <TickerTape items={data.tape} />
       ) : (
         <div className="h-8 bg-terminal-bg border-b border-terminal-border animate-pulse" />
@@ -251,7 +281,7 @@ export default function Home() {
               Marchés <span className="text-terminal-cyan">·</span> Actualités
             </h1>
             <p className="text-xs text-terminal-textDim mt-0.5">
-              Données Yahoo Finance · mise à jour toutes les 5 min
+              Twelve Data · prix en temps réel · snapshot 5 min
             </p>
           </div>
           {lastUpdate && (
@@ -278,7 +308,7 @@ export default function Home() {
             </div>
           ) : (
             <div className="grid grid-cols-3 sm:grid-cols-5 lg:grid-cols-9 gap-2">
-              {(data?.indices ?? []).map((item) => (
+              {(liveIndices.length > 0 ? liveIndices : data?.indices ?? []).map((item) => (
                 <IndexCard key={item.ticker} item={item} />
               ))}
             </div>
