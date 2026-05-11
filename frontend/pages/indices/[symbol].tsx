@@ -345,7 +345,7 @@ export default function IndexPage() {
                       : 'text-terminal-textMuted hover:text-terminal-text hover:bg-terminal-surfaceHi'
                   }`}
                 >
-                  {v === 'chart' ? '📈 Chart' : v === 'heatmap' ? '🔥 Heatmap' : v === 'table' ? '📋 Table' : '🥧 Sectors'}
+                  {v === 'chart' ? 'Chart' : v === 'heatmap' ? 'Heatmap' : v === 'table' ? 'Table' : 'Sectors'}
                 </button>
               ))}
 

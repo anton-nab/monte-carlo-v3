@@ -108,7 +108,7 @@ export default function Dashboard() {
         {/* Page title */}
         <div>
           <h1 className="text-xl font-semibold text-terminal-text">
-            <span className="text-terminal-cyan">📊</span> Global Macro Dashboard
+            Global Macro Dashboard
           </h1>
           <p className="text-xs text-terminal-textMuted mt-1">
             Click any indicator card to expand · period selectors available in detail view

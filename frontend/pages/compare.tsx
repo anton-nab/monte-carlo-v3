@@ -113,7 +113,7 @@ const STRESS_SLIDERS: StressSlider[] = [
   {
     key: 'vol_multiplier',
     label: 'Régime de volatilité',
-    icon: '📊',
+    icon: 'σ×',
     min: 1.0, max: 4.0, step: 0.1, default: 1.0,
     format: (v) => `${v.toFixed(1)}× σ`,
     ticks: [
@@ -128,7 +128,7 @@ const STRESS_SLIDERS: StressSlider[] = [
   {
     key: 'mu_adjustment',
     label: 'Tendance économique',
-    icon: '📈',
+    icon: 'μ',
     min: -0.30, max: 0.20, step: 0.01, default: 0.0,
     format: (v) => `${v >= 0 ? '+' : ''}${(v * 100).toFixed(0)}%/an`,
     ticks: [
@@ -143,7 +143,7 @@ const STRESS_SLIDERS: StressSlider[] = [
   {
     key: 'geopolitical_risk',
     label: 'Risque géopolitique',
-    icon: '🌍',
+    icon: 'λ',
     min: 0, max: 5, step: 0.1, default: 0,
     format: (v) => `${v.toFixed(1)} sauts/an`,
     ticks: [
@@ -158,7 +158,7 @@ const STRESS_SLIDERS: StressSlider[] = [
   {
     key: 'crash_severity',
     label: 'Sévérité des chocs',
-    icon: '💥',
+    icon: 'Δ',
     min: 0, max: 1, step: 0.05, default: 0,
     format: (v) => {
       if (v < 0.15) return 'Léger (-3%)';
@@ -250,23 +250,23 @@ function FanOverlayTooltip({ active, payload, label }: { active?: boolean; paylo
     { model: 'GARCH',  color: MODEL_META.garch.color,   p50: d.garch_p50,  p5: d.garch_p5,  p95: d.garch_p95  },
   ];
   return (
-    <div style={{ background: '#0f1117', border: '1px solid #2a2d3a', borderRadius: 6, padding: '8px 12px', fontSize: 11, minWidth: 220 }}>
-      <p style={{ color: '#6b7280', marginBottom: 6, fontFamily: 'monospace' }}>Jour {label}</p>
+    <div style={{ background: 'var(--chart-tooltip-bg)', border: '1px solid var(--chart-tooltip-border)', borderRadius: 6, padding: '8px 12px', fontSize: 11, minWidth: 220 }}>
+      <p style={{ color: 'var(--chart-tooltip-muted)', marginBottom: 6, fontFamily: 'monospace' }}>Jour {label}</p>
       <div style={{ display: 'grid', gridTemplateColumns: '60px 1fr 1fr 1fr', gap: '2px 8px', marginBottom: 2 }}>
-        <span style={{ color: '#4b5366', fontSize: 9 }}>MODÈLE</span>
-        <span style={{ color: '#4b5366', fontSize: 9, textAlign: 'right' }}>P5</span>
-        <span style={{ color: '#4b5366', fontSize: 9, textAlign: 'right' }}>P50</span>
-        <span style={{ color: '#4b5366', fontSize: 9, textAlign: 'right' }}>P95</span>
+        <span style={{ color: 'var(--chart-tooltip-muted)', fontSize: 9 }}>MODÈLE</span>
+        <span style={{ color: 'var(--chart-tooltip-muted)', fontSize: 9, textAlign: 'right' }}>P5</span>
+        <span style={{ color: 'var(--chart-tooltip-muted)', fontSize: 9, textAlign: 'right' }}>P50</span>
+        <span style={{ color: 'var(--chart-tooltip-muted)', fontSize: 9, textAlign: 'right' }}>P95</span>
         {rows.map(({ model, color, p50, p5, p95 }) => (
           <>
             <span key={`m-${model}`} style={{ color, fontWeight: 600 }}>{model}</span>
             <span key={`p5-${model}`}  style={{ color: '#ef5350', fontFamily: 'monospace', textAlign: 'right' }}>${p5.toFixed(0)}</span>
             <span key={`p50-${model}`} style={{ color, fontFamily: 'monospace', fontWeight: 700, textAlign: 'right' }}>${p50.toFixed(0)}</span>
-            <span key={`p95-${model}`} style={{ color: '#81c784', fontFamily: 'monospace', textAlign: 'right' }}>${p95.toFixed(0)}</span>
+            <span key={`p95-${model}`} style={{ color: '#26a69a', fontFamily: 'monospace', textAlign: 'right' }}>${p95.toFixed(0)}</span>
           </>
         ))}
       </div>
-      <div style={{ borderTop: '1px solid #2a2d3a', marginTop: 4, paddingTop: 4, color: '#e8e9ed', fontFamily: 'monospace', fontSize: 11 }}>
+      <div style={{ borderTop: '1px solid var(--chart-tooltip-border)', marginTop: 4, paddingTop: 4, color: 'var(--chart-tooltip-text)', fontFamily: 'monospace', fontSize: 11 }}>
         Consensus P50 : <strong>${d.cons_p50.toFixed(0)}</strong>
       </div>
     </div>
@@ -312,17 +312,17 @@ function ModelCorrHeatmap({ corr, names }: { corr: number[][]; names: string[] }
                 style={{
                   width: cell, height: cell,
                   background: isDiag ? 'rgba(0,217,255,0.15)' : corrColor4(v),
-                  border: isDiag ? '1px solid rgba(0,217,255,0.35)' : '1px solid rgba(255,255,255,0.05)',
+                  border: isDiag ? '1px solid rgba(0,170,200,0.40)' : '1px solid var(--chart-tooltip-border)',
                   borderRadius: 4,
                   display: 'flex', flexDirection: 'column',
                   alignItems: 'center', justifyContent: 'center',
                   fontSize: isDiag ? 9 : 11,
                   fontFamily: 'monospace',
                   cursor: 'default',
-                  color: isDiag ? '#7a8294' : (Math.abs(v) > 0.4 ? '#e8e9ed' : '#7a8294'),
+                  color: 'var(--chart-tooltip-text)',
                 }}>
                 {isDiag
-                  ? <span style={{ fontSize: 8, color: '#6b7280' }}>{MODEL_META[rowN as ModelKey]?.label}</span>
+                  ? <span style={{ fontSize: 8, color: 'var(--chart-tooltip-muted)' }}>{MODEL_META[rowN as ModelKey]?.label}</span>
                   : v.toFixed(3)
                 }
               </div>
@@ -506,27 +506,27 @@ function StressSlider({
 
 const PRESETS: { label: string; emoji: string; desc: string; values: StressState }[] = [
   {
-    label: 'Base', emoji: '📊', desc: 'Paramètres calibrés sur 2 ans d\'historique, aucun stress.',
+    label: 'Base', emoji: '◎', desc: 'Paramètres calibrés sur 2 ans d\'historique, aucun stress.',
     values: { vol_multiplier: 1.0, mu_adjustment: 0.0, geopolitical_risk: 0.0, crash_severity: 0.0 },
   },
   {
-    label: 'Bull', emoji: '🐂', desc: 'Fort bull market : tendance positive +10%/an, volatilité calme.',
+    label: 'Bull', emoji: '▲', desc: 'Fort bull market : tendance positive +10%/an, volatilité calme.',
     values: { vol_multiplier: 0.8, mu_adjustment: 0.10, geopolitical_risk: 0.0, crash_severity: 0.0 },
   },
   {
-    label: 'Correction', emoji: '📉', desc: 'Correction de marché : volatilité ×1.5, légère tendance négative.',
+    label: 'Correction', emoji: '↘', desc: 'Correction de marché : volatilité ×1.5, légère tendance négative.',
     values: { vol_multiplier: 1.5, mu_adjustment: -0.05, geopolitical_risk: 0.5, crash_severity: 0.15 },
   },
   {
-    label: 'Récession', emoji: '🔴', desc: 'Scénario récessif : vol ×2, rendements en baisse, risque géopolitique modéré.',
+    label: 'Récession', emoji: '▼', desc: 'Scénario récessif : vol ×2, rendements en baisse, risque géopolitique modéré.',
     values: { vol_multiplier: 2.0, mu_adjustment: -0.15, geopolitical_risk: 1.5, crash_severity: 0.35 },
   },
   {
-    label: 'Crise 2008', emoji: '💣', desc: 'Crise financière systémique : vol ×3, chutes structurelles, sauts fréquents.',
+    label: 'Crise 2008', emoji: '⚠', desc: 'Crise financière systémique : vol ×3, chutes structurelles, sauts fréquents.',
     values: { vol_multiplier: 3.0, mu_adjustment: -0.25, geopolitical_risk: 3.0, crash_severity: 0.70 },
   },
   {
-    label: 'Extrême', emoji: '☠️', desc: 'Scénario catastrophe : vol ×4, effondrement, chocs extrêmes.',
+    label: 'Extrême', emoji: '⊗', desc: 'Scénario catastrophe : vol ×4, effondrement, chocs extrêmes.',
     values: { vol_multiplier: 4.0, mu_adjustment: -0.30, geopolitical_risk: 5.0, crash_severity: 1.0 },
   },
 ];
@@ -610,7 +610,7 @@ export default function ComparePage() {
 
         {/* ── Titre ─────────────────────────────────────────────────── */}
         <div className="flex items-baseline gap-3 flex-wrap">
-          <h1 className="text-2xl font-bold text-terminal-cyan">🔬 Multi-Model Compare</h1>
+          <h1 className="text-2xl font-bold text-terminal-cyan">Multi-Model Compare</h1>
           <span className="text-xs text-terminal-textDim bg-terminal-surface border border-terminal-border px-2 py-0.5 rounded">
             Phase 4.5 · GBM · Merton · Heston · GARCH
           </span>
@@ -720,12 +720,12 @@ export default function ComparePage() {
               )}
               {stress.geopolitical_risk > 0 && (
                 <span className="bg-terminal-surfaceHi border border-terminal-border rounded px-2 py-0.5 text-warn num">
-                  🌍 +{stress.geopolitical_risk.toFixed(1)} sauts/an
+                  λ +{stress.geopolitical_risk.toFixed(1)} sauts/an
                 </span>
               )}
               {stress.crash_severity > 0 && (
                 <span className="bg-terminal-surfaceHi border border-terminal-border rounded px-2 py-0.5 text-bear num">
-                  💥 sévérité {(stress.crash_severity * 100).toFixed(0)}%
+                  Δ sévérité {(stress.crash_severity * 100).toFixed(0)}%
                 </span>
               )}
             </div>
@@ -776,7 +776,7 @@ export default function ComparePage() {
         {/* ── Placeholder ───────────────────────────────────────────── */}
         {!result && !running && (
           <div className="border border-dashed border-terminal-border rounded-lg p-12 text-center text-terminal-textDim">
-            <div className="text-4xl mb-3">🔬</div>
+            <div className="text-4xl mb-3 font-mono text-terminal-textDim">⊕</div>
             <p className="text-sm">Choisissez un ticker, un scénario de stress, puis cliquez sur <strong className="text-terminal-text">▶ Comparer les 4 modèles</strong></p>
             <p className="text-xs mt-2 max-w-lg mx-auto leading-relaxed">
               Les 4 modèles tournent avec le même seed aléatoire (simulation couplée).
@@ -834,17 +834,17 @@ export default function ComparePage() {
 
               <ResponsiveContainer width="100%" height={340}>
                 <ComposedChart data={mergedFan} margin={{ top: 4, right: 12, bottom: 0, left: 16 }}>
-                  <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.05)" />
-                  <XAxis dataKey="day" tick={{ fill: '#6b7280', fontSize: 11 }} tickFormatter={(v) => `J${v}`}
+                  <CartesianGrid strokeDasharray="3 3" stroke="var(--chart-grid)" />
+                  <XAxis dataKey="day" tick={{ fill: 'var(--chart-tooltip-muted)', fontSize: 11 }} tickFormatter={(v) => `J${v}`}
                     interval={Math.floor(mergedFan.length / 6)} />
-                  <YAxis tick={{ fill: '#6b7280', fontSize: 11 }} tickFormatter={(v) => `$${Number(v).toFixed(0)}`} width={64} />
+                  <YAxis tick={{ fill: 'var(--chart-tooltip-muted)', fontSize: 11 }} tickFormatter={(v) => `$${Number(v).toFixed(0)}`} width={64} />
                   <Tooltip content={<FanOverlayTooltip />} />
 
                   {/* Enveloppe globale (min P5 → max P95 de tous les modèles) */}
                   {fanView === 'full' && (
                     <>
                       <Area dataKey="env_lo"    fill="transparent" stroke="none" legendType="none" />
-                      <Area dataKey="env_hi"    fill="rgba(255,255,255,0.03)" stroke="none" legendType="none" stackId="env" />
+                      <Area dataKey="env_hi"    fill="var(--chart-grid)" stroke="none" legendType="none" stackId="env" />
                     </>
                   )}
 
@@ -866,12 +866,12 @@ export default function ComparePage() {
                   ))}
 
                   {/* Consensus */}
-                  <Line type="monotone" dataKey="cons_p50" stroke="rgba(255,255,255,0.3)"
+                  <Line type="monotone" dataKey="cons_p50" stroke="var(--chart-tooltip-muted)"
                     strokeWidth={1.5} strokeDasharray="6 3" dot={false} name="Consensus" />
 
                   {/* S0 reference */}
-                  <ReferenceLine y={S0} stroke="rgba(255,255,255,0.12)" strokeDasharray="5 3"
-                    label={{ value: `$${S0.toFixed(0)}`, fill: '#6b7280', fontSize: 10 }} />
+                  <ReferenceLine y={S0} stroke="var(--chart-grid)" strokeDasharray="5 3"
+                    label={{ value: `$${S0.toFixed(0)}`, fill: 'var(--chart-tooltip-muted)', fontSize: 10 }} />
                 </ComposedChart>
               </ResponsiveContainer>
 
@@ -904,21 +904,21 @@ export default function ComparePage() {
                 </SectionTitle>
                 <ResponsiveContainer width="100%" height={280}>
                   <BarChart data={result.histogram_overlay} margin={{ top: 4, right: 8, bottom: 0, left: 8 }} barCategoryGap={0} barGap={0}>
-                    <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.05)" vertical={false} />
-                    <XAxis dataKey="price" tick={{ fill: '#6b7280', fontSize: 9 }}
+                    <CartesianGrid strokeDasharray="3 3" stroke="var(--chart-grid)" vertical={false} />
+                    <XAxis dataKey="price" tick={{ fill: 'var(--chart-tooltip-muted)', fontSize: 9 }}
                       tickFormatter={(v) => `$${Number(v).toFixed(0)}`}
                       interval={Math.floor(result.histogram_overlay.length / 6)} />
-                    <YAxis tick={{ fill: '#6b7280', fontSize: 10 }} width={32} />
+                    <YAxis tick={{ fill: 'var(--chart-tooltip-muted)', fontSize: 10 }} width={32} />
                     <Tooltip
-                      contentStyle={{ background: '#0f1117', border: '1px solid #2a2d3a', borderRadius: 6, fontSize: 11 }}
+                      contentStyle={{ background: 'var(--chart-tooltip-bg)', border: '1px solid var(--chart-tooltip-border)', borderRadius: 6, fontSize: 11, color: 'var(--chart-tooltip-text)' }}
                       labelFormatter={(l) => `Prix : $${Number(l).toFixed(0)}`}
                     />
                     {MODEL_KEYS.map((k) => (
                       <Bar key={k} dataKey={k} name={MODEL_META[k].label}
                         fill={MODEL_META[k].color} opacity={0.45} radius={0} stackId={undefined} />
                     ))}
-                    <ReferenceLine x={S0} stroke="rgba(255,255,255,0.25)" strokeDasharray="4 2"
-                      label={{ value: 'S₀', fill: '#9ca3af', fontSize: 9, position: 'top' }} />
+                    <ReferenceLine x={S0} stroke="var(--chart-tooltip-muted)" strokeDasharray="4 2"
+                      label={{ value: 'S₀', fill: 'var(--chart-tooltip-muted)', fontSize: 9, position: 'top' }} />
                   </BarChart>
                 </ResponsiveContainer>
               </div>

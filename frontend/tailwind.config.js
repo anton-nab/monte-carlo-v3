@@ -16,19 +16,17 @@ module.exports = {
   theme: {
     extend: {
       colors: {
-        // ── Terminal tokens remapped to TintScale light palette ──────────────
+        // ── Terminal tokens — CSS variables (supports dark mode + opacity modifiers) ──
         terminal: {
-          bg:          '#fafaf9',   // Warm white — page background
-          surface:     '#f6f5f4',   // Card background
-          surfaceHi:   '#ede9e6',   // Hover / elevated card
-          border:      '#e7e5e3',   // Card borders
-
-          text:        '#1b1616',   // Primary text (near-black warm)
-          textMuted:   '#5a4f4f',   // Secondary text
-          textDim:     '#a79e9e',   // Tertiary / disabled
-
-          cyan:        '#b92e25',   // Brand accent → crimson red (primary)
-          cyanDim:     '#840000',   // Deeper accent
+          bg:         'rgb(var(--t-bg)         / <alpha-value>)',
+          surface:    'rgb(var(--t-surface)    / <alpha-value>)',
+          surfaceHi:  'rgb(var(--t-surface-hi) / <alpha-value>)',
+          border:     'rgb(var(--t-border)     / <alpha-value>)',
+          text:       'rgb(var(--t-text)       / <alpha-value>)',
+          textMuted:  'rgb(var(--t-text-muted) / <alpha-value>)',
+          textDim:    'rgb(var(--t-text-dim)   / <alpha-value>)',
+          cyan:       'rgb(var(--t-accent)     / <alpha-value>)',
+          cyanDim:    'rgb(var(--t-accent-dim) / <alpha-value>)',
         },
 
         // ── Financial convention ─────────────────────────────────────────────

@@ -1,26 +1,69 @@
 /**
  * Header — global navigation bar.
  *
- * Phase 4.5: search bar fixed (min-w), Instruments removed,
- * disabled items hidden from nav (they're in the home roadmap).
+ * Nav icons: small inline SVGs (no emoji, no external library).
+ * ThemeToggle: light/dark switcher, persisted in localStorage.
  */
 
 import Link from 'next/link';
 import { useRouter } from 'next/router';
 import { GlobalSearch } from './GlobalSearch';
+import { ThemeToggle } from './ThemeToggle';
 
 interface NavItem {
-  href: string;
+  href:  string;
   label: string;
-  emoji: string;
+  icon:  React.ReactNode;
 }
 
+// ─── Inline SVG icons (14×14, currentColor) ──────────────────────────────────
+
+const IconHome = () => (
+  <svg width="14" height="14" viewBox="0 0 24 24" fill="none"
+    stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <path d="M3 12L5 10M5 10L12 3L19 10M5 10V20a1 1 0 001 1h4v-5h4v5h4a1 1 0 001-1V10" />
+  </svg>
+);
+
+const IconMacro = () => (
+  <svg width="14" height="14" viewBox="0 0 24 24" fill="none"
+    stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <path d="M3 3v18h18" />
+    <path d="M7 16l4-7 4 5 3-4" />
+  </svg>
+);
+
+const IconSimulate = () => (
+  <svg width="14" height="14" viewBox="0 0 24 24" fill="none"
+    stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <path d="M2 12h2l3-9 4 18 3-9h4l3-3" />
+  </svg>
+);
+
+const IconCompare = () => (
+  <svg width="14" height="14" viewBox="0 0 24 24" fill="none"
+    stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <circle cx="8"  cy="12" r="5" />
+    <circle cx="16" cy="12" r="5" />
+  </svg>
+);
+
+const IconPortfolio = () => (
+  <svg width="14" height="14" viewBox="0 0 24 24" fill="none"
+    stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <rect x="2" y="7" width="20" height="14" rx="2" />
+    <path d="M16 7V5a2 2 0 00-2-2h-4a2 2 0 00-2 2v2" />
+    <line x1="12" y1="12" x2="12" y2="16" />
+    <line x1="10" y1="14" x2="14" y2="14" />
+  </svg>
+);
+
 const NAV_ITEMS: NavItem[] = [
-  { href: '/',          label: 'Home',      emoji: '⌂'  },
-  { href: '/dashboard', label: 'Macro',     emoji: '📊' },
-  { href: '/simulate',  label: 'Simulate',  emoji: '⚡' },
-  { href: '/compare',   label: 'Compare',   emoji: '🔬' },
-  { href: '/portfolio', label: 'Portfolio', emoji: '💼' },
+  { href: '/',          label: 'Home',      icon: <IconHome />      },
+  { href: '/dashboard', label: 'Macro',     icon: <IconMacro />     },
+  { href: '/simulate',  label: 'Simulate',  icon: <IconSimulate />  },
+  { href: '/compare',   label: 'Compare',   icon: <IconCompare />   },
+  { href: '/portfolio', label: 'Portfolio', icon: <IconPortfolio /> },
 ];
 
 export function Header() {
@@ -65,22 +108,25 @@ export function Header() {
               <Link
                 key={item.href}
                 href={item.href}
-                className={`px-2.5 py-1.5 rounded transition flex items-center gap-1 whitespace-nowrap ${
+                className={`px-2.5 py-1.5 rounded transition flex items-center gap-1.5 whitespace-nowrap ${
                   isActive
                     ? 'text-terminal-cyan bg-terminal-surfaceHi'
                     : 'text-terminal-textMuted hover:text-terminal-text hover:bg-terminal-surfaceHi'
                 }`}
               >
-                <span className="text-xs">{item.emoji}</span>
+                {item.icon}
                 <span>{item.label}</span>
               </Link>
             );
           })}
         </nav>
 
+        {/* Theme toggle */}
+        <ThemeToggle />
+
         {/* Mobile hamburger placeholder */}
         <div className="lg:hidden shrink-0">
-          <button className="text-terminal-textDim text-xl px-1">☰</button>
+          <button className="text-terminal-textDim text-xl px-1">&#9776;</button>
         </div>
       </div>
     </header>

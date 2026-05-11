@@ -169,11 +169,11 @@ function NewsCard({ item }: { item: NewsItem }) {
 // ─────────────────────────────────────────────────────────────────────────────
 
 const MODULES = [
-  { href: '/dashboard', emoji: '📊', title: 'Macro',      desc: '17 indicateurs — Fed, BCE, OCDE, FRED',           color: '#00d9ff' },
-  { href: '/indices',   emoji: '🗂️', title: 'Indices',    desc: 'SP500, NASDAQ, DAX, Nikkei — heatmap sectorielle', color: '#26a69a' },
-  { href: '/simulate',  emoji: '⚡', title: 'Simulate',   desc: 'GBM · Merton · Heston · GARCH — calibration auto', color: '#ffa726' },
-  { href: '/compare',   emoji: '🔬', title: 'Compare',    desc: '4 modèles simultanés + stress géopolitique',       color: '#ce93d8' },
-  { href: '/portfolio', emoji: '💼', title: 'Portfolio',  desc: 'Markowitz · frontière efficiente · Monte Carlo',   color: '#81c784' },
+  { href: '/dashboard', emoji: '▦',  title: 'Macro',      desc: '17 indicateurs — Fed, BCE, OCDE, FRED',           color: '#00d9ff' },
+  { href: '/indices',   emoji: '◫',  title: 'Indices',    desc: 'SP500, NASDAQ, DAX, Nikkei — heatmap sectorielle', color: '#26a69a' },
+  { href: '/simulate',  emoji: '∿',  title: 'Simulate',   desc: 'GBM · Merton · Heston · GARCH — calibration auto', color: '#ffa726' },
+  { href: '/compare',   emoji: '⊕',  title: 'Compare',    desc: '4 modèles simultanés + stress géopolitique',       color: '#ce93d8' },
+  { href: '/portfolio', emoji: '◈',  title: 'Portfolio',  desc: 'Markowitz · frontière efficiente · Monte Carlo',   color: '#81c784' },
 ];
 
 // ─────────────────────────────────────────────────────────────────────────────

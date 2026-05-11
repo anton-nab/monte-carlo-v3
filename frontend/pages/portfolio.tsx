@@ -226,12 +226,12 @@ function FanTooltip({
     { label: 'P5 — pessimiste',  value: d.p5,  color: 'rgba(255,100,100,0.85)' },
   ];
   return (
-    <div style={{ background: '#0f1117', border: '1px solid #2a2d3a', borderRadius: 6, padding: '8px 12px', fontSize: 12, minWidth: 180 }}>
-      <p style={{ color: '#6b7280', marginBottom: 6, fontFamily: 'monospace' }}>Jour {label}</p>
+    <div style={{ background: 'var(--chart-tooltip-bg)', border: '1px solid var(--chart-tooltip-border)', borderRadius: 6, padding: '8px 12px', fontSize: 12, minWidth: 180 }}>
+      <p style={{ color: 'var(--chart-tooltip-muted)', marginBottom: 6, fontFamily: 'monospace' }}>Jour {label}</p>
       {rows.map(({ label: l, value, color, bold }) => (
         <div key={l} style={{ display: 'flex', justifyContent: 'space-between', gap: 12, marginBottom: 2 }}>
           <span style={{ color }}>{l}</span>
-          <span style={{ color: bold ? color : '#e5e7eb', fontFamily: 'monospace', fontWeight: bold ? 700 : 400 }}>
+          <span style={{ color: bold ? color : 'var(--chart-tooltip-text)', fontFamily: 'monospace', fontWeight: bold ? 700 : 400 }}>
             ${value.toFixed(2)}
           </span>
         </div>
@@ -270,7 +270,7 @@ function CorrelationHeatmap({
         {/* Header row — ticker labels */}
         <div /> {/* empty top-left corner */}
         {tickers.map((t) => (
-          <div key={t} style={{ width: cellSize, textAlign: 'center', fontSize: 10, color: '#7a8294', fontFamily: 'monospace', padding: '2px 0' }}>
+          <div key={t} style={{ width: cellSize, textAlign: 'center', fontSize: 10, color: 'var(--chart-tooltip-muted)', fontFamily: 'monospace', padding: '2px 0' }}>
             {t.length > 5 ? t.slice(0, 4) + '…' : t}
           </div>
         ))}
@@ -281,7 +281,7 @@ function CorrelationHeatmap({
             {/* Row label */}
             <div
               key={`lbl-${rowTicker}`}
-              style={{ fontSize: 10, color: '#7a8294', fontFamily: 'monospace', textAlign: 'right', paddingRight: 4, display: 'flex', alignItems: 'center', justifyContent: 'flex-end' }}
+              style={{ fontSize: 10, color: 'var(--chart-tooltip-muted)', fontFamily: 'monospace', textAlign: 'right', paddingRight: 4, display: 'flex', alignItems: 'center', justifyContent: 'flex-end' }}
             >
               {rowTicker.length > 5 ? rowTicker.slice(0, 4) + '…' : rowTicker}
             </div>
@@ -296,15 +296,16 @@ function CorrelationHeatmap({
                   style={{
                     width: cellSize,
                     height: cellSize,
-                    background: isDiag ? 'rgba(0,217,255,0.2)' : corrColor(v),
-                    border: isDiag ? '1px solid rgba(0,217,255,0.4)' : '1px solid rgba(255,255,255,0.04)',
+                    background: isDiag ? 'rgba(0,150,180,0.25)' : corrColor(v),
+                    border: isDiag ? '2px solid rgba(0,150,180,0.55)' : '1px solid var(--chart-tooltip-border)',
                     borderRadius: 3,
                     display: 'flex',
                     alignItems: 'center',
                     justifyContent: 'center',
                     fontSize: cellSize > 40 ? 10 : 9,
                     fontFamily: 'monospace',
-                    color: Math.abs(v) > 0.5 ? '#e8e9ed' : '#7a8294',
+                    fontWeight: isDiag ? 700 : 400,
+                    color: 'var(--chart-tooltip-text)',
                     cursor: 'default',
                   }}
                 >
@@ -317,12 +318,12 @@ function CorrelationHeatmap({
       </div>
 
       {/* Légende */}
-      <div style={{ display: 'flex', gap: 12, marginTop: 10, fontSize: 10, color: '#7a8294', alignItems: 'center' }}>
-        <span style={{ display: 'inline-block', width: 12, height: 12, background: 'rgba(239,40,30,0.6)', borderRadius: 2 }} />
+      <div style={{ display: 'flex', gap: 12, marginTop: 10, fontSize: 10, color: 'var(--chart-tooltip-muted)', alignItems: 'center' }}>
+        <span style={{ display: 'inline-block', width: 12, height: 12, background: 'rgba(239,40,30,0.55)', borderRadius: 2 }} />
         <span>Corrélation négative</span>
-        <span style={{ display: 'inline-block', width: 12, height: 12, background: 'rgba(60,60,70,0.4)', border: '1px solid #2a3040', borderRadius: 2 }} />
+        <span style={{ display: 'inline-block', width: 12, height: 12, background: 'var(--chart-grid)', border: '1px solid var(--chart-tooltip-border)', borderRadius: 2 }} />
         <span>Neutre (≈0)</span>
-        <span style={{ display: 'inline-block', width: 12, height: 12, background: 'rgba(0,170,255,0.6)', borderRadius: 2 }} />
+        <span style={{ display: 'inline-block', width: 12, height: 12, background: 'rgba(0,130,200,0.55)', borderRadius: 2 }} />
         <span>Corrélation positive</span>
       </div>
     </div>
@@ -692,7 +693,7 @@ export default function PortfolioPage() {
 
         {/* ── Titre ────────────────────────────────────────────────── */}
         <div className="flex items-baseline gap-3">
-          <h1 className="text-2xl font-bold text-terminal-cyan">💼 Portfolio Analyzer</h1>
+          <h1 className="text-2xl font-bold text-terminal-cyan">Portfolio Analyzer</h1>
           <span className="text-xs text-terminal-textDim bg-terminal-surface border border-terminal-border px-2 py-0.5 rounded">
             Phase 4 · Markowitz
           </span>
@@ -753,7 +754,7 @@ export default function PortfolioPage() {
                         key={a.ticker}
                         className="text-[9px] font-mono px-1 py-0.5 rounded"
                         style={{
-                          background: isActive ? `${tpl.color}22` : 'rgba(255,255,255,0.04)',
+                          background: isActive ? `${tpl.color}22` : 'transparent',
                           color: isActive ? tpl.color : '#6b7280',
                         }}
                       >
@@ -1010,27 +1011,27 @@ export default function PortfolioPage() {
                 </SectionTitle>
                 <ResponsiveContainer width="100%" height={280}>
                   <ScatterChart margin={{ top: 4, right: 10, bottom: 20, left: 10 }}>
-                    <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.05)" />
+                    <CartesianGrid strokeDasharray="3 3" stroke="var(--chart-grid)" />
                     <XAxis
                       type="number"
                       dataKey="volatility"
                       name="Volatilité"
                       tickFormatter={(v) => pct(v, 0)}
-                      tick={{ fill: '#6b7280', fontSize: 10 }}
-                      label={{ value: 'Volatilité', fill: '#6b7280', fontSize: 10, position: 'insideBottom', offset: -12 }}
+                      tick={{ fill: 'var(--chart-tooltip-muted)', fontSize: 10 }}
+                      label={{ value: 'Volatilité', fill: 'var(--chart-tooltip-muted)', fontSize: 10, position: 'insideBottom', offset: -12 }}
                     />
                     <YAxis
                       type="number"
                       dataKey="return"
                       name="Rendement"
                       tickFormatter={(v) => pct(v, 0)}
-                      tick={{ fill: '#6b7280', fontSize: 10 }}
+                      tick={{ fill: 'var(--chart-tooltip-muted)', fontSize: 10 }}
                       width={44}
                     />
                     <ZAxis range={[16, 16]} />
                     <Tooltip
                       cursor={{ strokeDasharray: '3 3' }}
-                      contentStyle={{ background: '#0f1117', border: '1px solid #2a2d3a', fontSize: 11, borderRadius: 6 }}
+                      contentStyle={{ background: 'var(--chart-tooltip-bg)', border: '1px solid var(--chart-tooltip-border)', fontSize: 11, borderRadius: 6, color: 'var(--chart-tooltip-text)' }}
                       formatter={(v: unknown, name: unknown) => [`${pct(Number(v))}`, String(name ?? '')]}
                       labelFormatter={() => ''}
                     />
@@ -1167,15 +1168,15 @@ export default function PortfolioPage() {
               </SectionTitle>
               <ResponsiveContainer width="100%" height={320}>
                 <ComposedChart data={stackedFan} margin={{ top: 4, right: 12, bottom: 0, left: 12 }}>
-                  <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.06)" />
+                  <CartesianGrid strokeDasharray="3 3" stroke="var(--chart-grid)" />
                   <XAxis
                     dataKey="day"
-                    tick={{ fill: '#6b7280', fontSize: 11 }}
+                    tick={{ fill: 'var(--chart-tooltip-muted)', fontSize: 11 }}
                     tickFormatter={(v) => `J${v}`}
                     interval={Math.floor(stackedFan.length / 6)}
                   />
                   <YAxis
-                    tick={{ fill: '#6b7280', fontSize: 11 }}
+                    tick={{ fill: 'var(--chart-tooltip-muted)', fontSize: 11 }}
                     tickFormatter={(v) => `$${Number(v).toFixed(0)}`}
                     width={64}
                   />
@@ -1193,9 +1194,9 @@ export default function PortfolioPage() {
 
                   <ReferenceLine
                     y={S0}
-                    stroke="rgba(255,255,255,0.15)"
+                    stroke="var(--chart-grid)"
                     strokeDasharray="6 3"
-                    label={{ value: `$${S0.toFixed(0)}`, fill: '#6b7280', fontSize: 10 }}
+                    label={{ value: `$${S0.toFixed(0)}`, fill: 'var(--chart-tooltip-muted)', fontSize: 10 }}
                   />
                 </ComposedChart>
               </ResponsiveContainer>
@@ -1214,23 +1215,23 @@ export default function PortfolioPage() {
                 <SectionTitle>Distribution des valeurs finales</SectionTitle>
                 <ResponsiveContainer width="100%" height={240}>
                   <BarChart data={result.histogram} margin={{ top: 4, right: 8, bottom: 0, left: 8 }}>
-                    <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.05)" vertical={false} />
+                    <CartesianGrid strokeDasharray="3 3" stroke="var(--chart-grid)" vertical={false} />
                     <XAxis
                       dataKey="price"
-                      tick={{ fill: '#6b7280', fontSize: 10 }}
+                      tick={{ fill: 'var(--chart-tooltip-muted)', fontSize: 10 }}
                       tickFormatter={(v) => `$${Number(v).toFixed(0)}`}
                       interval={Math.floor(result.histogram.length / 6)}
                     />
-                    <YAxis tick={{ fill: '#6b7280', fontSize: 10 }} width={36} />
+                    <YAxis tick={{ fill: 'var(--chart-tooltip-muted)', fontSize: 10 }} width={36} />
                     <Tooltip
-                      contentStyle={{ background: '#0f1117', border: '1px solid #2a2d3a', borderRadius: 6, fontSize: 12 }}
+                      contentStyle={{ background: 'var(--chart-tooltip-bg)', border: '1px solid var(--chart-tooltip-border)', borderRadius: 6, fontSize: 12, color: 'var(--chart-tooltip-text)' }}
                       formatter={(v) => [v, 'trajectoires']}
                       labelFormatter={(l) => `Valeur : $${Number(l).toFixed(2)}`}
                     />
                     <Bar dataKey="count" fill="rgba(0,217,255,0.5)" radius={[2, 2, 0, 0]} />
 
-                    <ReferenceLine x={S0} stroke="rgba(255,255,255,0.3)" strokeDasharray="4 2"
-                      label={{ value: 'S₀', fill: '#9ca3af', fontSize: 10, position: 'top' }} />
+                    <ReferenceLine x={S0} stroke="var(--chart-tooltip-muted)" strokeDasharray="4 2"
+                      label={{ value: 'S₀', fill: 'var(--chart-tooltip-muted)', fontSize: 10, position: 'top' }} />
                     <ReferenceLine x={m.p50} stroke="#00d9ff" strokeWidth={1.5}
                       label={{ value: 'P50', fill: '#00d9ff', fontSize: 10, position: 'top' }} />
                     {modeBin && modeBin.price !== m.p50 && (

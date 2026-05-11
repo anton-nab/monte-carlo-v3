@@ -229,18 +229,18 @@ function FanTooltip({
 
   return (
     <div style={{
-      background: '#0f1117',
-      border: '1px solid #2a2d3a',
+      background: 'var(--chart-tooltip-bg)',
+      border: '1px solid var(--chart-tooltip-border)',
       borderRadius: 6,
       padding: '8px 12px',
       fontSize: 12,
       minWidth: 180,
     }}>
-      <p style={{ color: '#6b7280', marginBottom: 6, fontFamily: 'monospace' }}>Jour {label}</p>
+      <p style={{ color: 'var(--chart-tooltip-muted)', marginBottom: 6, fontFamily: 'monospace' }}>Jour {label}</p>
       {rows.map(({ label: l, value, color, bold }) => (
         <div key={l} style={{ display: 'flex', justifyContent: 'space-between', gap: 12, marginBottom: 2 }}>
           <span style={{ color }}>{l}</span>
-          <span style={{ color: bold ? color : '#e5e7eb', fontFamily: 'monospace', fontWeight: bold ? 700 : 400 }}>
+          <span style={{ color: bold ? color : 'var(--chart-tooltip-text)', fontFamily: 'monospace', fontWeight: bold ? 700 : 400 }}>
             ${value.toFixed(2)}
           </span>
         </div>
@@ -356,7 +356,7 @@ export default function SimulatePage() {
 
         {/* ── Titre ─────────────────────────────────────────────────── */}
         <div className="flex items-baseline gap-3">
-          <h1 className="text-2xl font-bold text-terminal-cyan">⚡ Monte Carlo Simulator</h1>
+          <h1 className="text-2xl font-bold text-terminal-cyan">Monte Carlo Simulator</h1>
           <span className="text-xs text-terminal-textDim bg-terminal-surface border border-terminal-border px-2 py-0.5 rounded">Phase 3</span>
         </div>
 
@@ -651,15 +651,15 @@ export default function SimulatePage() {
               </SectionTitle>
               <ResponsiveContainer width="100%" height={340}>
                 <ComposedChart data={stackedFan} margin={{ top: 4, right: 12, bottom: 0, left: 12 }}>
-                  <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.06)" />
+                  <CartesianGrid strokeDasharray="3 3" stroke="var(--chart-grid)" />
                   <XAxis
                     dataKey="day"
-                    tick={{ fill: '#6b7280', fontSize: 11 }}
+                    tick={{ fill: 'var(--chart-tooltip-muted)', fontSize: 11 }}
                     tickFormatter={(v) => `J${v}`}
                     interval={Math.floor(stackedFan.length / 6)}
                   />
                   <YAxis
-                    tick={{ fill: '#6b7280', fontSize: 11 }}
+                    tick={{ fill: 'var(--chart-tooltip-muted)', fontSize: 11 }}
                     tickFormatter={(v) => `$${Number(v).toFixed(0)}`}
                     width={60}
                   />
@@ -681,9 +681,9 @@ export default function SimulatePage() {
                   {/* Ligne S0 de référence */}
                   <ReferenceLine
                     y={result.S0}
-                    stroke="rgba(255,255,255,0.15)"
+                    stroke="var(--chart-grid)"
                     strokeDasharray="6 3"
-                    label={{ value: `$${result.S0.toFixed(0)}`, fill: '#6b7280', fontSize: 10 }}
+                    label={{ value: `$${result.S0.toFixed(0)}`, fill: 'var(--chart-tooltip-muted)', fontSize: 10 }}
                   />
                 </ComposedChart>
               </ResponsiveContainer>
@@ -703,24 +703,24 @@ export default function SimulatePage() {
                 <SectionTitle>Distribution des prix finaux</SectionTitle>
                 <ResponsiveContainer width="100%" height={240}>
                   <BarChart data={result.histogram} margin={{ top: 4, right: 8, bottom: 0, left: 8 }}>
-                    <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.05)" vertical={false} />
+                    <CartesianGrid strokeDasharray="3 3" stroke="var(--chart-grid)" vertical={false} />
                     <XAxis
                       dataKey="price"
-                      tick={{ fill: '#6b7280', fontSize: 10 }}
+                      tick={{ fill: 'var(--chart-tooltip-muted)', fontSize: 10 }}
                       tickFormatter={(v) => `$${Number(v).toFixed(0)}`}
                       interval={Math.floor(result.histogram.length / 6)}
                     />
-                    <YAxis tick={{ fill: '#6b7280', fontSize: 10 }} width={36} />
+                    <YAxis tick={{ fill: 'var(--chart-tooltip-muted)', fontSize: 10 }} width={36} />
                     <Tooltip
-                      contentStyle={{ background: '#0f1117', border: '1px solid #2a2d3a', borderRadius: 6, fontSize: 12 }}
+                      contentStyle={{ background: 'var(--chart-tooltip-bg)', border: '1px solid var(--chart-tooltip-border)', borderRadius: 6, fontSize: 12, color: 'var(--chart-tooltip-text)' }}
                       formatter={(v) => [v, 'trajectoires']}
                       labelFormatter={(l) => `Prix : $${Number(l).toFixed(2)}`}
                     />
                     <Bar dataKey="count" fill="rgba(0,229,255,0.5)" radius={[2, 2, 0, 0]} />
 
                     {/* S0 de départ */}
-                    <ReferenceLine x={result.S0} stroke="rgba(255,255,255,0.3)" strokeDasharray="4 2"
-                      label={{ value: 'S₀', fill: '#9ca3af', fontSize: 10, position: 'top' }} />
+                    <ReferenceLine x={result.S0} stroke="var(--chart-tooltip-muted)" strokeDasharray="4 2"
+                      label={{ value: 'S₀', fill: 'var(--chart-tooltip-muted)', fontSize: 10, position: 'top' }} />
 
                     {/* Médiane */}
                     <ReferenceLine x={m.p50} stroke="#00e5ff" strokeWidth={1.5}
@@ -830,7 +830,7 @@ export default function SimulatePage() {
         {/* ── Placeholder ───────────────────────────────────────────── */}
         {!result && !running && (
           <div className="border border-dashed border-terminal-border rounded-lg p-12 text-center text-terminal-textDim">
-            <div className="text-4xl mb-3">📊</div>
+            <div className="text-4xl mb-3 font-mono text-terminal-textDim">∿</div>
             <p className="text-sm">Configurez les paramètres ci-dessus et cliquez sur <strong className="text-terminal-text">▶ Lancer la simulation</strong></p>
             <p className="text-xs mt-1">GBM · Merton · Heston · GARCH — calibration automatique depuis yfinance</p>
           </div>

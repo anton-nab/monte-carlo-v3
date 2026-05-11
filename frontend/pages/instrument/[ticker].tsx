@@ -339,10 +339,10 @@ export default function InstrumentPage() {
   const lineColor     = isPositive !== false ? '#26a69a' : '#ef5350';
 
   const tabs: { id: PageTab; label: string }[] = [
-    { id: 'chart',      label: '📈 Chart' },
-    { id: 'financials', label: '📊 Financials' },
-    { id: 'analysis',   label: '🔍 Analysis' },
-    ...(isEtf ? [{ id: 'etf' as PageTab, label: '🗂️ ETF' }] : []),
+    { id: 'chart',      label: 'Chart' },
+    { id: 'financials', label: 'Financials' },
+    { id: 'analysis',   label: 'Analysis' },
+    ...(isEtf ? [{ id: 'etf' as PageTab, label: 'ETF' }] : []),
   ];
 
   return (
@@ -891,8 +891,8 @@ function PriceTargetBar({ low, mean, high, current }: { low: number|null; mean: 
       <div className="relative pt-9">
         {current != null && (
           <div className="absolute top-0 flex flex-col items-center pointer-events-none" style={{ left: `${pct(current)}%`, transform: 'translateX(-50%)' }}>
-            <span className="inline-flex items-center gap-1 text-[11px] font-bold text-white bg-white/10 border border-white/25 rounded px-1.5 py-0.5 whitespace-nowrap">● Current price</span>
-            <svg width="8" height="5" viewBox="0 0 8 5" className="mt-0.5 shrink-0"><path d="M4 5L0 0h8z" fill="rgba(255,255,255,0.25)" /></svg>
+            <span className="inline-flex items-center gap-1 text-[11px] font-bold text-terminal-text bg-terminal-surfaceHi border border-terminal-border rounded px-1.5 py-0.5 whitespace-nowrap">● Current price</span>
+            <svg width="8" height="5" viewBox="0 0 8 5" className="mt-0.5 shrink-0"><path d="M4 5L0 0h8z" fill="var(--chart-tooltip-border)" /></svg>
           </div>
         )}
         <div className="relative h-3.5 bg-terminal-bg rounded-full">
