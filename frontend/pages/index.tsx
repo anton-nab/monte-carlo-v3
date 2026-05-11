@@ -207,7 +207,7 @@ export default function Home() {
   const [lastUpdate, setLastUpdate] = useState<string>('');
 
   // Live price feed via WebSocket
-  const liveWs = useWebSocket(TAPE_WS_SYMBOLS);
+  const { prices: liveWs } = useWebSocket(TAPE_WS_SYMBOLS);
 
   // Merge WS prices into tape / indices (keep change_pct from REST, update price from WS)
   const liveTape = useMemo(() => {

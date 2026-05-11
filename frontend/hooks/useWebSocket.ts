@@ -4,18 +4,21 @@
  * Custom hook for real-time price streaming via the backend WebSocket.
  *
  * Connects to /ws/quotes, subscribes to a list of tickers, and returns
- * a live price map that updates in real time via Twelve Data.
+ * live prices + connection status.
  *
  * Auto-reconnects with exponential back-off (1 s → 30 s).
  *
  * Usage:
- *   const prices = useWebSocket(['AAPL', 'BTC-USD', '^GSPC'])
- *   prices['AAPL']       → { symbol: 'AAPL', price: 150.25, timestamp: '...' }
- *   prices['BTC/USD']    → { symbol: 'BTC/USD', price: 65000, timestamp: '...' }
+ *   const { prices, connected } = useWebSocket(['AAPL', 'BTC-USD'])
+ *   prices['AAPL']    → { symbol: 'AAPL', price: 150.25, timestamp: '...' }
+ *   prices['BTC/USD'] → { symbol: 'BTC/USD', price: 65000, timestamp: '...' }
+ *   connected         → true when the WS handshake is open
  *
- * Note: TD symbols are returned in TD format (e.g. 'BTC/USD', 'SPX') even when
- * subscribed with yfinance-style tickers ('BTC-USD', '^GSPC'). The backend
- * translates on subscribe; the snapshot/price events use the TD symbol.
+ * Note on asset coverage (free Twelve Data plan):
+ *   WS streams live prices only for US equities.
+ *   Crypto, forex, commodities and indices require a paid WS plan.
+ *   → `connected` will be true but `prices` empty for those assets.
+ *   → Use lookupPrice() to bridge yfinance ↔ TD symbol formats.
  */
 
 import { useEffect, useRef, useState, useCallback } from 'react';
@@ -33,18 +36,24 @@ export interface LivePrice {
 /** Map of TD symbol → latest price event */
 export type PriceMap = Record<string, LivePrice>;
 
+export interface WsHookResult {
+  /** Live price map keyed by Twelve Data symbol (e.g. 'AAPL', 'BTC/USD') */
+  prices:    PriceMap;
+  /** True when the WebSocket connection is open (but may not be streaming data) */
+  connected: boolean;
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Constants
 // ─────────────────────────────────────────────────────────────────────────────
 
-const RECONNECT_BASE_MS  = 1_000;
-const RECONNECT_MAX_MS   = 30_000;
-const WS_READY_OPEN      = 1; // WebSocket.OPEN
+const RECONNECT_BASE_MS = 1_000;
+const RECONNECT_MAX_MS  = 30_000;
+const WS_READY_OPEN     = 1;
 
 function buildWsUrl(): string {
   const api = (process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:8000')
     .replace(/\/$/, '');
-  // http(s) → ws(s)
   return api.replace(/^http/, 'ws') + '/ws/quotes';
 }
 
@@ -52,8 +61,9 @@ function buildWsUrl(): string {
 // Hook
 // ─────────────────────────────────────────────────────────────────────────────
 
-export function useWebSocket(symbols: string[]): PriceMap {
-  const [prices, setPrices] = useState<PriceMap>({});
+export function useWebSocket(symbols: string[]): WsHookResult {
+  const [prices,    setPrices]    = useState<PriceMap>({});
+  const [connected, setConnected] = useState(false);
 
   const wsRef      = useRef<WebSocket | null>(null);
   const symbolsRef = useRef<string[]>(symbols);
@@ -63,13 +73,10 @@ export function useWebSocket(symbols: string[]): PriceMap {
   const WS_URL     = useRef(buildWsUrl()).current;
 
   // Keep symbols ref current without re-creating connect()
-  useEffect(() => {
-    symbolsRef.current = symbols;
-  });
+  useEffect(() => { symbolsRef.current = symbols; });
 
   const connect = useCallback(() => {
     if (!mountedRef.current) return;
-    // Don't stack connections
     if (wsRef.current?.readyState === WS_READY_OPEN) return;
 
     const ws = new WebSocket(WS_URL);
@@ -77,6 +84,7 @@ export function useWebSocket(symbols: string[]): PriceMap {
 
     ws.onopen = () => {
       backoffRef.current = RECONNECT_BASE_MS;
+      setConnected(true);
       if (symbolsRef.current.length > 0) {
         ws.send(JSON.stringify({
           action:  'subscribe',
@@ -90,17 +98,12 @@ export function useWebSocket(symbols: string[]): PriceMap {
         const msg = JSON.parse(evt.data as string) as Record<string, unknown>;
 
         if (msg.type === 'price') {
-          // Single price update
           const { symbol, price, timestamp } = msg as {
             type: string; symbol: string; price: number; timestamp: string;
           };
-          setPrices(prev => ({
-            ...prev,
-            [symbol]: { symbol, price, timestamp },
-          }));
+          setPrices(prev => ({ ...prev, [symbol]: { symbol, price, timestamp } }));
 
         } else if (msg.type === 'snapshot') {
-          // Bulk snapshot on connect/subscribe
           const snap = msg.prices as Record<string, LivePrice> | null;
           if (snap && typeof snap === 'object') {
             setPrices(prev => ({ ...prev, ...snap }));
@@ -113,6 +116,7 @@ export function useWebSocket(symbols: string[]): PriceMap {
 
     ws.onclose = () => {
       wsRef.current = null;
+      setConnected(false);
       if (!mountedRef.current) return;
       timerRef.current = setTimeout(() => {
         backoffRef.current = Math.min(backoffRef.current * 2, RECONNECT_MAX_MS);
@@ -120,7 +124,7 @@ export function useWebSocket(symbols: string[]): PriceMap {
       }, backoffRef.current);
     };
 
-    ws.onerror = () => ws.close(); // triggers onclose → retry
+    ws.onerror = () => ws.close();
   }, [WS_URL]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Re-subscribe when symbol list changes while connected
@@ -144,7 +148,7 @@ export function useWebSocket(symbols: string[]): PriceMap {
     };
   }, [connect]);
 
-  return prices;
+  return { prices, connected };
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -178,4 +182,21 @@ export function lookupPrice(
   ticker: string,
 ): LivePrice | undefined {
   return prices[ticker] ?? prices[YF_TO_TD[ticker] ?? ticker];
+}
+
+/**
+ * Returns true for asset classes that Twelve Data does NOT stream via WebSocket
+ * on the free plan (crypto, forex, commodities, indices).
+ * These assets still get REST-polled prices but won't show a LIVE badge.
+ */
+export function isWsUnsupported(ticker: string): boolean {
+  // Crypto
+  if (ticker.endsWith('-USD') && ticker !== ticker.replace('-USD', '')) return true;
+  // Forex
+  if (ticker.endsWith('=X')) return true;
+  // Commodities / futures
+  if (ticker.endsWith('=F')) return true;
+  // Indices (start with ^)
+  if (ticker.startsWith('^')) return true;
+  return false;
 }

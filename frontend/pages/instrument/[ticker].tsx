@@ -12,7 +12,7 @@
 import { useRouter } from 'next/router';
 import { useState, useMemo, useCallback, useRef, useEffect } from 'react';
 import useSWR from 'swr';
-import { useWebSocket, lookupPrice } from '../../hooks/useWebSocket';
+import { useWebSocket, lookupPrice, isWsUnsupported } from '../../hooks/useWebSocket';
 import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
   PieChart, Pie, Cell, ReferenceLine,
@@ -316,7 +316,7 @@ export default function InstrumentPage() {
     () => (tickerStr ? [tickerStr] : []),
     [tickerStr],
   );
-  const livePrices = useWebSocket(wsSymbols);
+  const { prices: livePrices, connected: wsConnected } = useWebSocket(wsSymbols);
   const livePrice  = tickerStr ? lookupPrice(livePrices, tickerStr) : undefined;
 
   // ── SWR fetches ────────────────────────────────────────────────────────────
@@ -499,11 +499,15 @@ export default function InstrumentPage() {
               <div className={`text-right ${changeBgColor} rounded px-4 py-2`}>
                 <div className="flex items-baseline justify-end gap-2">
                   <div className="text-2xl font-bold num">${quote.price.toFixed(2)}</div>
-                  {livePrice && (
+                  {livePrice ? (
                     <span className="text-2xs font-mono text-terminal-cyan px-1 py-0.5 border border-terminal-cyan/40 rounded tracking-wider">
                       LIVE
                     </span>
-                  )}
+                  ) : wsConnected && tickerStr && !isWsUnsupported(tickerStr) ? (
+                    <span className="text-2xs font-mono text-terminal-textDim px-1 py-0.5 border border-terminal-border rounded tracking-wider" title="WebSocket connected — streaming when market opens">
+                      WS
+                    </span>
+                  ) : null}
                 </div>
                 <div className={`text-sm font-semibold num ${changeColor}`}>
                   {isPositive ? '+' : ''}{quote.change.toFixed(2)} ({quote.change_pct.toFixed(2)}%)
@@ -552,7 +556,11 @@ export default function InstrumentPage() {
                 <div className="px-4 py-2 border-b border-terminal-border bg-terminal-surface flex items-center gap-3 flex-wrap shrink-0">
                   <span className="font-mono font-bold text-terminal-cyan text-lg">{tickerStr}</span>
                   {quote && <span className="num text-terminal-text">${quote.price.toFixed(2)}</span>}
-                  {livePrice && <span className="text-2xs text-terminal-cyan border border-terminal-cyan/30 rounded px-1 font-mono">LIVE</span>}
+                  {livePrice ? (
+                    <span className="text-2xs text-terminal-cyan border border-terminal-cyan/30 rounded px-1 font-mono">LIVE</span>
+                  ) : wsConnected && tickerStr && !isWsUnsupported(tickerStr) ? (
+                    <span className="text-2xs text-terminal-textDim border border-terminal-border rounded px-1 font-mono" title="WebSocket connected — streaming when market opens">WS</span>
+                  ) : null}
                   <div className="flex items-center gap-1 flex-wrap ml-4">
                     {(['area', 'candle'] as ChartType[]).map(ct => (
                       <button key={ct} onClick={() => setChartType(ct)}
@@ -875,7 +883,7 @@ function InfoTip({ text, dir = 'right' }: { text: string; dir?: 'right' | 'top' 
   const pos = { right: 'left-full top-1/2 -translate-y-1/2 ml-1.5', top: 'bottom-full left-1/2 -translate-x-1/2 mb-1.5', bottom: 'top-full left-1/2 -translate-x-1/2 mt-1.5' }[dir];
   return (
     <span className="relative group inline-flex items-center cursor-help align-middle ml-0.5">
-      <span className="text-terminal-textDim/60 text-[9px] select-none leading-none">ⓘ</span>
+      <span className="inline-flex items-center justify-center w-3 h-3 rounded-full border border-current text-[7px] font-bold select-none leading-none text-terminal-textDim/60">i</span>
       <span className={`pointer-events-none absolute ${pos} z-50 invisible group-hover:visible opacity-0 group-hover:opacity-100 transition-opacity duration-150 bg-[#0f1522] border border-terminal-border rounded px-2 py-1.5 text-xs text-terminal-text w-52 leading-snug shadow-xl`}>
         {text}
       </span>
