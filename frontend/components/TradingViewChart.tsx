@@ -4,12 +4,14 @@
  * Features:
  *  - Line / Area / Candlestick chart types
  *  - Intraday support (ISO datetime → Unix seconds)
- *  - Theme-aware: reads `html.dark` class, re-creates chart on toggle
- *  - Dashed grid lines (subtle, not solid)
- *  - overlays prop: additional line series (EMA, Bollinger bands …)
- *  - volumeData prop: histogram series at the bottom 20 % of the chart
+ *  - Theme-aware: reads `html.dark` class via MutationObserver
+ *  - Dashed grid lines (LargeDashed, subtle)
+ *  - overlays prop: additional LineSeries (EMA, Bollinger …)
+ *  - volumeData prop: histogram at bottom ~30% of chart (in-chart, always synced)
+ *  - onVisibleRangeChange: fires debounced unix-second range for sub-panel sync
  *
- * Doc: https://tradingview.github.io/lightweight-charts/
+ * Bug fix: init + data loading combined in ONE effect so the chart is never
+ * left blank after a theme toggle (the data effect no longer trails behind).
  */
 
 import { useEffect, useRef, useState } from 'react';
@@ -18,7 +20,6 @@ import {
   ColorType,
   LineStyle,
   IChartApi,
-  ISeriesApi,
   LineData,
   Time,
   AreaData,
@@ -33,10 +34,10 @@ import {
 // Public types
 // ─────────────────────────────────────────────────────────────────────────────
 
-interface DataPoint  { date: string; value: number }
-interface OHLCPoint  { date: string; open: number; high: number; low: number; close: number }
+interface DataPoint { date: string; value: number }
+interface OHLCPoint { date: string; open: number; high: number; low: number; close: number }
 
-/** A single overlay line (EMA, Bollinger band …) drawn on top of the main chart */
+/** Single overlay line drawn on top of the main chart (EMA, Bollinger …) */
 export interface OverlayLine {
   data:       DataPoint[];
   color:      string;
@@ -45,7 +46,7 @@ export interface OverlayLine {
   lineStyle?: number;
 }
 
-/** Volume bar data — color should be bull/bear green/red */
+/** Volume bar — color should reflect bull/bear */
 export interface VolumePoint {
   date:   string;
   value:  number;
@@ -55,33 +56,25 @@ export interface VolumePoint {
 export type ChartType = 'line' | 'area' | 'candle';
 
 interface TradingViewChartProps {
-  /** Line / area data — used when chartType is 'line' or 'area' */
-  data?: DataPoint[];
-  /** OHLC data — used when chartType is 'candle' */
-  ohlcData?: OHLCPoint[];
-  /** Chart type — defaults to 'area' (or 'line' if fill=false) */
-  chartType?: ChartType;
-  /** Legacy: if false => line, true => area. Ignored if chartType is set. */
-  fill?: boolean;
-  height?: number;
-  /** Line colour (hex). Candlestick colours are fixed green/red. */
-  color?: string;
-  /** Show price scale + time axis (default true) */
-  showAxes?: boolean;
-  /**
-   * Intraday mode: dates are ISO datetime strings → converted to Unix seconds.
-   * Time-axis label shows H:MM.
-   */
-  isIntraday?: boolean;
-  /**
-   * Initial visible date range for daily charts.
-   * All data stays in the chart; this just sets the viewport.
-   */
+  data?:         DataPoint[];
+  ohlcData?:     OHLCPoint[];
+  chartType?:    ChartType;
+  /** Legacy: false → line, true → area. Ignored when chartType is set. */
+  fill?:         boolean;
+  height?:       number;
+  color?:        string;
+  showAxes?:     boolean;
+  isIntraday?:   boolean;
   visibleRange?: { from: string; to: string };
-  /** Additional line series drawn on the main chart (EMA, Bollinger …) */
-  overlays?: OverlayLine[];
-  /** Volume histogram drawn at the bottom 20 % of the chart */
-  volumeData?: VolumePoint[];
+  /** Additional LineSeries overlays (EMA, Bollinger …) */
+  overlays?:     OverlayLine[];
+  /** Volume histogram drawn at the bottom 30 % of the chart */
+  volumeData?:   VolumePoint[];
+  /**
+   * Fires with the currently visible time window (unix seconds).
+   * Debounced ~100 ms. Used by the instrument page to sync RSI/MACD panels.
+   */
+  onVisibleRangeChange?: (fromTs: number, toTs: number) => void;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -99,6 +92,13 @@ function isDarkTheme(): boolean {
     : true;
 }
 
+/** Convert a LWC Time value to a Unix-second timestamp */
+function timeToUnix(t: Time): number {
+  if (typeof t === 'number') return t;
+  // 'YYYY-MM-DD' string → midnight UTC
+  return new Date(String(t) + 'T00:00:00Z').getTime() / 1000;
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Component
 // ─────────────────────────────────────────────────────────────────────────────
@@ -108,50 +108,46 @@ export function TradingViewChart({
   ohlcData,
   chartType,
   fill,
-  height  = 240,
-  color   = '#26a69a',
+  height   = 240,
+  color    = '#26a69a',
   showAxes = true,
-  isIntraday = false,
+  isIntraday   = false,
   visibleRange,
   overlays,
   volumeData,
+  onVisibleRangeChange,
 }: TradingViewChartProps) {
   const resolvedChartType: ChartType =
     chartType ?? (fill === false ? 'line' : 'area');
 
   const containerRef = useRef<HTMLDivElement>(null);
   const chartRef     = useRef<IChartApi | null>(null);
-  // Series refs — populated in init effect, used in the same effect
-  const mainSeriesRef    = useRef<ISeriesApi<'Area' | 'Line' | 'Candlestick'> | null>(null);
-  const overlayRefsRef   = useRef<ISeriesApi<'Line'>[]>([]);
-  const volSeriesRef     = useRef<ISeriesApi<'Histogram'> | null>(null);
+
+  // Keep the callback ref always current without requiring it as an effect dep
+  const onRangeChangeRef = useRef(onVisibleRangeChange);
+  useEffect(() => { onRangeChangeRef.current = onVisibleRangeChange; });
 
   // ── Theme detection ─────────────────────────────────────────────────────────
   const [dark, setDark] = useState(isDarkTheme);
-
   useEffect(() => {
     const update = () => setDark(isDarkTheme());
     update();
     const obs = new MutationObserver(update);
-    obs.observe(document.documentElement, {
-      attributes: true,
-      attributeFilter: ['class'],
-    });
+    obs.observe(document.documentElement, { attributes: true, attributeFilter: ['class'] });
     return () => obs.disconnect();
   }, []);
 
-  // ── Chart init effect ───────────────────────────────────────────────────────
-  // Re-creates the chart when structural settings change.
-  // Data is loaded separately below to avoid a full re-create on every
-  // SWR refresh.
-  //
-  // `overlayKey` encodes overlay structure (count + per-line color/style) so
-  // the chart re-creates only when the user toggles an indicator,
-  // not on every data refresh.
+  // ── Overlay structure key ────────────────────────────────────────────────────
+  // Changes only when overlay count/colors/styles change (not on data refresh).
+  // This determines whether the chart needs full re-creation.
   const overlayKey = (overlays ?? [])
     .map((o) => `${o.color}|${o.lineWidth ?? 1}|${o.lineStyle ?? 0}`)
     .join(',') + (volumeData != null ? '|vol' : '');
 
+  // ── Single combined effect — creates chart, series, AND sets data ───────────
+  // Combining init + data in one effect is the safest approach:
+  // a separate data effect would trail a render cycle behind after a theme toggle,
+  // leaving the chart momentarily blank.
   useEffect(() => {
     if (!containerRef.current) return;
 
@@ -163,25 +159,17 @@ export function TradingViewChart({
       width:  containerRef.current.clientWidth,
       height,
       layout: {
-        background: { type: ColorType.Solid, color: 'transparent' },
+        background:  { type: ColorType.Solid, color: 'transparent' },
         textColor,
-        fontFamily: 'JetBrains Mono, monospace',
-        fontSize: 11,
+        fontFamily:  'JetBrains Mono, monospace',
+        fontSize:    11,
       },
       grid: {
         vertLines: { color: gridColor, style: LineStyle.LargeDashed },
         horzLines: { color: gridColor, style: LineStyle.LargeDashed },
       },
-      rightPriceScale: {
-        visible:     showAxes,
-        borderColor: borderColor,
-      },
-      timeScale: {
-        visible:        showAxes,
-        borderColor:    borderColor,
-        timeVisible:    isIntraday,
-        secondsVisible: false,
-      },
+      rightPriceScale: { visible: showAxes, borderColor },
+      timeScale:       { visible: showAxes, borderColor, timeVisible: isIntraday, secondsVisible: false },
       crosshair: {
         mode:     1,
         vertLine: { color: '#b92e25', width: 1, style: LineStyle.Dashed },
@@ -193,35 +181,41 @@ export function TradingViewChart({
     chartRef.current = chart;
 
     // ── Main series ──────────────────────────────────────────────────────────
+    let mainSeries;
     if (resolvedChartType === 'candle') {
-      mainSeriesRef.current = chart.addSeries(CandlestickSeries, {
-        upColor:         '#009371',
-        downColor:       '#b92e25',
-        borderUpColor:   '#009371',
-        borderDownColor: '#b92e25',
-        wickUpColor:     '#009371',
-        wickDownColor:   '#b92e25',
+      mainSeries = chart.addSeries(CandlestickSeries, {
+        upColor: '#009371', downColor: '#b92e25',
+        borderUpColor: '#009371', borderDownColor: '#b92e25',
+        wickUpColor: '#009371', wickDownColor: '#b92e25',
       });
     } else if (resolvedChartType === 'area') {
-      mainSeriesRef.current = chart.addSeries(AreaSeries, {
-        lineColor:        color,
-        topColor:         `${color}55`,
-        bottomColor:      `${color}05`,
-        lineWidth:        2,
-        priceLineVisible: false,
-        lastValueVisible: showAxes,
+      mainSeries = chart.addSeries(AreaSeries, {
+        lineColor: color, topColor: `${color}55`, bottomColor: `${color}05`,
+        lineWidth: 2, priceLineVisible: false, lastValueVisible: showAxes,
       });
     } else {
-      mainSeriesRef.current = chart.addSeries(LineSeries, {
-        color,
-        lineWidth:        2,
-        priceLineVisible: false,
-        lastValueVisible: showAxes,
+      mainSeries = chart.addSeries(LineSeries, {
+        color, lineWidth: 2, priceLineVisible: false, lastValueVisible: showAxes,
       });
     }
 
+    // Main data
+    if (resolvedChartType === 'candle' && ohlcData) {
+      mainSeries.setData(
+        ohlcData.map((p) => ({
+          time: toChartTime(p.date, isIntraday),
+          open: p.open, high: p.high, low: p.low, close: p.close,
+        })) as CandlestickData[],
+      );
+    } else if (data) {
+      mainSeries.setData(
+        data.filter((p) => Number.isFinite(p.value)).map((p) => ({
+          time: toChartTime(p.date, isIntraday), value: p.value,
+        })) as (LineData | AreaData)[],
+      );
+    }
+
     // ── Overlay series (EMA, Bollinger …) ───────────────────────────────────
-    overlayRefsRef.current = [];
     for (const ov of overlays ?? []) {
       const s = chart.addSeries(LineSeries, {
         color:               ov.color,
@@ -231,99 +225,31 @@ export function TradingViewChart({
         lastValueVisible:    false,
         crosshairMarkerVisible: false,
       });
-      overlayRefsRef.current.push(s);
+      s.setData(
+        ov.data.filter((p) => Number.isFinite(p.value)).map((p) => ({
+          time: toChartTime(p.date, isIntraday), value: p.value,
+        })),
+      );
     }
 
-    // ── Volume histogram ─────────────────────────────────────────────────────
-    volSeriesRef.current = null;
+    // ── Volume histogram at bottom 30 % ─────────────────────────────────────
     if (volumeData != null) {
       const vs = chart.addSeries(HistogramSeries, {
         priceScaleId:     'vol',
         priceLineVisible: false,
         lastValueVisible: false,
       });
-      vs.priceScale().applyOptions({
-        scaleMargins: { top: 0.85, bottom: 0 },
-      });
-      volSeriesRef.current = vs;
-    }
-
-    // ── Resize observer ──────────────────────────────────────────────────────
-    const handleResize = () => {
-      if (containerRef.current && chartRef.current) {
-        chartRef.current.applyOptions({
-          width: containerRef.current.clientWidth,
-        });
-      }
-    };
-    window.addEventListener('resize', handleResize);
-
-    return () => {
-      window.removeEventListener('resize', handleResize);
-      chart.remove();
-      chartRef.current    = null;
-      mainSeriesRef.current  = null;
-      overlayRefsRef.current = [];
-      volSeriesRef.current   = null;
-    };
-    // overlayKey captures overlay structure; dark captures theme
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [height, color, showAxes, resolvedChartType, isIntraday, dark, overlayKey]);
-
-  // ── Data update effect ──────────────────────────────────────────────────────
-  // Runs when data changes without re-creating the chart.
-  useEffect(() => {
-    const chart      = chartRef.current;
-    const mainSeries = mainSeriesRef.current;
-    if (!chart || !mainSeries) return;
-
-    // Main series data
-    if (resolvedChartType === 'candle' && ohlcData) {
-      const formatted: CandlestickData[] = ohlcData.map((p) => ({
-        time:  toChartTime(p.date, isIntraday),
-        open:  p.open,
-        high:  p.high,
-        low:   p.low,
-        close: p.close,
-      }));
-      (mainSeries as ISeriesApi<'Candlestick'>).setData(formatted);
-    } else if (data) {
-      const formatted: (LineData | AreaData)[] = data
-        .filter((p) => Number.isFinite(p.value))
-        .map((p) => ({
-          time:  toChartTime(p.date, isIntraday),
-          value: p.value,
-        }));
-      (mainSeries as ISeriesApi<'Line' | 'Area'>).setData(formatted);
-    }
-
-    // Overlay data
-    const overlaySeries = overlayRefsRef.current;
-    for (let i = 0; i < overlaySeries.length; i++) {
-      const ov = overlays?.[i];
-      if (!ov) continue;
-      overlaySeries[i].setData(
-        ov.data
-          .filter((p) => Number.isFinite(p.value))
-          .map((p) => ({
-            time:  toChartTime(p.date, isIntraday),
-            value: p.value,
-          })),
-      );
-    }
-
-    // Volume data
-    if (volSeriesRef.current && volumeData) {
-      volSeriesRef.current.setData(
+      vs.priceScale().applyOptions({ scaleMargins: { top: 0.70, bottom: 0 } });
+      vs.setData(
         volumeData.map((p) => ({
           time:  toChartTime(p.date, isIntraday),
           value: p.value,
-          color: p.color ?? '#26a69a55',
+          color: p.color ?? '#26a69a44',
         })),
       );
     }
 
-    // Visible range / fit
+    // ── Visible range / fit ──────────────────────────────────────────────────
     if (!isIntraday && visibleRange) {
       chart.timeScale().setVisibleRange({
         from: visibleRange.from as Time,
@@ -332,8 +258,34 @@ export function TradingViewChart({
     } else {
       chart.timeScale().fitContent();
     }
+
+    // ── Subscribe to visible range for sub-panel sync ────────────────────────
+    let debounceTimer: ReturnType<typeof setTimeout> | null = null;
+    const handleRangeChange = (range: { from: Time; to: Time } | null) => {
+      if (!range) return;
+      if (debounceTimer) clearTimeout(debounceTimer);
+      debounceTimer = setTimeout(() => {
+        onRangeChangeRef.current?.(timeToUnix(range.from), timeToUnix(range.to));
+      }, 100);
+    };
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    chart.timeScale().subscribeVisibleTimeRangeChange(handleRangeChange as any);
+
+    // ── Resize observer ──────────────────────────────────────────────────────
+    const handleResize = () => {
+      if (containerRef.current) chart.applyOptions({ width: containerRef.current.clientWidth });
+    };
+    window.addEventListener('resize', handleResize);
+
+    return () => {
+      if (debounceTimer) clearTimeout(debounceTimer);
+      window.removeEventListener('resize', handleResize);
+      chart.remove();
+      chartRef.current = null;
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [data, ohlcData, overlays, volumeData, resolvedChartType, isIntraday, visibleRange]);
+  }, [height, color, showAxes, resolvedChartType, isIntraday, dark, overlayKey,
+      data, ohlcData, overlays, volumeData, visibleRange]);
 
   return <div ref={containerRef} style={{ width: '100%', height }} />;
 }

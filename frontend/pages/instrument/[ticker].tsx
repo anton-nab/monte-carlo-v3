@@ -10,7 +10,7 @@
  */
 
 import { useRouter } from 'next/router';
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useCallback, useRef, useEffect } from 'react';
 import useSWR from 'swr';
 import { useWebSocket, lookupPrice } from '../../hooks/useWebSocket';
 import {
@@ -272,6 +272,43 @@ export default function InstrumentPage() {
       return next;
     });
 
+  // ── Fullscreen state ──────────────────────────────────────────────────────
+  const [isFullscreen, setIsFullscreen] = useState(false);
+  const [winHeight, setWinHeight] = useState(800);
+  useEffect(() => {
+    setWinHeight(window.innerHeight);
+    const onResize = () => setWinHeight(window.innerHeight);
+    window.addEventListener('resize', onResize);
+    return () => window.removeEventListener('resize', onResize);
+  }, []);
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') setIsFullscreen(false); };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, []);
+
+  // ── Zoom synchronisation (TradingViewChart → RSI / MACD panels) ───────────
+  const [chartVisibleDates, setChartVisibleDates] = useState<{ from: string; to: string } | null>(null);
+  const zoomTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const handleChartRangeChange = useCallback((fromTs: number, toTs: number) => {
+    if (zoomTimerRef.current) clearTimeout(zoomTimerRef.current);
+    zoomTimerRef.current = setTimeout(() => {
+      setChartVisibleDates({
+        from: new Date(fromTs * 1000).toISOString().substring(0, 10),
+        to:   new Date(toTs   * 1000).toISOString().substring(0, 10),
+      });
+    }, 120);
+  }, []);
+  // Reset zoom state when timeframe changes
+  useEffect(() => { setChartVisibleDates(null); }, [selectedLabel]);
+
+  /** Filter sub-panel data to the currently visible chart window */
+  const applyRange = useCallback(<T extends { date: string }>(arr: T[]): T[] => {
+    if (!chartVisibleDates || arr.length === 0) return arr;
+    const { from, to } = chartVisibleDates;
+    return arr.filter(p => { const d = p.date.substring(0, 10); return d >= from && d <= to; });
+  }, [chartVisibleDates]);
+
   const tf = TIMEFRAMES.find(t => t.label === selectedLabel) ?? TIMEFRAMES[9];
 
   // ── Live price via WebSocket (Phase 7) ─────────────────────────────────────
@@ -311,11 +348,11 @@ export default function InstrumentPage() {
     fetcher, { revalidateOnFocus: false, dedupingInterval: 86_400_000 });
 
   // Financials — lazy (Financials / Analysis tabs)
-  const { data: financials, isLoading: isLoadingFS } = useSWR<FinancialsData>(
+  const { data: financials, isLoading: isLoadingFS, error: financialsError } = useSWR<FinancialsData>(
     tickerStr && (activeTab === 'financials' || activeTab === 'analysis')
       ? `${API_URL}/api/instruments/financials/${tickerStr}?period=${fsPeriod}`
       : null,
-    fetcher, { revalidateOnFocus: false, dedupingInterval: 3_600_000 });
+    fetcher, { revalidateOnFocus: false, dedupingInterval: 3_600_000, shouldRetryOnError: true, errorRetryCount: 2 });
 
   // FOMO sources — always active so score is consistent across all tabs
   const { data: fomoChart } = useSWR<ChartResponse>(
@@ -393,37 +430,30 @@ export default function InstrumentPage() {
     }));
   }, [activeIndicators, historical]);
 
-  // Sub-panel data: windowed to visible range for readability
-  const visibleStart = useMemo(() => {
-    if (!tf.visibleDays) return 0;
-    return Math.max(0, historical.length - tf.visibleDays);
-  }, [historical.length, tf.visibleDays]);
-
+  // Sub-panel data: full dataset (applyRange() is called at render time for zoom sync)
   const rsiPanelData = useMemo(() =>
     activeIndicators.has('rsi')
-      ? dates.slice(visibleStart).map((d, i) => {
-          const idx = visibleStart + i;
-          const v = rsiVals[idx];
+      ? dates.map((d, i) => {
+          const v = rsiVals[i];
           return { date: d.split('T')[0], rsi: v !== null ? +v.toFixed(2) : undefined };
-        }).filter(p => p.rsi !== undefined)
+        }).filter((p): p is { date: string; rsi: number } => p.rsi !== undefined)
       : [],
-  [activeIndicators, dates, rsiVals, visibleStart]);
+  [activeIndicators, dates, rsiVals]);
 
   const macdPanelData = useMemo(() =>
     activeIndicators.has('macd')
-      ? dates.slice(visibleStart).map((d, i) => {
-          const idx = visibleStart + i;
-          const h = macdVals.hist[idx];
+      ? dates.map((d, i) => {
+          const h = macdVals.hist[i];
           if (h === null) return null;
           return {
             date:   d.split('T')[0],
-            macd:   macdVals.macd[idx]   !== null ? +(macdVals.macd[idx]   as number).toFixed(4) : undefined,
-            signal: macdVals.signal[idx] !== null ? +(macdVals.signal[idx] as number).toFixed(4) : undefined,
+            macd:   macdVals.macd[i]   !== null ? +(macdVals.macd[i]   as number).toFixed(4) : undefined,
+            signal: macdVals.signal[i] !== null ? +(macdVals.signal[i] as number).toFixed(4) : undefined,
             hist:   +(h as number).toFixed(4),
           };
         }).filter(Boolean) as { date: string; macd?: number; signal?: number; hist: number }[]
       : [],
-  [activeIndicators, dates, macdVals, visibleStart]);
+  [activeIndicators, dates, macdVals]);
 
   // ── FOMO ───────────────────────────────────────────────────────────────────
   const fomoResult = useMemo(
@@ -514,8 +544,129 @@ export default function InstrumentPage() {
         {/* ════ CHART ════ */}
         {activeTab === 'chart' && (
           <div className="space-y-6">
+
+            {/* ── Fullscreen modal ── */}
+            {isFullscreen && (
+              <div className="fixed inset-0 z-[100] bg-terminal-bg flex flex-col overflow-hidden">
+                {/* FS top bar */}
+                <div className="px-4 py-2 border-b border-terminal-border bg-terminal-surface flex items-center gap-3 flex-wrap shrink-0">
+                  <span className="font-mono font-bold text-terminal-cyan text-lg">{tickerStr}</span>
+                  {quote && <span className="num text-terminal-text">${quote.price.toFixed(2)}</span>}
+                  {livePrice && <span className="text-2xs text-terminal-cyan border border-terminal-cyan/30 rounded px-1 font-mono">LIVE</span>}
+                  <div className="flex items-center gap-1 flex-wrap ml-4">
+                    {(['area', 'candle'] as ChartType[]).map(ct => (
+                      <button key={ct} onClick={() => setChartType(ct)}
+                        className={`px-2 py-0.5 text-xs transition border rounded ${
+                          chartType === ct ? 'bg-terminal-cyan text-terminal-bg font-semibold border-terminal-cyan' : 'border-terminal-border text-terminal-textMuted hover:text-terminal-text'
+                        }`}>
+                        {ct === 'area' ? 'Line' : 'Candle'}
+                      </button>
+                    ))}
+                  </div>
+                  <div className="flex items-center gap-1 flex-wrap">
+                    {TIMEFRAMES.filter(t => t.group === 'intraday').map(t => (
+                      <TfBtn key={t.label} label={t.label} active={selectedLabel === t.label} onClick={() => setSelectedLabel(t.label)} />
+                    ))}
+                    <span className="text-terminal-border text-xs mx-0.5">│</span>
+                    {TIMEFRAMES.filter(t => t.group === 'daily').map(t => (
+                      <TfBtn key={t.label} label={t.label} active={selectedLabel === t.label} onClick={() => setSelectedLabel(t.label)} />
+                    ))}
+                  </div>
+                  <button onClick={() => setIsFullscreen(false)}
+                    className="ml-auto text-terminal-textMuted hover:text-terminal-text text-xl leading-none px-2" title="Fermer (Esc)">
+                    ✕
+                  </button>
+                </div>
+
+                {/* FS indicator chips */}
+                <div className="px-4 py-2 border-b border-terminal-border shrink-0 flex flex-wrap gap-1.5">
+                  {([
+                    { key: 'volume', label: 'Vol',       color: '#26a69a' },
+                    { key: 'ema50',  label: 'EMA 50',    color: '#ffa726' },
+                    { key: 'ema100', label: 'EMA 100',   color: '#42a5f5' },
+                    { key: 'ema200', label: 'EMA 200',   color: '#ef5350' },
+                    { key: 'bb',     label: 'Bollinger', color: '#ab47bc' },
+                    { key: 'rsi',    label: 'RSI 14',    color: '#00d9ff' },
+                    { key: 'macd',   label: 'MACD',      color: '#f9a825' },
+                  ] as { key: IndicatorKey; label: string; color: string }[]).map(({ key, label, color }) => {
+                    const on = activeIndicators.has(key);
+                    return (
+                      <button key={key} onClick={() => toggleIndicator(key)}
+                        className={`px-2.5 py-0.5 text-2xs font-mono rounded border transition ${
+                          on ? 'bg-terminal-surfaceHi font-semibold' : 'border-terminal-border text-terminal-textMuted hover:text-terminal-text'
+                        }`}
+                        style={on ? { borderColor: color, color } : undefined}>
+                        {label}
+                      </button>
+                    );
+                  })}
+                </div>
+
+                {/* FS chart + sub-panels */}
+                <div className="flex-1 overflow-y-auto p-3">
+                  <div className="bg-terminal-bg rounded p-2">
+                    {historical.length > 0 ? (
+                      <TradingViewChart data={lineData} ohlcData={ohlcData} chartType={chartType}
+                        height={Math.max(winHeight - 230, 400)}
+                        color={lineColor} showAxes isIntraday={tf.isIntraday}
+                        visibleRange={visibleRange}
+                        overlays={tvOverlays.length ? tvOverlays : undefined}
+                        volumeData={tvVolumeData}
+                        onVisibleRangeChange={handleChartRangeChange} />
+                    ) : <div className="h-64 flex items-center justify-center text-terminal-textMuted">No data</div>}
+                  </div>
+
+                  {/* FS RSI sub-panel */}
+                  {activeIndicators.has('rsi') && rsiPanelData.length > 0 && (
+                    <div className="mt-2 bg-terminal-bg rounded p-2">
+                      <div className="text-2xs text-terminal-textDim mb-1 font-mono">RSI (14)</div>
+                      <ResponsiveContainer width="100%" height={110}>
+                        <ComposedChart data={applyRange(rsiPanelData)} margin={{ top: 2, right: 12, bottom: 0, left: 12 }}>
+                          <CartesianGrid strokeDasharray="2 6" stroke="rgba(42,48,64,0.4)" vertical={false} />
+                          <XAxis dataKey="date" hide />
+                          <YAxis domain={[0, 100]} tick={{ fill: '#9ca3af', fontSize: 9 }} width={24} tickCount={3} />
+                          <Tooltip contentStyle={{ background: '#1a2035', border: '1px solid #2a3040', borderRadius: 4, fontSize: 10 }} labelStyle={{ color: '#7a8294' }}
+                            formatter={(v: unknown) => [typeof v === 'number' ? v.toFixed(1) : '—', 'RSI']} />
+                          <ReferenceLine y={70} stroke="#ef5350" strokeDasharray="3 3" strokeOpacity={0.6} />
+                          <ReferenceLine y={30} stroke="#26a69a" strokeDasharray="3 3" strokeOpacity={0.6} />
+                          <ReferenceLine y={50} stroke="#4b5563" strokeDasharray="2 4" strokeOpacity={0.4} />
+                          <Line type="monotone" dataKey="rsi" stroke="#00d9ff" strokeWidth={1.5} dot={false} isAnimationActive={false} />
+                        </ComposedChart>
+                      </ResponsiveContainer>
+                    </div>
+                  )}
+
+                  {/* FS MACD sub-panel */}
+                  {activeIndicators.has('macd') && macdPanelData.length > 0 && (() => {
+                    const d = applyRange(macdPanelData);
+                    return (
+                      <div className="mt-2 bg-terminal-bg rounded p-2">
+                        <div className="text-2xs text-terminal-textDim mb-1 font-mono">MACD (12, 26, 9)</div>
+                        <ResponsiveContainer width="100%" height={110}>
+                          <ComposedChart data={d} margin={{ top: 2, right: 12, bottom: 0, left: 12 }}>
+                            <CartesianGrid strokeDasharray="2 6" stroke="rgba(42,48,64,0.4)" vertical={false} />
+                            <XAxis dataKey="date" hide />
+                            <YAxis tick={{ fill: '#9ca3af', fontSize: 9 }} width={40} tickFormatter={v => v.toFixed(2)} />
+                            <Tooltip contentStyle={{ background: '#1a2035', border: '1px solid #2a3040', borderRadius: 4, fontSize: 10 }} labelStyle={{ color: '#7a8294' }}
+                              formatter={(v: unknown, name: unknown) => [typeof v === 'number' ? v.toFixed(4) : '—', name === 'hist' ? 'Hist' : name === 'macd' ? 'MACD' : 'Signal']} />
+                            <ReferenceLine y={0} stroke="#4b5563" strokeOpacity={0.5} />
+                            <Bar dataKey="hist" isAnimationActive={false}>
+                              {d.map((e, i) => <Cell key={i} fill={(e.hist ?? 0) >= 0 ? '#009371' : '#b92e25'} />)}
+                            </Bar>
+                            <Line type="monotone" dataKey="macd"   stroke="#00d9ff" strokeWidth={1.5} dot={false} isAnimationActive={false} />
+                            <Line type="monotone" dataKey="signal" stroke="#ffa726" strokeWidth={1}   dot={false} isAnimationActive={false} />
+                          </ComposedChart>
+                        </ResponsiveContainer>
+                      </div>
+                    );
+                  })()}
+                </div>
+              </div>
+            )}
+
+            {/* ── Normal card ── */}
             <div className="bg-terminal-surface border border-terminal-border rounded p-4">
-              {/* ── Row 1: chart type + timeframe buttons ── */}
+              {/* ── Row 1: chart type + fullscreen + timeframe buttons ── */}
               <div className="mb-2 flex items-center justify-between flex-wrap gap-3">
                 <div className="flex items-center gap-3">
                   <h2 className="text-lg font-semibold">Price Chart</h2>
@@ -529,6 +680,11 @@ export default function InstrumentPage() {
                       </button>
                     ))}
                   </div>
+                  <button onClick={() => setIsFullscreen(true)}
+                    className="px-2 py-1 text-xs border border-terminal-border rounded text-terminal-textMuted hover:text-terminal-cyan hover:border-terminal-cyan transition"
+                    title="Plein écran">
+                    ⛶
+                  </button>
                 </div>
                 <div className="flex items-center gap-1 flex-wrap">
                   {TIMEFRAMES.filter(t => t.group === 'intraday').map(t => (
@@ -565,67 +721,76 @@ export default function InstrumentPage() {
                 })}
               </div>
 
-              {/* ── Chart ── */}
-              <div className="bg-terminal-bg rounded p-2">
-                {chartError ? (
-                  <div className="h-80 flex items-center justify-center text-red-500 text-sm">Failed to load chart data</div>
-                ) : isLoadingChart ? (
-                  <SkeletonBlock className="h-96 w-full" />
-                ) : historical.length > 0 ? (
-                  <TradingViewChart data={lineData} ohlcData={ohlcData} chartType={chartType}
-                    height={400} color={lineColor} showAxes isIntraday={tf.isIntraday}
-                    visibleRange={visibleRange}
-                    overlays={tvOverlays.length ? tvOverlays : undefined}
-                    volumeData={tvVolumeData} />
-                ) : (
-                  <div className="h-96 flex items-center justify-center text-terminal-textMuted">No chart data</div>
-                )}
-              </div>
-
-              {/* ── RSI sub-panel ── */}
-              {activeIndicators.has('rsi') && rsiPanelData.length > 0 && (
-                <div className="mt-2 bg-terminal-bg rounded p-2">
-                  <div className="text-2xs text-terminal-textDim mb-1 font-mono">RSI (14)</div>
-                  <ResponsiveContainer width="100%" height={110}>
-                    <ComposedChart data={rsiPanelData} margin={{ top: 2, right: 12, bottom: 0, left: 12 }}>
-                      <CartesianGrid strokeDasharray="2 6" stroke="rgba(42,48,64,0.4)" vertical={false} />
-                      <XAxis dataKey="date" hide />
-                      <YAxis domain={[0, 100]} tick={{ fill: '#9ca3af', fontSize: 9 }} width={24} tickCount={3} />
-                      <Tooltip contentStyle={{ background: '#1a2035', border: '1px solid #2a3040', borderRadius: 4, fontSize: 10 }}
-                        labelStyle={{ color: '#7a8294' }} formatter={(v: unknown) => [typeof v === 'number' ? v.toFixed(1) : '—', 'RSI']} />
-                      <ReferenceLine y={70} stroke="#ef5350" strokeDasharray="3 3" strokeOpacity={0.6} />
-                      <ReferenceLine y={30} stroke="#26a69a" strokeDasharray="3 3" strokeOpacity={0.6} />
-                      <ReferenceLine y={50} stroke="#4b5563" strokeDasharray="2 4" strokeOpacity={0.4} />
-                      <Line type="monotone" dataKey="rsi" stroke="#00d9ff" strokeWidth={1.5} dot={false}
-                        isAnimationActive={false} />
-                    </ComposedChart>
-                  </ResponsiveContainer>
+              {/* ── Chart (hidden while fullscreen) ── */}
+              {isFullscreen ? (
+                <div className="h-40 flex items-center justify-center text-terminal-textMuted text-sm border border-terminal-border rounded bg-terminal-bg">
+                  Chart ouvert en plein écran · appuyer sur <kbd className="mx-1 px-1.5 py-0.5 text-xs rounded border border-terminal-border bg-terminal-surfaceHi font-mono">Esc</kbd> pour fermer
                 </div>
-              )}
+              ) : (
+                <>
+                  <div className="bg-terminal-bg rounded p-2">
+                    {chartError ? (
+                      <div className="h-80 flex items-center justify-center text-red-500 text-sm">Failed to load chart data</div>
+                    ) : isLoadingChart ? (
+                      <SkeletonBlock className="h-96 w-full" />
+                    ) : historical.length > 0 ? (
+                      <TradingViewChart data={lineData} ohlcData={ohlcData} chartType={chartType}
+                        height={400} color={lineColor} showAxes isIntraday={tf.isIntraday}
+                        visibleRange={visibleRange}
+                        overlays={tvOverlays.length ? tvOverlays : undefined}
+                        volumeData={tvVolumeData}
+                        onVisibleRangeChange={handleChartRangeChange} />
+                    ) : (
+                      <div className="h-96 flex items-center justify-center text-terminal-textMuted">No chart data</div>
+                    )}
+                  </div>
 
-              {/* ── MACD sub-panel ── */}
-              {activeIndicators.has('macd') && macdPanelData.length > 0 && (
-                <div className="mt-2 bg-terminal-bg rounded p-2">
-                  <div className="text-2xs text-terminal-textDim mb-1 font-mono">MACD (12, 26, 9)</div>
-                  <ResponsiveContainer width="100%" height={110}>
-                    <ComposedChart data={macdPanelData} margin={{ top: 2, right: 12, bottom: 0, left: 12 }}>
-                      <CartesianGrid strokeDasharray="2 6" stroke="rgba(42,48,64,0.4)" vertical={false} />
-                      <XAxis dataKey="date" hide />
-                      <YAxis tick={{ fill: '#9ca3af', fontSize: 9 }} width={40} tickFormatter={v => v.toFixed(2)} />
-                      <Tooltip contentStyle={{ background: '#1a2035', border: '1px solid #2a3040', borderRadius: 4, fontSize: 10 }}
-                        labelStyle={{ color: '#7a8294' }}
-                        formatter={(v: unknown, name: unknown) => [typeof v === 'number' ? v.toFixed(4) : '—', name === 'hist' ? 'Hist' : name === 'macd' ? 'MACD' : 'Signal']} />
-                      <ReferenceLine y={0} stroke="#4b5563" strokeOpacity={0.5} />
-                      <Bar dataKey="hist" isAnimationActive={false}
-                        fill="#26a69a"
-                        // Color each bar: positive = bull, negative = bear
-                        label={false}
-                      />
-                      <Line type="monotone" dataKey="macd"   stroke="#00d9ff" strokeWidth={1.5} dot={false} isAnimationActive={false} />
-                      <Line type="monotone" dataKey="signal" stroke="#ffa726" strokeWidth={1}   dot={false} isAnimationActive={false} />
-                    </ComposedChart>
-                  </ResponsiveContainer>
-                </div>
+                  {/* RSI sub-panel */}
+                  {activeIndicators.has('rsi') && rsiPanelData.length > 0 && (
+                    <div className="mt-2 bg-terminal-bg rounded p-2">
+                      <div className="text-2xs text-terminal-textDim mb-1 font-mono">RSI (14)</div>
+                      <ResponsiveContainer width="100%" height={110}>
+                        <ComposedChart data={applyRange(rsiPanelData)} margin={{ top: 2, right: 12, bottom: 0, left: 12 }}>
+                          <CartesianGrid strokeDasharray="2 6" stroke="rgba(42,48,64,0.4)" vertical={false} />
+                          <XAxis dataKey="date" hide />
+                          <YAxis domain={[0, 100]} tick={{ fill: '#9ca3af', fontSize: 9 }} width={24} tickCount={3} />
+                          <Tooltip contentStyle={{ background: '#1a2035', border: '1px solid #2a3040', borderRadius: 4, fontSize: 10 }}
+                            labelStyle={{ color: '#7a8294' }} formatter={(v: unknown) => [typeof v === 'number' ? v.toFixed(1) : '—', 'RSI']} />
+                          <ReferenceLine y={70} stroke="#ef5350" strokeDasharray="3 3" strokeOpacity={0.6} />
+                          <ReferenceLine y={30} stroke="#26a69a" strokeDasharray="3 3" strokeOpacity={0.6} />
+                          <ReferenceLine y={50} stroke="#4b5563" strokeDasharray="2 4" strokeOpacity={0.4} />
+                          <Line type="monotone" dataKey="rsi" stroke="#00d9ff" strokeWidth={1.5} dot={false} isAnimationActive={false} />
+                        </ComposedChart>
+                      </ResponsiveContainer>
+                    </div>
+                  )}
+
+                  {/* MACD sub-panel */}
+                  {activeIndicators.has('macd') && macdPanelData.length > 0 && (() => {
+                    const d = applyRange(macdPanelData);
+                    return (
+                      <div className="mt-2 bg-terminal-bg rounded p-2">
+                        <div className="text-2xs text-terminal-textDim mb-1 font-mono">MACD (12, 26, 9)</div>
+                        <ResponsiveContainer width="100%" height={110}>
+                          <ComposedChart data={d} margin={{ top: 2, right: 12, bottom: 0, left: 12 }}>
+                            <CartesianGrid strokeDasharray="2 6" stroke="rgba(42,48,64,0.4)" vertical={false} />
+                            <XAxis dataKey="date" hide />
+                            <YAxis tick={{ fill: '#9ca3af', fontSize: 9 }} width={40} tickFormatter={v => v.toFixed(2)} />
+                            <Tooltip contentStyle={{ background: '#1a2035', border: '1px solid #2a3040', borderRadius: 4, fontSize: 10 }}
+                              labelStyle={{ color: '#7a8294' }}
+                              formatter={(v: unknown, name: unknown) => [typeof v === 'number' ? v.toFixed(4) : '—', name === 'hist' ? 'Hist' : name === 'macd' ? 'MACD' : 'Signal']} />
+                            <ReferenceLine y={0} stroke="#4b5563" strokeOpacity={0.5} />
+                            <Bar dataKey="hist" isAnimationActive={false}>
+                              {d.map((e, i) => <Cell key={i} fill={(e.hist ?? 0) >= 0 ? '#009371' : '#b92e25'} />)}
+                            </Bar>
+                            <Line type="monotone" dataKey="macd"   stroke="#00d9ff" strokeWidth={1.5} dot={false} isAnimationActive={false} />
+                            <Line type="monotone" dataKey="signal" stroke="#ffa726" strokeWidth={1}   dot={false} isAnimationActive={false} />
+                          </ComposedChart>
+                        </ResponsiveContainer>
+                      </div>
+                    );
+                  })()}
+                </>
               )}
 
               <p className="text-2xs text-terminal-textDim mt-2">
@@ -663,13 +828,28 @@ export default function InstrumentPage() {
 
         {/* ════ FINANCIALS ════ */}
         {activeTab === 'financials' && (
-          <FinancialsTab financials={financials} isLoading={isLoadingFS}
-            fsPeriod={fsPeriod} setFsPeriod={setFsPeriod} fsTab={fsTab} setFsTab={setFsTab} />
+          financialsError ? (
+            <div className="bg-terminal-surface border border-bear-border rounded p-6 text-sm space-y-2">
+              <p className="font-semibold text-bear">⚠ Impossible de charger les données financières</p>
+              <p className="text-terminal-textMuted font-mono text-xs">{String(financialsError?.message ?? financialsError)}</p>
+              <p className="text-terminal-textDim text-xs">Source : yfinance (Yahoo Finance peut être temporairement indisponible ou avoir changé son API)</p>
+            </div>
+          ) : (
+            <FinancialsTab financials={financials} isLoading={isLoadingFS}
+              fsPeriod={fsPeriod} setFsPeriod={setFsPeriod} fsTab={fsTab} setFsTab={setFsTab} />
+          )
         )}
 
         {/* ════ ANALYSIS ════ */}
         {activeTab === 'analysis' && (
-          <AnalysisTab financials={financials} isLoading={isLoadingFS} quote={quote} fomoResult={fomoResult} />
+          financialsError ? (
+            <div className="bg-terminal-surface border border-bear-border rounded p-6 text-sm">
+              <p className="font-semibold text-bear">⚠ Données financières indisponibles</p>
+              <p className="text-terminal-textMuted font-mono text-xs mt-1">{String(financialsError?.message ?? financialsError)}</p>
+            </div>
+          ) : (
+            <AnalysisTab financials={financials} isLoading={isLoadingFS} quote={quote} fomoResult={fomoResult} />
+          )
         )}
 
         {/* ════ ETF ════ */}
