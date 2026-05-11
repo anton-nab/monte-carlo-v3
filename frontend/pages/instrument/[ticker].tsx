@@ -883,8 +883,8 @@ function InfoTip({ text, dir = 'right' }: { text: string; dir?: 'right' | 'top' 
   const pos = { right: 'left-full top-1/2 -translate-y-1/2 ml-1.5', top: 'bottom-full left-1/2 -translate-x-1/2 mb-1.5', bottom: 'top-full left-1/2 -translate-x-1/2 mt-1.5' }[dir];
   return (
     <span className="relative group inline-flex items-center cursor-help align-middle ml-0.5">
-      <span className="inline-flex items-center justify-center w-3.5 h-3.5 rounded-full border border-terminal-textDim text-terminal-textDim text-[9px] select-none leading-none hover:border-terminal-cyan hover:text-terminal-cyan transition-colors">i</span>
-      <span className={`pointer-events-none absolute ${pos} z-50 invisible group-hover:visible opacity-0 group-hover:opacity-100 transition-opacity duration-150 bg-[#0f1522] border border-terminal-border rounded px-2 py-1.5 text-xs text-terminal-text w-52 leading-snug shadow-xl`}>
+      <span className="inline-flex items-center justify-center w-3.5 h-3.5 rounded-full border border-terminal-textMuted text-terminal-textMuted text-[9px] select-none leading-none hover:border-terminal-cyan hover:text-terminal-cyan transition-colors">i</span>
+      <span className={`pointer-events-none absolute ${pos} z-50 invisible group-hover:visible opacity-0 group-hover:opacity-100 transition-opacity duration-150 bg-[#0f1522] border border-[#2a3040] rounded px-2 py-1.5 text-xs text-[#e8e9ed] w-52 leading-snug shadow-xl`}>
         {text}
       </span>
     </span>
