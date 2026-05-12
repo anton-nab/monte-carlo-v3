@@ -21,7 +21,7 @@ import {
 import { TradingViewChart, ChartType, OverlayLine, VolumePoint } from '../../components/TradingViewChart';
 import { fetcher } from '../../lib/fetcher';
 import { Header } from '../../components/Header';
-import { ema, rsi as computeRsi, macd as computeMacd, bollinger, cvd as computeCvd, CvdPoint } from '../../lib/indicators';
+import { ema, rsi as computeRsi, macd as computeMacd, bollinger } from '../../lib/indicators';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Types
@@ -288,26 +288,23 @@ export default function InstrumentPage() {
   }, []);
 
   // ── Zoom synchronisation (TradingViewChart → RSI / MACD panels) ───────────
-  const [chartVisibleDates, setChartVisibleDates] = useState<{ from: string; to: string } | null>(null);
+  const [chartVisibleRange, setChartVisibleRange] = useState<{
+    from: string; to: string; fromTs: number; toTs: number;
+  } | null>(null);
   const zoomTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const handleChartRangeChange = useCallback((fromTs: number, toTs: number) => {
     if (zoomTimerRef.current) clearTimeout(zoomTimerRef.current);
     zoomTimerRef.current = setTimeout(() => {
-      setChartVisibleDates({
-        from: new Date(fromTs * 1000).toISOString().substring(0, 10),
-        to:   new Date(toTs   * 1000).toISOString().substring(0, 10),
+      setChartVisibleRange({
+        from:   new Date(fromTs * 1000).toISOString().substring(0, 10),
+        to:     new Date(toTs   * 1000).toISOString().substring(0, 10),
+        fromTs,
+        toTs,
       });
     }, 120);
   }, []);
   // Reset zoom state when timeframe changes
-  useEffect(() => { setChartVisibleDates(null); }, [selectedLabel]);
-
-  /** Filter sub-panel data to the currently visible chart window */
-  const applyRange = useCallback(<T extends { date: string }>(arr: T[]): T[] => {
-    if (!chartVisibleDates || arr.length === 0) return arr;
-    const { from, to } = chartVisibleDates;
-    return arr.filter(p => { const d = p.date.substring(0, 10); return d >= from && d <= to; });
-  }, [chartVisibleDates]);
+  useEffect(() => { setChartVisibleRange(null); }, [selectedLabel]);
 
   const tf = TIMEFRAMES.find(t => t.label === selectedLabel) ?? TIMEFRAMES[9];
 
@@ -378,6 +375,52 @@ export default function InstrumentPage() {
     if (tf.resampleHours && rawHistorical.length > 0) return resampleToNHour(rawHistorical, tf.resampleHours);
     return rawHistorical;
   }, [rawHistorical, tf.resampleHours]);
+
+  /**
+   * Filter sub-panel data to the visible chart window, then append phantom
+   * (empty) entries to match any right-side blank space shown by LWC.
+   * This ensures the last real bar (e.g. May 8) aligns across all panels.
+   */
+  const applyRange = useCallback(<T extends { date: string }>(arr: T[]): T[] => {
+    if (arr.length === 0) return arr;
+    if (!chartVisibleRange) return arr;
+
+    const { from, to, toTs } = chartVisibleRange;
+    const filtered = arr.filter(p => {
+      const d = p.date.substring(0, 10);
+      return d >= from && d <= to;
+    });
+    if (filtered.length === 0) return filtered;
+
+    // Right-padding: if LWC's visible window extends past the last data bar,
+    // add phantom entries so Recharts stretches the same empty space.
+    const lastDate = filtered[filtered.length - 1].date.substring(0, 10);
+    const lastBarTs = Date.UTC(
+      +lastDate.slice(0, 4), +lastDate.slice(5, 7) - 1, +lastDate.slice(8, 10),
+    ) / 1000;
+
+    if (toTs > lastBarTs + 3600 && historical.length >= 2) {
+      // Average seconds between consecutive bars (handles daily + intraday)
+      const d0 = historical[0].date;
+      const dN = historical[historical.length - 1].date;
+      const t0 = new Date(d0.length === 10 ? d0 + 'T00:00:00Z' : d0).getTime() / 1000;
+      const tN = new Date(dN.length === 10 ? dN + 'T00:00:00Z' : dN).getTime() / 1000;
+      const avgSec = (tN - t0) / Math.max(historical.length - 1, 1);
+      const extraBars = Math.min(
+        Math.max(0, Math.round((toTs - lastBarTs) / avgSec) - 1),
+        30, // safety cap
+      );
+      if (extraBars > 0) {
+        const phantoms = Array.from(
+          { length: extraBars },
+          (_, i) => ({ date: `__pad_${i}` }) as unknown as T,
+        );
+        return [...filtered, ...phantoms];
+      }
+    }
+    return filtered;
+  }, [chartVisibleRange, historical]);
+
   const lineData  = useMemo(() => historical.map(p => ({ date: p.date, value: p.close })), [historical]);
   const ohlcData  = useMemo(() => historical.map(p => ({ date: p.date, open: p.open, high: p.high, low: p.low, close: p.close })), [historical]);
   const visibleRange = useMemo(() => {
@@ -427,18 +470,6 @@ export default function InstrumentPage() {
       date:  p.date,
       value: p.volume,
       color: p.close >= p.open ? '#00937166' : '#b92e2566',
-    }));
-  }, [activeIndicators, historical]);
-
-  // CVD sub-panel data — per-bar volume delta (below the main chart)
-  // delta > 0 → buyers dominated, delta < 0 → sellers dominated
-  const cvdPanelData = useMemo((): (CvdPoint & { date: string })[] => {
-    if (!activeIndicators.has('volume')) return [];
-    const points = computeCvd(historical);
-    return historical.map((p, i) => ({
-      date:  p.date.split('T')[0],
-      cvd:   points[i].cvd,
-      delta: points[i].delta,
     }));
   }, [activeIndicators, historical]);
 
@@ -681,38 +712,6 @@ export default function InstrumentPage() {
                     );
                   })()}
 
-                  {/* FS CVD sub-panel */}
-                  {activeIndicators.has('volume') && cvdPanelData.length > 0 && (() => {
-                    const d = applyRange(cvdPanelData);
-                    const fmt = (v: number) => {
-                      const a = Math.abs(v);
-                      if (a >= 1e9) return `${(v / 1e9).toFixed(1)}B`;
-                      if (a >= 1e6) return `${(v / 1e6).toFixed(1)}M`;
-                      if (a >= 1e3) return `${(v / 1e3).toFixed(0)}K`;
-                      return String(Math.round(v));
-                    };
-                    return (
-                      <div className="mt-2 bg-terminal-bg rounded p-2">
-                        <div className="text-2xs text-terminal-textDim mb-1 font-mono">CVD — Volume Delta per bar</div>
-                        <ResponsiveContainer width="100%" height={110}>
-                          <ComposedChart data={d} margin={{ top: 4, right: 0, bottom: 0, left: 0 }}>
-                            <CartesianGrid strokeDasharray="2 6" stroke="rgba(42,48,64,0.4)" vertical={false} />
-                            <XAxis dataKey="date" hide />
-                            <YAxis orientation="right" tick={{ fill: '#9ca3af', fontSize: 9 }} width={64} tickFormatter={fmt} />
-                            <Tooltip contentStyle={{ background: '#1a2035', border: '1px solid #2a3040', borderRadius: 4, fontSize: 10 }}
-                              labelStyle={{ color: '#7a8294' }}
-                              formatter={(v: unknown) => [typeof v === 'number' ? fmt(v) : '—', 'Δ vol']} />
-                            <ReferenceLine y={0} stroke="#6b7280" strokeOpacity={0.7} />
-                            <Bar dataKey="delta" isAnimationActive={false} maxBarSize={8}>
-                              {d.map((e, i) => (
-                                <Cell key={i} fill={e.delta >= 0 ? '#009371' : '#b92e25'} />
-                              ))}
-                            </Bar>
-                          </ComposedChart>
-                        </ResponsiveContainer>
-                      </div>
-                    );
-                  })()}
                 </div>
               </div>
             )}
@@ -753,7 +752,7 @@ export default function InstrumentPage() {
               {/* ── Row 2: indicator chips ── */}
               <div className="mb-3 flex flex-wrap gap-1.5">
                 {([
-                  { key: 'volume',  label: 'CVD',       color: '#26a69a' },
+                  { key: 'volume',  label: 'Volume',    color: '#26a69a' },
                   { key: 'ema50',   label: 'EMA 50',    color: '#ffa726' },
                   { key: 'ema100',  label: 'EMA 100',   color: '#42a5f5' },
                   { key: 'ema200',  label: 'EMA 200',   color: '#ef5350' },
@@ -844,38 +843,6 @@ export default function InstrumentPage() {
                     );
                   })()}
 
-                  {/* CVD sub-panel */}
-                  {activeIndicators.has('volume') && cvdPanelData.length > 0 && (() => {
-                    const d = applyRange(cvdPanelData);
-                    const fmt = (v: number) => {
-                      const a = Math.abs(v);
-                      if (a >= 1e9) return `${(v / 1e9).toFixed(1)}B`;
-                      if (a >= 1e6) return `${(v / 1e6).toFixed(1)}M`;
-                      if (a >= 1e3) return `${(v / 1e3).toFixed(0)}K`;
-                      return String(Math.round(v));
-                    };
-                    return (
-                      <div className="mt-2 bg-terminal-bg rounded p-2">
-                        <div className="text-2xs text-terminal-textDim mb-1 font-mono">CVD — Volume Delta per bar</div>
-                        <ResponsiveContainer width="100%" height={110}>
-                          <ComposedChart data={d} margin={{ top: 4, right: 0, bottom: 0, left: 0 }}>
-                            <CartesianGrid strokeDasharray="2 6" stroke="rgba(42,48,64,0.4)" vertical={false} />
-                            <XAxis dataKey="date" hide />
-                            <YAxis orientation="right" tick={{ fill: '#9ca3af', fontSize: 9 }} width={64} tickFormatter={fmt} />
-                            <Tooltip contentStyle={{ background: '#1a2035', border: '1px solid #2a3040', borderRadius: 4, fontSize: 10 }}
-                              labelStyle={{ color: '#7a8294' }}
-                              formatter={(v: unknown) => [typeof v === 'number' ? fmt(v) : '—', 'Δ vol']} />
-                            <ReferenceLine y={0} stroke="#6b7280" strokeOpacity={0.7} />
-                            <Bar dataKey="delta" isAnimationActive={false} maxBarSize={8}>
-                              {d.map((e, i) => (
-                                <Cell key={i} fill={e.delta >= 0 ? '#009371' : '#b92e25'} />
-                              ))}
-                            </Bar>
-                          </ComposedChart>
-                        </ResponsiveContainer>
-                      </div>
-                    );
-                  })()}
                 </>
               )}
 
