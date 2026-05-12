@@ -376,7 +376,10 @@ export default function InstrumentPage() {
   /**
    * Filter sub-panel data to the visible chart window, then append phantom
    * (empty) entries to match any right-side blank space shown by LWC.
-   * This ensures the last real bar (e.g. May 8) aligns across all panels.
+   *
+   * Key insight: use the VISIBLE bars' own time span to compute bar width,
+   * not an average over the full history. LWC extrapolates empty slots using
+   * the same linear spacing, so our estimate is accurate even across weekends.
    */
   const applyRange = useCallback(<T extends { date: string }>(arr: T[]): T[] => {
     if (arr.length === 0) return arr;
@@ -389,34 +392,35 @@ export default function InstrumentPage() {
     });
     if (filtered.length === 0) return filtered;
 
-    // Right-padding: if LWC's visible window extends past the last data bar,
-    // add phantom entries so Recharts stretches the same empty space.
-    const lastDate = filtered[filtered.length - 1].date.substring(0, 10);
+    // Right-padding: match LWC's empty bar slots on the right edge
+    const lastDate  = filtered[filtered.length - 1].date.substring(0, 10);
     const lastBarTs = Date.UTC(
       +lastDate.slice(0, 4), +lastDate.slice(5, 7) - 1, +lastDate.slice(8, 10),
     ) / 1000;
 
-    if (toTs > lastBarTs + 3600 && historical.length >= 2) {
-      // Average seconds between consecutive bars (handles daily + intraday)
-      const d0 = historical[0].date;
-      const dN = historical[historical.length - 1].date;
-      const t0 = new Date(d0.length === 10 ? d0 + 'T00:00:00Z' : d0).getTime() / 1000;
-      const tN = new Date(dN.length === 10 ? dN + 'T00:00:00Z' : dN).getTime() / 1000;
-      const avgSec = (tN - t0) / Math.max(historical.length - 1, 1);
-      const extraBars = Math.min(
-        Math.max(0, Math.round((toTs - lastBarTs) / avgSec) - 1),
-        30, // safety cap
-      );
-      if (extraBars > 0) {
-        const phantoms = Array.from(
-          { length: extraBars },
-          (_, i) => ({ date: `__pad_${i}` }) as unknown as T,
+    if (toTs > lastBarTs + 3600 && filtered.length >= 2) {
+      // Per-bar interval from the visible window (matches LWC's linear extrapolation)
+      const firstDate  = filtered[0].date.substring(0, 10);
+      const firstBarTs = Date.UTC(
+        +firstDate.slice(0, 4), +firstDate.slice(5, 7) - 1, +firstDate.slice(8, 10),
+      ) / 1000;
+      const barWidthSec = (lastBarTs - firstBarTs) / Math.max(filtered.length - 1, 1);
+
+      if (barWidthSec > 0) {
+        const extraBars = Math.min(
+          Math.max(0, Math.round((toTs - lastBarTs) / barWidthSec) - 1),
+          365, // cap at ~1 year of trading days
         );
-        return [...filtered, ...phantoms];
+        if (extraBars > 0) {
+          return [
+            ...filtered,
+            ...Array.from({ length: extraBars }, (_, i) => ({ date: `__pad_${i}` }) as unknown as T),
+          ];
+        }
       }
     }
     return filtered;
-  }, [chartVisibleRange, historical]);
+  }, [chartVisibleRange]);
 
   const lineData  = useMemo(() => historical.map(p => ({ date: p.date, value: p.close })), [historical]);
   const ohlcData  = useMemo(() => historical.map(p => ({ date: p.date, open: p.open, high: p.high, low: p.low, close: p.close })), [historical]);
