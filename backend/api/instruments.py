@@ -186,14 +186,23 @@ async def get_financials(
 ):
     """Get full financial statements (IS + BS + CF) + earnings history + analyst data.
 
-    Uses yfinance — Twelve Data financial statements require paid plan.
+    Primary: FMP (commercial-friendly, 72 h cache).
+    Fallback: yfinance (if FMP returns empty or fails).
     Example: GET /api/instruments/financials/AAPL?period=annual
     """
+    t = ticker.upper()
     try:
-        result = await _yf_provider.get_financials_data(ticker.upper(), period)
-        return result
-    except Exception as e:
-        raise HTTPException(status_code=400, detail=str(e))
+        result = await _fmp.get_financials_data(t, period)
+        # FMP succeeded but returned empty IS — fall back to yfinance
+        if result.get("income_statement"):
+            return result
+        raise ValueError("FMP returned empty income statement")
+    except Exception as fmp_err:
+        print(f"[instruments] FMP financials failed for {t}: {fmp_err} — falling back to yfinance")
+    try:
+        return await _yf_provider.get_financials_data(t, period)
+    except Exception as yf_err:
+        raise HTTPException(status_code=400, detail=str(yf_err))
 
 
 @router.get("/etf-profile/{ticker}")

@@ -1,13 +1,24 @@
 """
 Shared Financial Modeling Prep (FMP) client.
 
-Free tier: 250 calls/day — cache everything 24h to stay within limits.
+Free tier: 250 calls/day — cache everything to stay within limits.
+  - ETF / index data:       24 h TTL
+  - Financial statements:   72 h TTL (quarterly reports only change 4×/year)
 
 Endpoints used:
-  GET /v3/sp500_constituent         → S&P 500 constituents
-  GET /v3/nasdaq_constituent        → Nasdaq 100 constituents
-  GET /v3/dowjones_constituent      → Dow Jones 30 constituents
-  GET /v3/etf-holder/{symbol}       → ETF holdings with weightPercentage
+  GET /v3/sp500_constituent              → S&P 500 constituents
+  GET /v3/nasdaq_constituent             → Nasdaq 100 constituents
+  GET /v3/dowjones_constituent           → Dow Jones 30 constituents
+  GET /v3/etf-holder/{symbol}            → ETF holdings with weightPercentage
+  GET /v3/etf-sector-weightings/{symbol} → ETF sector breakdown
+  GET /v3/etf-country-weightings/{symbol}→ ETF country breakdown
+
+  Phase 8.5 — Financial Statements (replaces yfinance):
+  GET /v3/income-statement/{symbol}          → IS (revenue, GP, EBITDA, NI…)
+  GET /v3/balance-sheet-statement/{symbol}   → BS (assets, liabilities, debt…)
+  GET /v3/cash-flow-statement/{symbol}       → CF (operating, capex, FCF…)
+  GET /v3/earnings-surprises/{symbol}        → EPS actual vs estimate
+  GET /v3/analyst-stock-recommendations/{s}  → per-analyst grades + price targets
 """
 
 import os
@@ -18,10 +29,38 @@ from typing import Any, Dict, List, Optional
 
 BASE_URL = "https://financialmodelingprep.com/api/v3"
 
-INDEX_ENDPOINTS: Dict[str, str] = {
-    "SP500": "/sp500_constituent",
-    "NDX":   "/nasdaq_constituent",
-    "DJI":   "/dowjones_constituent",
+# Map analyst grade strings → our internal bucket
+_GRADE_MAP: Dict[str, str] = {
+    "strong buy":           "strong_buy",
+    "buy":                  "buy",
+    "outperform":           "buy",
+    "overweight":           "buy",
+    "market outperform":    "buy",
+    "positive":             "buy",
+    "top pick":             "strong_buy",
+    "sector outperform":    "buy",
+    "accumulate":           "buy",
+    "add":                  "buy",
+    "neutral":              "hold",
+    "hold":                 "hold",
+    "equal-weight":         "hold",
+    "equal weight":         "hold",
+    "market perform":       "hold",
+    "sector perform":       "hold",
+    "peer perform":         "hold",
+    "market weight":        "hold",
+    "in-line":              "hold",
+    "sector neutral":       "hold",
+    "mixed":                "hold",
+    "fair value":           "hold",
+    "sell":                 "sell",
+    "underperform":         "sell",
+    "underweight":          "sell",
+    "reduce":               "sell",
+    "market underperform":  "sell",
+    "negative":             "sell",
+    "strong sell":          "strong_sell",
+    "strong underperform":  "strong_sell",
 }
 
 # Singleton — shared across the app
@@ -36,9 +75,10 @@ def get_fmp_provider() -> "FMPProvider":
 
 
 class FMPProvider:
-    """Financial Modeling Prep API client with in-memory 24h cache."""
+    """Financial Modeling Prep API client with in-memory cache."""
 
-    CACHE_TTL = timedelta(hours=24)
+    CACHE_TTL      = timedelta(hours=24)
+    FINANCIALS_TTL = timedelta(hours=72)   # IS/BS/CF barely change
 
     def __init__(self, api_key: Optional[str] = None) -> None:
         self._api_key = api_key or os.getenv("FMP_API_KEY", "")
@@ -48,19 +88,20 @@ class FMPProvider:
     # Public: index constituents
     # ─────────────────────────────────────────────────────────────────
 
-    async def get_index_constituents(self, symbol: str) -> List[Dict[str, Any]]:
-        """Return [{ticker, name, sector, sub_sector}] for a US index.
+    INDEX_ENDPOINTS: Dict[str, str] = {
+        "SP500": "/sp500_constituent",
+        "NDX":   "/nasdaq_constituent",
+        "DJI":   "/dowjones_constituent",
+    }
 
-        Supported symbols: SP500, NDX, DJI.
-        Raises ValueError if symbol is not supported.
-        """
-        endpoint = INDEX_ENDPOINTS.get(symbol.upper())
+    async def get_index_constituents(self, symbol: str) -> List[Dict[str, Any]]:
+        """Return [{ticker, name, sector, sub_sector}] for a US index."""
+        endpoint = self.INDEX_ENDPOINTS.get(symbol.upper())
         if not endpoint:
             raise ValueError(
                 f"FMP has no constituent endpoint for '{symbol}'. "
-                f"Supported: {list(INDEX_ENDPOINTS)}"
+                f"Supported: {list(self.INDEX_ENDPOINTS)}"
             )
-
         cache_key = f"constituents:{symbol.upper()}"
         cached = self._get_cache(cache_key)
         if cached is not None:
@@ -69,15 +110,14 @@ class FMPProvider:
         raw = await self._get(endpoint)
         result = [
             {
-                "ticker": (item.get("symbol") or "").strip(),
-                "name": item.get("name") or item.get("companyName") or "",
-                "sector": item.get("sector") or "",
-                "sub_sector": item.get("subSector") or "",
+                "ticker":      (item.get("symbol") or "").strip(),
+                "name":        item.get("name") or item.get("companyName") or "",
+                "sector":      item.get("sector") or "",
+                "sub_sector":  item.get("subSector") or "",
             }
             for item in raw
             if (item.get("symbol") or "").strip()
         ]
-
         self._set_cache(cache_key, result)
         return result
 
@@ -99,17 +139,14 @@ class FMPProvider:
             if not sym:
                 continue
             raw_pct = float(item.get("weightPercentage") or 0)
-            # FMP returns fractions (0.063 = 6.3%) — multiply by 100
-            # Guard: if already a percentage (> 1), keep as-is
             weight_pct = round(raw_pct * 100, 3) if raw_pct <= 1 else round(raw_pct, 3)
             result.append({
-                "ticker": sym,
-                "name": item.get("name") or sym,
+                "ticker":     sym,
+                "name":       item.get("name") or sym,
                 "weight_pct": weight_pct,
             })
         result.sort(key=lambda x: x["weight_pct"], reverse=True)
         result = result[:25]
-
         self._set_cache(cache_key, result)
         return result
 
@@ -126,7 +163,7 @@ class FMPProvider:
         raw = await self._get(f"/etf-sector-weightings/{ticker.upper()}")
         result = []
         for item in raw:
-            sector = item.get("sector", "")
+            sector  = item.get("sector", "")
             pct_str = str(item.get("weightPercentage", "0")).replace("%", "").strip()
             try:
                 pct = round(float(pct_str), 2)
@@ -160,12 +197,225 @@ class FMPProvider:
         return result
 
     # ─────────────────────────────────────────────────────────────────
+    # Public: Financial Statements (Phase 8.5 — replaces yfinance)
+    # ─────────────────────────────────────────────────────────────────
+
+    async def get_financials_data(
+        self,
+        ticker: str,
+        period: str = "annual",
+    ) -> Dict[str, Any]:
+        """
+        Full financial statements: IS + BS + CF + earnings + analyst.
+        Output matches YFinanceProvider.get_financials_data() format exactly.
+
+        Uses 5 FMP calls (all cached 72 h):
+          income-statement, balance-sheet-statement, cash-flow-statement,
+          earnings-surprises, analyst-stock-recommendations
+        """
+        t         = ticker.upper()
+        cache_key = f"financials:{t}:{period}"
+        cached    = self._get_cache(cache_key, ttl=self.FINANCIALS_TTL)
+        if cached is not None:
+            return cached
+
+        period_str = "quarter" if period == "quarterly" else "annual"
+
+        # ── Parallel fetch ──────────────────────────────────────────────────
+        results = await asyncio.gather(
+            self._get_stmt(f"/income-statement/{t}",       period_str, limit=8),
+            self._get_stmt(f"/balance-sheet-statement/{t}", period_str, limit=8),
+            self._get_stmt(f"/cash-flow-statement/{t}",    period_str, limit=8),
+            self._get_stmt(f"/earnings-surprises/{t}"),
+            self._get_stmt(f"/analyst-stock-recommendations/{t}", limit=60),
+            return_exceptions=True,
+        )
+
+        is_raw    = results[0] if not isinstance(results[0], Exception) else []
+        bs_raw    = results[1] if not isinstance(results[1], Exception) else []
+        cf_raw    = results[2] if not isinstance(results[2], Exception) else []
+        earn_raw  = results[3] if not isinstance(results[3], Exception) else []
+        recs_raw  = results[4] if not isinstance(results[4], Exception) else []
+
+        data = {
+            "ticker":           t,
+            "period":           period,
+            "income_statement": self._parse_income(is_raw),
+            "balance_sheet":    self._parse_balance(bs_raw),
+            "cash_flow":        self._parse_cashflow(cf_raw),
+            "earnings":         self._parse_earnings(earn_raw),
+            "analyst":          self._parse_analyst(recs_raw),
+        }
+
+        if data["income_statement"]:   # only cache successful responses
+            self._set_cache(cache_key, data)
+        return data
+
+    # ── Parsing helpers ──────────────────────────────────────────────────────
+
+    @staticmethod
+    def _sf(val: Any) -> Optional[float]:
+        """Safe float — returns None for None / NaN."""
+        if val is None:
+            return None
+        try:
+            f = float(val)
+            return None if f != f else round(f, 2)
+        except (TypeError, ValueError):
+            return None
+
+    def _parse_income(self, rows: List[Dict]) -> List[Dict]:
+        result = []
+        for r in sorted(rows, key=lambda x: x.get("date", "")):
+            rev = self._sf(r.get("revenue"))
+            gp  = self._sf(r.get("grossProfit"))
+            oi  = self._sf(r.get("operatingIncome"))
+            ni  = self._sf(r.get("netIncome"))
+            result.append({
+                "date":             r.get("date", "")[:10],
+                "revenue":          rev,
+                "gross_profit":     gp,
+                "ebitda":           self._sf(r.get("ebitda")),
+                "operating_income": oi,
+                "net_income":       ni,
+                "rd_expense":       self._sf(r.get("researchAndDevelopmentExpenses")),
+                # Use pre-computed ratios from FMP when direct calc not possible
+                "gross_margin":     round(gp / rev, 4) if gp and rev
+                                    else self._sf(r.get("grossProfitRatio")),
+                "operating_margin": round(oi / rev, 4) if oi and rev
+                                    else self._sf(r.get("operatingIncomeRatio")),
+                "net_margin":       round(ni / rev, 4) if ni and rev
+                                    else self._sf(r.get("netIncomeRatio")),
+            })
+        return result
+
+    def _parse_balance(self, rows: List[Dict]) -> List[Dict]:
+        result = []
+        for r in sorted(rows, key=lambda x: x.get("date", "")):
+            td   = self._sf(r.get("totalDebt"))
+            cash = self._sf(r.get("cashAndCashEquivalents"))
+            nd   = self._sf(r.get("netDebt"))
+            if nd is None and td is not None and cash is not None:
+                nd = round(td - cash, 2)
+            result.append({
+                "date":              r.get("date", "")[:10],
+                "total_assets":      self._sf(r.get("totalAssets")),
+                "total_liabilities": self._sf(r.get("totalLiabilities")),
+                "equity":            self._sf(r.get("totalStockholdersEquity")),
+                "cash":              cash,
+                "total_debt":        td,
+                "net_debt":          nd,
+            })
+        return result
+
+    def _parse_cashflow(self, rows: List[Dict]) -> List[Dict]:
+        result = []
+        for r in sorted(rows, key=lambda x: x.get("date", "")):
+            op = self._sf(r.get("operatingCashFlow"))
+            cx = self._sf(r.get("capitalExpenditure"))
+            fc = self._sf(r.get("freeCashFlow"))
+            if fc is None and op is not None and cx is not None:
+                fc = round(op + cx, 2)   # capex is negative in FMP
+            result.append({
+                "date":         r.get("date", "")[:10],
+                "operating_cf": op,
+                "investing_cf": self._sf(
+                    r.get("investingActivitiesCashFlow")
+                    or r.get("netCashUsedForInvestingActivites")
+                ),
+                "financing_cf": self._sf(
+                    r.get("financingActivitiesCashFlow")
+                    or r.get("netCashUsedProvidedByFinancingActivities")
+                ),
+                "capex":   cx,
+                "free_cf": fc,
+            })
+        return result
+
+    def _parse_earnings(self, rows: List[Dict]) -> List[Dict]:
+        result = []
+        for r in sorted(rows, key=lambda x: x.get("date", ""))[-8:]:
+            actual   = self._sf(r.get("actualEarningResult"))
+            estimate = self._sf(r.get("estimatedEarning"))
+            surprise: Optional[float] = None
+            if actual is not None and estimate is not None and estimate != 0:
+                surprise = round((actual - estimate) / abs(estimate) * 100, 2)
+            result.append({
+                "date":         r.get("date", "")[:10],
+                "period":       r.get("period", ""),
+                "eps_actual":   actual,
+                "eps_estimate": estimate,
+                "surprise_pct": surprise,
+            })
+        return result
+
+    def _parse_analyst(self, recs: List[Dict]) -> Dict[str, Any]:
+        """
+        Aggregate individual analyst recommendations into:
+          recommendations: {strong_buy, buy, hold, sell, strong_sell}
+          price_targets:   {low, mean, high, count}
+
+        Uses only recommendations from the last 90 days.
+        """
+        cutoff = (datetime.now() - timedelta(days=90)).strftime("%Y-%m-%d")
+
+        counts: Dict[str, int] = {
+            "strong_buy": 0, "buy": 0, "hold": 0, "sell": 0, "strong_sell": 0,
+        }
+        targets: List[float] = []
+
+        for r in recs:
+            date = (r.get("date") or r.get("publishedDate") or "")[:10]
+            if date < cutoff:
+                continue
+
+            # Grade → bucket
+            grade = (r.get("newGrade") or r.get("analystRating") or "").strip().lower()
+            bucket = _GRADE_MAP.get(grade)
+            if bucket:
+                counts[bucket] += 1
+
+            # Price target
+            pt = self._sf(r.get("priceTarget") or r.get("adjPriceTarget"))
+            if pt and pt > 0:
+                targets.append(pt)
+
+        total = sum(counts.values())
+        recommendations = counts if total > 0 else None
+
+        price_targets: Optional[Dict[str, Any]] = None
+        if targets:
+            price_targets = {
+                "low":   round(min(targets), 2),
+                "mean":  round(sum(targets) / len(targets), 2),
+                "high":  round(max(targets), 2),
+                "count": len(targets),
+            }
+
+        return {"recommendations": recommendations, "price_targets": price_targets}
+
+    # ─────────────────────────────────────────────────────────────────
     # Internal: HTTP + cache
     # ─────────────────────────────────────────────────────────────────
 
     async def _get(self, path: str) -> List[Dict]:
-        url = f"{BASE_URL}{path}"
+        """Simple GET — returns list, apikey only."""
+        url    = f"{BASE_URL}{path}"
         params = {"apikey": self._api_key}
+        loop   = asyncio.get_event_loop()
+        return await loop.run_in_executor(None, self._sync_get, url, params)
+
+    async def _get_stmt(
+        self,
+        path: str,
+        period: Optional[str] = None,
+        limit: int = 8,
+    ) -> List[Dict]:
+        """GET for financial statement endpoints — supports period + limit."""
+        url    = f"{BASE_URL}{path}"
+        params: Dict[str, Any] = {"apikey": self._api_key, "limit": limit}
+        if period:
+            params["period"] = period
         loop = asyncio.get_event_loop()
         return await loop.run_in_executor(None, self._sync_get, url, params)
 
@@ -177,20 +427,25 @@ class FMPProvider:
                 data = resp.json()
                 if isinstance(data, list):
                     return data
-                if isinstance(data, dict) and "Error Message" in data:
-                    print(f"[FMP] API error: {data['Error Message']}")
-                    return []
+                if isinstance(data, dict):
+                    if "Error Message" in data:
+                        print(f"[FMP] API error: {data['Error Message']}")
+                        return []
+                    # Some endpoints return {"symbol": ..., "data": [...]}
+                    if "data" in data and isinstance(data["data"], list):
+                        return data["data"]
                 return []
         except Exception as exc:
             print(f"[FMP] Request failed ({url}): {exc}")
             return []
 
-    def _get_cache(self, key: str) -> Optional[Any]:
+    def _get_cache(self, key: str, ttl: Optional[timedelta] = None) -> Optional[Any]:
         entry = self._cache.get(key)
         if entry is None:
             return None
         value, ts = entry
-        if datetime.now() - ts > self.CACHE_TTL:
+        effective_ttl = ttl if ttl is not None else self.CACHE_TTL
+        if datetime.now() - ts > effective_ttl:
             del self._cache[key]
             return None
         return value
