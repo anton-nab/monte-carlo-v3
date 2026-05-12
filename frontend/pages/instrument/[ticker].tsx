@@ -499,6 +499,21 @@ export default function InstrumentPage() {
       : [],
   [activeIndicators, dates, macdVals]);
 
+  // Fixed Y-domain for MACD — computed once from the FULL dataset so zooming
+  // in never causes the axis to auto-scale to a tiny local range.
+  // Symmetric around 0 (zero-centered) since MACD oscillates around zero.
+  const macdYDomain = useMemo((): [number, number] => {
+    if (macdPanelData.length === 0) return [-1, 1];
+    let absMax = 0.001;
+    for (const p of macdPanelData) {
+      if (p.hist   !== undefined) absMax = Math.max(absMax, Math.abs(p.hist));
+      if (p.macd   !== undefined) absMax = Math.max(absMax, Math.abs(p.macd));
+      if (p.signal !== undefined) absMax = Math.max(absMax, Math.abs(p.signal));
+    }
+    const padded = absMax * 1.15; // 15 % headroom above extreme values
+    return [-padded, padded];
+  }, [macdPanelData]);
+
   // ── FOMO ───────────────────────────────────────────────────────────────────
   const fomoResult = useMemo(
     () => computeFomoScore(fomoChart?.data ?? [], quote?.volume, fomoFinancials),
@@ -828,12 +843,12 @@ export default function InstrumentPage() {
                           <ComposedChart data={d} margin={{ top: 2, right: 0, bottom: 0, left: 0 }}>
                             <CartesianGrid strokeDasharray="2 6" stroke="rgba(42,48,64,0.4)" vertical={false} />
                             <XAxis dataKey="date" hide />
-                            <YAxis orientation="right" tick={{ fill: '#9ca3af', fontSize: 9 }} width={64} tickFormatter={v => v.toFixed(2)} />
+                            <YAxis orientation="right" domain={macdYDomain} tick={{ fill: '#9ca3af', fontSize: 9 }} width={64} tickFormatter={v => v.toFixed(2)} />
                             <Tooltip contentStyle={{ background: '#1a2035', border: '1px solid #2a3040', borderRadius: 4, fontSize: 10 }}
                               labelStyle={{ color: '#7a8294' }}
                               formatter={(v: unknown, name: unknown) => [typeof v === 'number' ? v.toFixed(4) : '—', name === 'hist' ? 'Hist' : name === 'macd' ? 'MACD' : 'Signal']} />
                             <ReferenceLine y={0} stroke="#4b5563" strokeOpacity={0.5} />
-                            <Bar dataKey="hist" isAnimationActive={false}>
+                            <Bar dataKey="hist" isAnimationActive={false} maxBarSize={6}>
                               {d.map((e, i) => <Cell key={i} fill={(e.hist ?? 0) >= 0 ? '#009371' : '#b92e25'} />)}
                             </Bar>
                             <Line type="monotone" dataKey="macd"   stroke="#00d9ff" strokeWidth={1.5} dot={false} isAnimationActive={false} />
