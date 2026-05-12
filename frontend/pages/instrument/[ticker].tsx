@@ -18,7 +18,7 @@ import {
   PieChart, Pie, Cell, ReferenceLine,
   ComposedChart, Line,
 } from 'recharts';
-import { TradingViewChart, ChartType, OverlayLine } from '../../components/TradingViewChart';
+import { TradingViewChart, ChartType, OverlayLine, VolumePoint } from '../../components/TradingViewChart';
 import { fetcher } from '../../lib/fetcher';
 import { Header } from '../../components/Header';
 import { ema, rsi as computeRsi, macd as computeMacd, bollinger, cvd as computeCvd, CvdPoint } from '../../lib/indicators';
@@ -420,8 +420,18 @@ export default function InstrumentPage() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeIndicators, ema50Vals, ema100Vals, ema200Vals, bbVals]);
 
-  // CVD panel data — replaces the old in-chart volume histogram
-  // Each point: cvd = cumulative delta (the line), delta = per-bar direction (color)
+  // In-chart volume histogram (bottom 30 % of main LWC chart, green/red by candle)
+  const tvVolumeData = useMemo((): VolumePoint[] => {
+    if (!activeIndicators.has('volume')) return [];
+    return historical.map((p) => ({
+      date:  p.date,
+      value: p.volume,
+      color: p.close >= p.open ? '#00937166' : '#b92e2566',
+    }));
+  }, [activeIndicators, historical]);
+
+  // CVD sub-panel data — per-bar volume delta (below the main chart)
+  // delta > 0 → buyers dominated, delta < 0 → sellers dominated
   const cvdPanelData = useMemo((): (CvdPoint & { date: string })[] => {
     if (!activeIndicators.has('volume')) return [];
     const points = computeCvd(historical);
@@ -621,7 +631,7 @@ export default function InstrumentPage() {
                         color={lineColor} showAxes isIntraday={tf.isIntraday}
                         visibleRange={visibleRange}
                         overlays={tvOverlays.length ? tvOverlays : undefined}
-                        volumeData={undefined}
+                        volumeData={tvVolumeData.length ? tvVolumeData : undefined}
                         onVisibleRangeChange={handleChartRangeChange} />
                     ) : <div className="h-64 flex items-center justify-center text-terminal-textMuted">No data</div>}
                   </div>
@@ -781,7 +791,7 @@ export default function InstrumentPage() {
                         height={400} color={lineColor} showAxes isIntraday={tf.isIntraday}
                         visibleRange={visibleRange}
                         overlays={tvOverlays.length ? tvOverlays : undefined}
-                        volumeData={undefined}
+                        volumeData={tvVolumeData.length ? tvVolumeData : undefined}
                         onVisibleRangeChange={handleChartRangeChange} />
                     ) : (
                       <div className="h-96 flex items-center justify-center text-terminal-textMuted">No chart data</div>
