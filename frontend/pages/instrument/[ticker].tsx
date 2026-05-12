@@ -683,17 +683,21 @@ export default function InstrumentPage() {
                     };
                     return (
                       <div className="mt-2 bg-terminal-bg rounded p-2">
-                        <div className="text-2xs text-terminal-textDim mb-1 font-mono">CVD — Cumulative Volume Delta</div>
-                        <ResponsiveContainer width="100%" height={90}>
-                          <ComposedChart data={d} margin={{ top: 2, right: 12, bottom: 0, left: 12 }}>
+                        <div className="text-2xs text-terminal-textDim mb-1 font-mono">CVD — Volume Delta per bar</div>
+                        <ResponsiveContainer width="100%" height={110}>
+                          <ComposedChart data={d} margin={{ top: 4, right: 12, bottom: 0, left: 12 }}>
                             <CartesianGrid strokeDasharray="2 6" stroke="rgba(42,48,64,0.4)" vertical={false} />
                             <XAxis dataKey="date" hide />
                             <YAxis tick={{ fill: '#9ca3af', fontSize: 9 }} width={44} tickFormatter={fmt} />
                             <Tooltip contentStyle={{ background: '#1a2035', border: '1px solid #2a3040', borderRadius: 4, fontSize: 10 }}
                               labelStyle={{ color: '#7a8294' }}
-                              formatter={(v: unknown) => [typeof v === 'number' ? fmt(v) : '—', 'CVD']} />
-                            <ReferenceLine y={0} stroke="#4b5563" strokeOpacity={0.5} strokeDasharray="3 3" />
-                            <Line type="monotone" dataKey="cvd" stroke="#26a69a" strokeWidth={1.5} dot={false} isAnimationActive={false} />
+                              formatter={(v: unknown) => [typeof v === 'number' ? fmt(v) : '—', 'Δ vol']} />
+                            <ReferenceLine y={0} stroke="#6b7280" strokeOpacity={0.7} />
+                            <Bar dataKey="delta" isAnimationActive={false} maxBarSize={8}>
+                              {d.map((e, i) => (
+                                <Cell key={i} fill={e.delta >= 0 ? '#009371' : '#b92e25'} />
+                              ))}
+                            </Bar>
                           </ComposedChart>
                         </ResponsiveContainer>
                       </div>
@@ -842,17 +846,21 @@ export default function InstrumentPage() {
                     };
                     return (
                       <div className="mt-2 bg-terminal-bg rounded p-2">
-                        <div className="text-2xs text-terminal-textDim mb-1 font-mono">CVD — Cumulative Volume Delta</div>
-                        <ResponsiveContainer width="100%" height={90}>
-                          <ComposedChart data={d} margin={{ top: 2, right: 12, bottom: 0, left: 12 }}>
+                        <div className="text-2xs text-terminal-textDim mb-1 font-mono">CVD — Volume Delta per bar</div>
+                        <ResponsiveContainer width="100%" height={110}>
+                          <ComposedChart data={d} margin={{ top: 4, right: 12, bottom: 0, left: 12 }}>
                             <CartesianGrid strokeDasharray="2 6" stroke="rgba(42,48,64,0.4)" vertical={false} />
                             <XAxis dataKey="date" hide />
                             <YAxis tick={{ fill: '#9ca3af', fontSize: 9 }} width={44} tickFormatter={fmt} />
                             <Tooltip contentStyle={{ background: '#1a2035', border: '1px solid #2a3040', borderRadius: 4, fontSize: 10 }}
                               labelStyle={{ color: '#7a8294' }}
-                              formatter={(v: unknown) => [typeof v === 'number' ? fmt(v) : '—', 'CVD']} />
-                            <ReferenceLine y={0} stroke="#4b5563" strokeOpacity={0.5} strokeDasharray="3 3" />
-                            <Line type="monotone" dataKey="cvd" stroke="#26a69a" strokeWidth={1.5} dot={false} isAnimationActive={false} />
+                              formatter={(v: unknown) => [typeof v === 'number' ? fmt(v) : '—', 'Δ vol']} />
+                            <ReferenceLine y={0} stroke="#6b7280" strokeOpacity={0.7} />
+                            <Bar dataKey="delta" isAnimationActive={false} maxBarSize={8}>
+                              {d.map((e, i) => (
+                                <Cell key={i} fill={e.delta >= 0 ? '#009371' : '#b92e25'} />
+                              ))}
+                            </Bar>
                           </ComposedChart>
                         </ResponsiveContainer>
                       </div>
