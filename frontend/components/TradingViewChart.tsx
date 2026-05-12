@@ -168,7 +168,7 @@ export function TradingViewChart({
         vertLines: { color: gridColor, style: LineStyle.LargeDashed },
         horzLines: { color: gridColor, style: LineStyle.LargeDashed },
       },
-      rightPriceScale: { visible: showAxes, borderColor },
+      rightPriceScale: { visible: showAxes, borderColor, minimumWidth: 64 },
       timeScale:       { visible: showAxes, borderColor, timeVisible: isIntraday, secondsVisible: false },
       crosshair: {
         mode:     1,

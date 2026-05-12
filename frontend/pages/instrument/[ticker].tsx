@@ -631,10 +631,10 @@ export default function InstrumentPage() {
                     <div className="mt-2 bg-terminal-bg rounded p-2">
                       <div className="text-2xs text-terminal-textDim mb-1 font-mono">RSI (14)</div>
                       <ResponsiveContainer width="100%" height={110}>
-                        <ComposedChart data={applyRange(rsiPanelData)} margin={{ top: 2, right: 12, bottom: 0, left: 12 }}>
+                        <ComposedChart data={applyRange(rsiPanelData)} margin={{ top: 2, right: 0, bottom: 0, left: 0 }}>
                           <CartesianGrid strokeDasharray="2 6" stroke="rgba(42,48,64,0.4)" vertical={false} />
                           <XAxis dataKey="date" hide />
-                          <YAxis domain={[0, 100]} tick={{ fill: '#9ca3af', fontSize: 9 }} width={24} tickCount={3} />
+                          <YAxis orientation="right" domain={[0, 100]} tick={{ fill: '#9ca3af', fontSize: 9 }} width={64} tickCount={3} />
                           <Tooltip contentStyle={{ background: '#1a2035', border: '1px solid #2a3040', borderRadius: 4, fontSize: 10 }} labelStyle={{ color: '#7a8294' }}
                             formatter={(v: unknown) => [typeof v === 'number' ? v.toFixed(1) : '—', 'RSI']} />
                           <ReferenceLine y={70} stroke="#ef5350" strokeDasharray="3 3" strokeOpacity={0.6} />
@@ -653,10 +653,10 @@ export default function InstrumentPage() {
                       <div className="mt-2 bg-terminal-bg rounded p-2">
                         <div className="text-2xs text-terminal-textDim mb-1 font-mono">MACD (12, 26, 9)</div>
                         <ResponsiveContainer width="100%" height={110}>
-                          <ComposedChart data={d} margin={{ top: 2, right: 12, bottom: 0, left: 12 }}>
+                          <ComposedChart data={d} margin={{ top: 2, right: 0, bottom: 0, left: 0 }}>
                             <CartesianGrid strokeDasharray="2 6" stroke="rgba(42,48,64,0.4)" vertical={false} />
                             <XAxis dataKey="date" hide />
-                            <YAxis tick={{ fill: '#9ca3af', fontSize: 9 }} width={40} tickFormatter={v => v.toFixed(2)} />
+                            <YAxis orientation="right" tick={{ fill: '#9ca3af', fontSize: 9 }} width={64} tickFormatter={v => v.toFixed(2)} />
                             <Tooltip contentStyle={{ background: '#1a2035', border: '1px solid #2a3040', borderRadius: 4, fontSize: 10 }} labelStyle={{ color: '#7a8294' }}
                               formatter={(v: unknown, name: unknown) => [typeof v === 'number' ? v.toFixed(4) : '—', name === 'hist' ? 'Hist' : name === 'macd' ? 'MACD' : 'Signal']} />
                             <ReferenceLine y={0} stroke="#4b5563" strokeOpacity={0.5} />
@@ -685,10 +685,10 @@ export default function InstrumentPage() {
                       <div className="mt-2 bg-terminal-bg rounded p-2">
                         <div className="text-2xs text-terminal-textDim mb-1 font-mono">CVD — Volume Delta per bar</div>
                         <ResponsiveContainer width="100%" height={110}>
-                          <ComposedChart data={d} margin={{ top: 4, right: 12, bottom: 0, left: 12 }}>
+                          <ComposedChart data={d} margin={{ top: 4, right: 0, bottom: 0, left: 0 }}>
                             <CartesianGrid strokeDasharray="2 6" stroke="rgba(42,48,64,0.4)" vertical={false} />
                             <XAxis dataKey="date" hide />
-                            <YAxis tick={{ fill: '#9ca3af', fontSize: 9 }} width={44} tickFormatter={fmt} />
+                            <YAxis orientation="right" tick={{ fill: '#9ca3af', fontSize: 9 }} width={64} tickFormatter={fmt} />
                             <Tooltip contentStyle={{ background: '#1a2035', border: '1px solid #2a3040', borderRadius: 4, fontSize: 10 }}
                               labelStyle={{ color: '#7a8294' }}
                               formatter={(v: unknown) => [typeof v === 'number' ? fmt(v) : '—', 'Δ vol']} />
@@ -793,10 +793,10 @@ export default function InstrumentPage() {
                     <div className="mt-2 bg-terminal-bg rounded p-2">
                       <div className="text-2xs text-terminal-textDim mb-1 font-mono">RSI (14)</div>
                       <ResponsiveContainer width="100%" height={110}>
-                        <ComposedChart data={applyRange(rsiPanelData)} margin={{ top: 2, right: 12, bottom: 0, left: 12 }}>
+                        <ComposedChart data={applyRange(rsiPanelData)} margin={{ top: 2, right: 0, bottom: 0, left: 0 }}>
                           <CartesianGrid strokeDasharray="2 6" stroke="rgba(42,48,64,0.4)" vertical={false} />
                           <XAxis dataKey="date" hide />
-                          <YAxis domain={[0, 100]} tick={{ fill: '#9ca3af', fontSize: 9 }} width={24} tickCount={3} />
+                          <YAxis orientation="right" domain={[0, 100]} tick={{ fill: '#9ca3af', fontSize: 9 }} width={64} tickCount={3} />
                           <Tooltip contentStyle={{ background: '#1a2035', border: '1px solid #2a3040', borderRadius: 4, fontSize: 10 }}
                             labelStyle={{ color: '#7a8294' }} formatter={(v: unknown) => [typeof v === 'number' ? v.toFixed(1) : '—', 'RSI']} />
                           <ReferenceLine y={70} stroke="#ef5350" strokeDasharray="3 3" strokeOpacity={0.6} />
@@ -815,10 +815,10 @@ export default function InstrumentPage() {
                       <div className="mt-2 bg-terminal-bg rounded p-2">
                         <div className="text-2xs text-terminal-textDim mb-1 font-mono">MACD (12, 26, 9)</div>
                         <ResponsiveContainer width="100%" height={110}>
-                          <ComposedChart data={d} margin={{ top: 2, right: 12, bottom: 0, left: 12 }}>
+                          <ComposedChart data={d} margin={{ top: 2, right: 0, bottom: 0, left: 0 }}>
                             <CartesianGrid strokeDasharray="2 6" stroke="rgba(42,48,64,0.4)" vertical={false} />
                             <XAxis dataKey="date" hide />
-                            <YAxis tick={{ fill: '#9ca3af', fontSize: 9 }} width={40} tickFormatter={v => v.toFixed(2)} />
+                            <YAxis orientation="right" tick={{ fill: '#9ca3af', fontSize: 9 }} width={64} tickFormatter={v => v.toFixed(2)} />
                             <Tooltip contentStyle={{ background: '#1a2035', border: '1px solid #2a3040', borderRadius: 4, fontSize: 10 }}
                               labelStyle={{ color: '#7a8294' }}
                               formatter={(v: unknown, name: unknown) => [typeof v === 'number' ? v.toFixed(4) : '—', name === 'hist' ? 'Hist' : name === 'macd' ? 'MACD' : 'Signal']} />
@@ -848,10 +848,10 @@ export default function InstrumentPage() {
                       <div className="mt-2 bg-terminal-bg rounded p-2">
                         <div className="text-2xs text-terminal-textDim mb-1 font-mono">CVD — Volume Delta per bar</div>
                         <ResponsiveContainer width="100%" height={110}>
-                          <ComposedChart data={d} margin={{ top: 4, right: 12, bottom: 0, left: 12 }}>
+                          <ComposedChart data={d} margin={{ top: 4, right: 0, bottom: 0, left: 0 }}>
                             <CartesianGrid strokeDasharray="2 6" stroke="rgba(42,48,64,0.4)" vertical={false} />
                             <XAxis dataKey="date" hide />
-                            <YAxis tick={{ fill: '#9ca3af', fontSize: 9 }} width={44} tickFormatter={fmt} />
+                            <YAxis orientation="right" tick={{ fill: '#9ca3af', fontSize: 9 }} width={64} tickFormatter={fmt} />
                             <Tooltip contentStyle={{ background: '#1a2035', border: '1px solid #2a3040', borderRadius: 4, fontSize: 10 }}
                               labelStyle={{ color: '#7a8294' }}
                               formatter={(v: unknown) => [typeof v === 'number' ? fmt(v) : '—', 'Δ vol']} />
