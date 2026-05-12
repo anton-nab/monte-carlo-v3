@@ -10,7 +10,7 @@
  */
 
 import { useRouter } from 'next/router';
-import { useState, useMemo, useCallback, useRef, useEffect } from 'react';
+import { useState, useMemo, useCallback, useEffect } from 'react';
 import useSWR from 'swr';
 import { useWebSocket, lookupPrice, isWsUnsupported } from '../../hooks/useWebSocket';
 import {
@@ -291,17 +291,14 @@ export default function InstrumentPage() {
   const [chartVisibleRange, setChartVisibleRange] = useState<{
     from: string; to: string; fromTs: number; toTs: number;
   } | null>(null);
-  const zoomTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // TradingViewChart already batches via rAF — call setState directly here
   const handleChartRangeChange = useCallback((fromTs: number, toTs: number) => {
-    if (zoomTimerRef.current) clearTimeout(zoomTimerRef.current);
-    zoomTimerRef.current = setTimeout(() => {
-      setChartVisibleRange({
-        from:   new Date(fromTs * 1000).toISOString().substring(0, 10),
-        to:     new Date(toTs   * 1000).toISOString().substring(0, 10),
-        fromTs,
-        toTs,
-      });
-    }, 120);
+    setChartVisibleRange({
+      from:   new Date(fromTs * 1000).toISOString().substring(0, 10),
+      to:     new Date(toTs   * 1000).toISOString().substring(0, 10),
+      fromTs,
+      toTs,
+    });
   }, []);
   // Reset zoom state when timeframe changes
   useEffect(() => { setChartVisibleRange(null); }, [selectedLabel]);

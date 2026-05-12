@@ -260,13 +260,16 @@ export function TradingViewChart({
     }
 
     // ── Subscribe to visible range for sub-panel sync ────────────────────────
-    let debounceTimer: ReturnType<typeof setTimeout> | null = null;
+    // Use rAF instead of setTimeout so sub-panels update every frame during
+    // panning — no visible lag between chart and RSI/MACD panels.
+    let rafId: number | null = null;
     const handleRangeChange = (range: { from: Time; to: Time } | null) => {
       if (!range) return;
-      if (debounceTimer) clearTimeout(debounceTimer);
-      debounceTimer = setTimeout(() => {
+      if (rafId !== null) cancelAnimationFrame(rafId);
+      rafId = requestAnimationFrame(() => {
         onRangeChangeRef.current?.(timeToUnix(range.from), timeToUnix(range.to));
-      }, 100);
+        rafId = null;
+      });
     };
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     chart.timeScale().subscribeVisibleTimeRangeChange(handleRangeChange as any);
@@ -278,7 +281,7 @@ export function TradingViewChart({
     window.addEventListener('resize', handleResize);
 
     return () => {
-      if (debounceTimer) clearTimeout(debounceTimer);
+      if (rafId !== null) cancelAnimationFrame(rafId);
       window.removeEventListener('resize', handleResize);
       chart.remove();
       chartRef.current = null;
