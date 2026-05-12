@@ -3,8 +3,10 @@
  * ─────────────────
  * Pure TypeScript technical indicator math.
  *
- * All functions accept an array of close prices (numbers) and return
- * (number | null)[] — null during the warm-up period (insufficient data).
+ * EMA / RSI / MACD / Bollinger accept close-price arrays and return
+ * (number | null)[] — null during warm-up (insufficient data).
+ *
+ * CVD accepts full OHLCV bars — no warm-up period, no nulls.
  *
  * No external dependencies.
  */
@@ -168,4 +170,55 @@ export function bollinger(
     lower[i]  = mean - stdDev * sd;
   }
   return { upper, middle, lower };
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// CVD  (Cumulative Volume Delta)
+// ─────────────────────────────────────────────────────────────────────────────
+
+export interface CvdPoint {
+  /** Running cumulative delta at this bar */
+  cvd:   number;
+  /**
+   * Individual bar delta (buying − selling pressure).
+   * Positive → buyers dominated; negative → sellers dominated.
+   */
+  delta: number;
+}
+
+/**
+ * CVD — Cumulative Volume Delta
+ *
+ * Per-bar delta approximation using the High-Low-Close method (no tick data):
+ *   delta_i = volume_i × (2 × (close_i − low_i) / (high_i − low_i) − 1)
+ *
+ * Interpretation of delta:
+ *   close = high    → delta = +volume  (100% buying pressure)
+ *   close = low     → delta = −volume  (100% selling pressure)
+ *   close = midpoint → delta = 0       (balanced)
+ *
+ * CVD = running cumulative sum of all deltas.
+ *   Rising CVD  → net accumulation (buyers in control)
+ *   Falling CVD → net distribution (sellers in control)
+ *   Divergence from price → potential reversal signal
+ *
+ * Returns one CvdPoint per input bar — no warm-up period.
+ */
+export function cvd(
+  bars: { open: number; high: number; low: number; close: number; volume: number }[],
+): CvdPoint[] {
+  const result: CvdPoint[] = [];
+  let cumulative = 0;
+
+  for (const bar of bars) {
+    const range = bar.high - bar.low;
+    // Guard against zero-range candles (doji, gaps at open)
+    const d = range > 1e-10
+      ? bar.volume * (2 * (bar.close - bar.low) / range - 1)
+      : 0;
+    cumulative += d;
+    result.push({ cvd: cumulative, delta: d });
+  }
+
+  return result;
 }
