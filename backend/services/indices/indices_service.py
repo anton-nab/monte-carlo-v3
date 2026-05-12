@@ -26,7 +26,7 @@ from typing import Dict, Any, List, Optional
 import yfinance as yf
 import pandas as pd
 
-from .indices_registry import INDICES_REGISTRY, get_index
+from .indices_registry import INDICES_REGISTRY, get_index, resolve_symbol
 from .wikipedia_provider import WikipediaProvider
 from .csv_provider import CsvProvider
 
@@ -76,6 +76,7 @@ class IndicesService:
                             constituent list immediately (fast path for two-phase
                             loading on the frontend). Prices will be None.
         """
+        symbol = resolve_symbol(symbol)   # "^GSPC" → "SP500", "^NDX" → "NDX", etc.
         cfg = get_index(symbol)
         if cfg is None:
             raise ValueError(f"Unknown index: {symbol}")

@@ -1015,8 +1015,36 @@ INDICES_REGISTRY: Dict[str, Dict[str, Any]] = {
 }
 
 
-def get_index(symbol: str) -> Dict[str, Any]:
-    return INDICES_REGISTRY.get(symbol.upper())
+# ─────────────────────────────────────────────────────────────────────────────
+# Reverse map: yfinance ticker → registry symbol
+# Built automatically from INDICES_REGISTRY — zero maintenance.
+# Allows URLs like /indices/^GSPC to resolve to the SP500 entry.
+# ─────────────────────────────────────────────────────────────────────────────
+_YF_TICKER_TO_SYMBOL: Dict[str, str] = {
+    cfg["yf_ticker"].upper(): sym
+    for sym, cfg in INDICES_REGISTRY.items()
+    if "yf_ticker" in cfg
+}
+
+
+def resolve_symbol(symbol: str) -> str:
+    """
+    Normalize any index identifier to its canonical registry key.
+
+    Accepts:
+      - Registry keys  : "SP500", "NDX", "CAC40"  → returned as-is (uppercased)
+      - yfinance tickers: "^GSPC", "^FCHI", "^N225" → mapped to registry key
+      - Unknown         : returned uppercased (will raise 404 in the service)
+    """
+    key = symbol.upper()
+    if key in INDICES_REGISTRY:
+        return key
+    return _YF_TICKER_TO_SYMBOL.get(key, key)
+
+
+def get_index(symbol: str) -> Optional[Dict[str, Any]]:
+    """Return registry config for a symbol (registry key OR yfinance ticker)."""
+    return INDICES_REGISTRY.get(resolve_symbol(symbol))
 
 
 def list_all() -> List[Dict[str, Any]]:
