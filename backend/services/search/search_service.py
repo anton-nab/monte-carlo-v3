@@ -1,29 +1,27 @@
 from typing import List, Dict, Any, Optional
+from .twelvedata_search_service import TwelveDataSearchService
 from .openfigi_service import OpenFIGIService
 from .fuzzy_search_service import FuzzySearchService
-from .yfinance_search_service import YFinanceSearchService
 
 
 class SearchService:
     """Unified search service.
 
     Strategy:
-    1. YFinance global search (primary) — covers 100k+ instruments worldwide
-    2. Fuzzy local search (instant fallback for popular tickers)
+    1. Twelve Data /symbol_search (primary) — commercial-friendly, async
+    2. Fuzzy local search (instant for 1-2 char queries; fills gaps from TD)
     3. OpenFIGI (backup for ISIN lookups)
     """
 
     def __init__(self):
-        self.yfinance = YFinanceSearchService()
+        self.td     = TwelveDataSearchService()
+        self.fuzzy  = FuzzySearchService()
         self.openfigi = OpenFIGIService()
-        self.fuzzy = FuzzySearchService()
 
     async def search(
         self,
         query: str,
         limit: int = 10,
-        use_yfinance: bool = True,
-        use_fuzzy: bool = True,
     ) -> List[Dict[str, Any]]:
         """Search for instruments globally.
 
@@ -36,19 +34,19 @@ class SearchService:
         results: List[Dict[str, Any]] = []
         seen_tickers: set = set()
 
-        # 1. YFinance global search (covers worldwide tickers, names, ISINs)
-        if use_yfinance:
+        # 1. Twelve Data global search (3+ chars only — avoids noisy short-query results)
+        if len(normalized) >= 3:
             try:
-                yf_results = await self.yfinance.search(normalized, limit=limit)
-                for r in yf_results:
+                td_results = await self.td.search(normalized, limit=limit)
+                for r in td_results:
                     if r["ticker"] not in seen_tickers:
                         results.append(r)
                         seen_tickers.add(r["ticker"])
             except Exception as exc:
-                print(f"Warning: YFinance search failed: {exc}")
+                print(f"Warning: Twelve Data search failed: {exc}")
 
-        # 2. Local fuzzy search — fills in popular tickers if YFinance missed any
-        if use_fuzzy and len(results) < limit:
+        # 2. Local fuzzy search — instant, fills gaps and covers 1-2 char queries
+        if len(results) < limit:
             try:
                 fuzzy_results = self.fuzzy.search(normalized, limit=limit)
                 for r in fuzzy_results:
@@ -66,7 +64,7 @@ class SearchService:
         """Autocomplete suggestions.
 
         For very short queries (1-2 chars) we use the local fuzzy index only
-        to keep responses instant. For 3+ chars we hit YFinance for global
+        to keep responses instant. For 3+ chars we hit Twelve Data for global
         coverage.
         """
         normalized = query.strip()
@@ -74,9 +72,7 @@ class SearchService:
             return []
 
         if len(normalized) <= 2:
-            return self.fuzzy.autocomplete(normalized, limit) if hasattr(
-                self.fuzzy, "autocomplete"
-            ) else self.fuzzy.search(normalized, limit)
+            return self.fuzzy.autocomplete(normalized, limit)
 
         return await self.search(normalized, limit=limit)
 
@@ -110,7 +106,8 @@ class SearchService:
 
     async def close(self):
         await self.openfigi.close()
+        await self.td.close()
 
     def clear_caches(self):
         self.openfigi.clear_cache()
-        self.yfinance.clear_cache()
+        self.td.clear_cache()
