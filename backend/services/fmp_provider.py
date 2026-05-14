@@ -197,6 +197,77 @@ class FMPProvider:
         return result
 
     # ─────────────────────────────────────────────────────────────────
+    # Public: Company Profile + Ratios (Phase 8.6 — replaces yfinance fundamentals)
+    # ─────────────────────────────────────────────────────────────────
+
+    async def get_company_profile(self, ticker: str) -> Dict[str, Any]:
+        """
+        Company fundamentals from FMP (commercial-friendly, free tier).
+
+        Two calls (both cached 24 h):
+          /v3/profile/{ticker}     → name, sector, industry, mktCap, beta, type
+          /v3/ratios-ttm/{ticker}  → pe, pb, roe, div yield, D/E, eps, gross margin
+
+        Output shape matches YFinanceProvider.get_fundamentals().
+        """
+        t = ticker.upper()
+
+        # ── Profile ──────────────────────────────────────────────────
+        profile_key = f"profile:{t}"
+        profile_raw = self._get_cache(profile_key)
+        if profile_raw is None:
+            rows = await self._get(f"/profile/{t}")
+            profile_raw = rows[0] if rows else {}
+            self._set_cache(profile_key, profile_raw)
+
+        # ── TTM Ratios ───────────────────────────────────────────────
+        ratios_key = f"ratios_ttm:{t}"
+        ratios_raw = self._get_cache(ratios_key)
+        if ratios_raw is None:
+            rows = await self._get(f"/ratios-ttm/{t}")
+            ratios_raw = rows[0] if rows else {}
+            self._set_cache(ratios_key, ratios_raw)
+
+        def _f(*keys) -> Optional[float]:
+            """Pull first non-None numeric from profile_raw or ratios_raw."""
+            for src in (profile_raw, ratios_raw):
+                for k in keys:
+                    v = src.get(k)
+                    if v is not None:
+                        try:
+                            f = float(v)
+                            return None if f != f else round(f, 4)  # NaN guard
+                        except (TypeError, ValueError):
+                            pass
+            return None
+
+        # Determine instrument type
+        if profile_raw.get("isEtf"):
+            itype = "etf"
+        elif profile_raw.get("isFund"):
+            itype = "mutual_fund"
+        else:
+            itype = "equity"
+
+        return {
+            "ticker":         t,
+            "type":           itype,
+            "name":           profile_raw.get("companyName") or t,
+            "sector":         profile_raw.get("sector") or "",
+            "industry":       profile_raw.get("industry") or "",
+            "market_cap":     _f("mktCap"),
+            "pe_ratio":       _f("peRatioTTM"),
+            "pb_ratio":       _f("priceToBookRatioTTM"),
+            "roe":            _f("returnOnEquityTTM"),
+            "dividend_yield": _f("dividendYieldTTM", "dividendYielTTM"),
+            "debt_to_equity": _f("debtEquityRatioTTM"),
+            "eps":            _f("epsBasicTTM", "netIncomePerShareTTM"),
+            "beta":           _f("beta"),
+            "revenue_ttm":    None,   # not available in profile/ratios — shows "—" in UI
+            "gross_margin":   _f("grossProfitMarginTTM"),
+        }
+
+    # ─────────────────────────────────────────────────────────────────
     # Public: Financial Statements (Phase 8.5 — replaces yfinance)
     # ─────────────────────────────────────────────────────────────────
 

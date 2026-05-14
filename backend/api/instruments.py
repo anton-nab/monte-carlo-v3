@@ -3,10 +3,13 @@ api/instruments.py
 ------------------
 Instrument data endpoints.
 
-Provider hierarchy (Phase 7):
-  Primary:  Twelve Data   — quote, chart, intraday, news, search
-  Fallback: yfinance       — fundamentals (TD requires paid plan),
-                             ETF holdings, ETF profile, financial statements
+Provider hierarchy (Phase 8.6):
+  Primary:  Twelve Data   — quote, chart, intraday, news
+  Primary:  FMP           — fundamentals (profile + ratios), financials, ETF data
+  Fallback: yfinance       — ONLY when no commercial API key is set (local dev)
+
+yfinance (Yahoo Finance) ToS forbids commercial use.
+All production paths must go through TD or FMP.
 """
 import os
 import asyncio
@@ -31,26 +34,50 @@ _fmp = get_fmp_provider()
 
 
 # ─────────────────────────────────────────────────────────────────────────────
+# Commercial API guard
+# yfinance is only allowed when no commercial key is set (i.e. local dev).
+# In production (TD key present) all paths must use TD / FMP.
+# ─────────────────────────────────────────────────────────────────────────────
+
+_allow_yfinance = not bool(_td_key)   # True only in local dev without TD key
+
+
+# ─────────────────────────────────────────────────────────────────────────────
 # Helpers
 # ─────────────────────────────────────────────────────────────────────────────
 
-async def _get_fundamentals_with_fallback(ticker: str):
-    """Try Twelve Data /statistics, fall back to yfinance on failure."""
-    if _td_provider:
+async def _get_fundamentals(ticker: str):
+    """
+    Fundamentals hierarchy (Phase 8.6):
+      1. FMP /profile + /ratios-ttm  (commercial OK, free tier)
+      2. yfinance                    (local dev only — no commercial key)
+    """
+    fmp_key = os.getenv("FMP_API_KEY", "")
+    if fmp_key:
         try:
-            return await _td_provider.get_fundamentals(ticker)
+            return await _fmp.get_company_profile(ticker)
         except Exception as e:
-            print(f"[instruments] TD fundamentals failed for {ticker}: {e}, falling back to yfinance")
-    return await _yf_provider.get_fundamentals(ticker)
+            print(f"[instruments] FMP profile failed for {ticker}: {e}")
+            if not _allow_yfinance:
+                raise
+    if _allow_yfinance:
+        return await _yf_provider.get_fundamentals(ticker)
+    raise ValueError(f"No fundamentals data available for {ticker} (no commercial API key configured)")
 
 
 async def _get_news_with_fallback(ticker: str):
-    """Try Twelve Data /news, fall back to yfinance on failure."""
+    """
+    News hierarchy:
+      1. Twelve Data /news           (commercial OK, free tier)
+      2. yfinance                    (local dev only)
+    """
     if _td_provider:
         result = await _td_provider.get_news(ticker)
         if result:
             return result
-    return await _yf_provider.get_news(ticker)
+    if _allow_yfinance:
+        return await _yf_provider.get_news(ticker)
+    return []   # TD returned empty — return nothing rather than hit yfinance in prod
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -65,7 +92,7 @@ async def get_instrument_snapshot(ticker: str):
     """
     try:
         quote = await _primary.get_quote(ticker)
-        fundamentals = await _get_fundamentals_with_fallback(ticker)
+        fundamentals = await _get_fundamentals(ticker)
         return {
             "ticker":        ticker,
             "quote":         quote,
@@ -91,12 +118,12 @@ async def get_quote(ticker: str):
 
 @router.get("/fundamentals/{ticker}")
 async def get_fundamentals(ticker: str):
-    """Get company fundamentals (TD primary, yfinance fallback).
+    """Get company fundamentals (FMP profile+ratios primary, yfinance local-dev fallback).
 
     Example: GET /api/instruments/fundamentals/GOOGL
     """
     try:
-        result = await _get_fundamentals_with_fallback(ticker)
+        result = await _get_fundamentals(ticker)
         return result
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
@@ -187,18 +214,19 @@ async def get_financials(
     """Get full financial statements (IS + BS + CF) + earnings history + analyst data.
 
     Primary: FMP (commercial-friendly, 72 h cache).
-    Fallback: yfinance (if FMP returns empty or fails).
+    Fallback: yfinance — local dev only (no commercial API key configured).
     Example: GET /api/instruments/financials/AAPL?period=annual
     """
     t = ticker.upper()
     try:
         result = await _fmp.get_financials_data(t, period)
-        # FMP succeeded but returned empty IS — fall back to yfinance
         if result.get("income_statement"):
             return result
         raise ValueError("FMP returned empty income statement")
     except Exception as fmp_err:
-        print(f"[instruments] FMP financials failed for {t}: {fmp_err} — falling back to yfinance")
+        if not _allow_yfinance:
+            raise HTTPException(status_code=502, detail=f"Financial data unavailable: {fmp_err}")
+        print(f"[instruments] FMP financials failed for {t}: {fmp_err} — falling back to yfinance (local dev)")
     try:
         return await _yf_provider.get_financials_data(t, period)
     except Exception as yf_err:
@@ -209,20 +237,31 @@ async def get_financials(
 async def get_etf_profile(ticker: str):
     """Get ETF sector + country breakdown + asset class weights.
 
-    Combines FMP sector/country data with yfinance asset-class breakdown.
+    FMP primary (sectors + countries). yfinance asset-class breakdown
+    is only fetched in local dev (no commercial API key).
     Example: GET /api/instruments/etf-profile/SPY
     """
     t = ticker.upper()
     try:
-        results = await asyncio.gather(
-            _fmp.get_etf_sectors(t),
-            _fmp.get_etf_countries(t),
-            _yf_provider.get_etf_profile(t),
-            return_exceptions=True,
-        )
-        sectors   = results[0] if not isinstance(results[0], Exception) else []
-        countries = results[1] if not isinstance(results[1], Exception) else []
-        yf_data   = results[2] if not isinstance(results[2], Exception) else {}
+        if _allow_yfinance:
+            results = await asyncio.gather(
+                _fmp.get_etf_sectors(t),
+                _fmp.get_etf_countries(t),
+                _yf_provider.get_etf_profile(t),
+                return_exceptions=True,
+            )
+            sectors   = results[0] if not isinstance(results[0], Exception) else []
+            countries = results[1] if not isinstance(results[1], Exception) else []
+            yf_data   = results[2] if not isinstance(results[2], Exception) else {}
+        else:
+            results = await asyncio.gather(
+                _fmp.get_etf_sectors(t),
+                _fmp.get_etf_countries(t),
+                return_exceptions=True,
+            )
+            sectors   = results[0] if not isinstance(results[0], Exception) else []
+            countries = results[1] if not isinstance(results[1], Exception) else []
+            yf_data   = {}
         return {
             "ticker":             t,
             "sector_weightings":  sectors or yf_data.get("sector_weightings", []),
@@ -237,22 +276,23 @@ async def get_etf_profile(ticker: str):
 async def get_etf_holdings(ticker: str):
     """Get ETF top holdings.
 
-    Uses yfinance funds_data (most accurate weights) with FMP fallback.
+    FMP primary (commercial OK). yfinance fallback — local dev only.
     Example: GET /api/instruments/etf-holdings/SPY
     """
     t = ticker.upper()
     try:
-        yf_result = await _yf_provider.get_etf_holdings(t)
-        if yf_result and any(h["weight_pct"] > 0 for h in yf_result):
-            print(f"[holdings] {t}: yfinance OK ({len(yf_result)} positions)")
-            return yf_result
-
         fmp_result = await _fmp.get_etf_holdings(t)
         if fmp_result and any(h["weight_pct"] > 0 for h in fmp_result):
             print(f"[holdings] {t}: FMP OK ({len(fmp_result)} positions)")
             return fmp_result
 
+        if _allow_yfinance:
+            yf_result = await _yf_provider.get_etf_holdings(t)
+            if yf_result:
+                print(f"[holdings] {t}: yfinance fallback ({len(yf_result)} positions)")
+                return yf_result
+
         print(f"[holdings] {t}: no valid weights found")
-        return yf_result or fmp_result or []
+        return fmp_result or []
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
