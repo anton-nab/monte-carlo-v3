@@ -3,10 +3,10 @@ api/home.py
 -----------
 Home page data (MSN Finance style).
 
-Phase 8.6: yfinance fully removed.
-  - Tape / movers → Twelve Data batch quotes (unchanged)
-  - News          → FMP /v4/general_news (replaces yf.Ticker('^GSPC').news)
-  - Fallback: if TD unavailable, return empty arrays (no yfinance)
+Provider hierarchy:
+  Tape / movers → Twelve Data batch quotes
+  News          → Finnhub /news?category=general
+  Fallback: empty arrays if provider unavailable
 """
 
 from __future__ import annotations
@@ -19,7 +19,7 @@ from typing import Optional
 
 from fastapi import APIRouter
 from services.instruments.twelvedata_provider import TwelveDataProvider
-from services.fmp_provider import get_fmp_provider
+from services.finnhub_provider import get_finnhub_provider
 
 router = APIRouter(prefix="/api/home", tags=["home"])
 
@@ -27,9 +27,9 @@ router = APIRouter(prefix="/api/home", tags=["home"])
 # Providers
 # ─────────────────────────────────────────────────────────────────────────────
 
-_td_key = os.getenv("TWELVE_DATA_API_KEY", "")
+_td_key  = os.getenv("TWELVE_DATA_API_KEY", "")
 _td: Optional[TwelveDataProvider] = TwelveDataProvider(_td_key) if _td_key else None
-_fmp = get_fmp_provider()
+_finnhub = get_finnhub_provider()
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Ticker universe
@@ -127,20 +127,19 @@ async def _td_fetch_movers(tickers: list[str]) -> tuple[list[dict], list[dict]]:
 # ─────────────────────────────────────────────────────────────────────────────
 
 async def _build_market_data_async() -> dict:
-    """Build full market payload. TD for tape/movers, FMP for news."""
+    """Build full market payload. TD for tape/movers, Finnhub for news."""
     if _td:
         tape_task   = asyncio.create_task(_td_fetch_tape(TAPE_TICKERS))
         movers_task = asyncio.create_task(_td_fetch_movers(MOVERS_UNIVERSE))
-        news_task   = asyncio.create_task(_fmp.get_general_news(limit=9))
+        news_task   = asyncio.create_task(_finnhub.get_market_news(limit=9))
 
         tape            = await tape_task
         gainers, losers = await movers_task
         news            = await news_task
     else:
-        # No TD key — return empty market data (should not happen in production)
         print("[home] No TWELVE_DATA_API_KEY configured — returning empty market data")
         tape, gainers, losers = [], [], []
-        news = await _fmp.get_general_news(limit=9)
+        news = await _finnhub.get_market_news(limit=9)
 
     tape_map = {t["ticker"]: t for t in tape}
     indices  = [tape_map[s] for s in KEY_INDICES if s in tape_map]
@@ -151,7 +150,7 @@ async def _build_market_data_async() -> dict:
         "gainers":   gainers,
         "losers":    losers,
         "news":      news,
-        "source":    "twelvedata+fmp",
+        "source":    "twelvedata+finnhub",
         "cached_at": datetime.now(tz=timezone.utc).isoformat(),
     }
 

@@ -3,19 +3,25 @@ api/instruments.py
 ------------------
 Instrument data endpoints.
 
-Provider hierarchy (Phase 8.6):
-  Primary:  Twelve Data   — quote, chart, intraday, news
-  Primary:  FMP           — fundamentals (profile + ratios), financials, ETF data
-  Fallback: yfinance       — ONLY when no commercial API key is set (local dev)
+Provider hierarchy (Phase 8.7 — Stooq / SEC EDGAR / Finnhub):
+  Quotes / Chart / Intraday  → Twelve Data (primary) | yfinance (local dev)
+  Fundamentals (profile)     → Finnhub /stock/profile2 + /metric (global)
+  Financial statements       → SEC EDGAR XBRL (US, no key) → Finnhub (non-US/fallback)
+  Earnings + Analyst         → Finnhub
+  News (per ticker)          → Twelve Data /news → Finnhub /company-news
+  News (market, home page)   → Finnhub /news?category=general  [see home.py]
+  ETF holdings / sectors     → FMP (kept — free tier OK, no free alternative)
+  Index constituents         → FMP + CSV fallback
 
-yfinance (Yahoo Finance) ToS forbids commercial use.
-All production paths must go through TD or FMP.
+yfinance only callable when _allow_yfinance = True (local dev, no TD key).
 """
 import os
 import asyncio
 from fastapi import APIRouter, HTTPException, Query
 from services.instruments import YFinanceProvider, TwelveDataProvider, InstrumentsService
 from services.fmp_provider import get_fmp_provider
+from services.finnhub_provider import get_finnhub_provider
+from services.sec_edgar_provider import get_sec_edgar_provider
 
 router = APIRouter(prefix="/api/instruments", tags=["instruments"])
 
@@ -23,23 +29,19 @@ router = APIRouter(prefix="/api/instruments", tags=["instruments"])
 # Provider initialisation
 # ─────────────────────────────────────────────────────────────────────────────
 
-_td_key = os.getenv("TWELVE_DATA_API_KEY", "")
+_td_key      = os.getenv("TWELVE_DATA_API_KEY", "")
 _td_provider = TwelveDataProvider(_td_key) if _td_key else None
 _yf_provider = YFinanceProvider()
 
-# Service uses Twelve Data as primary when available, yfinance otherwise
 _primary = _td_provider or _yf_provider
-service = InstrumentsService(_primary)
-_fmp = get_fmp_provider()
+service  = InstrumentsService(_primary)
 
+_fmp     = get_fmp_provider()       # ETF + index data only
+_finnhub = get_finnhub_provider()   # profile, financials, news (global)
+_sec     = get_sec_edgar_provider() # US financials, no key needed
 
-# ─────────────────────────────────────────────────────────────────────────────
-# Commercial API guard
-# yfinance is only allowed when no commercial key is set (i.e. local dev).
-# In production (TD key present) all paths must use TD / FMP.
-# ─────────────────────────────────────────────────────────────────────────────
-
-_allow_yfinance = not bool(_td_key)   # True only in local dev without TD key
+# yfinance only in local dev (no commercial key)
+_allow_yfinance = not bool(_td_key)
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -48,36 +50,33 @@ _allow_yfinance = not bool(_td_key)   # True only in local dev without TD key
 
 async def _get_fundamentals(ticker: str):
     """
-    Fundamentals hierarchy (Phase 8.6):
-      1. FMP /profile + /ratios-ttm  (commercial OK, free tier)
-      2. yfinance                    (local dev only — no commercial key)
+    Fundamentals hierarchy:
+      1. Finnhub /stock/profile2 + /metric  (global, free tier)
+      2. yfinance                           (local dev only)
     """
-    fmp_key = os.getenv("FMP_API_KEY", "")
-    if fmp_key:
-        try:
-            return await _fmp.get_company_profile(ticker)
-        except Exception as e:
-            print(f"[instruments] FMP profile failed for {ticker}: {e}")
-            if not _allow_yfinance:
-                raise
-    if _allow_yfinance:
-        return await _yf_provider.get_fundamentals(ticker)
-    raise ValueError(f"No fundamentals data available for {ticker} (no commercial API key configured)")
+    try:
+        return await _finnhub.get_company_profile(ticker)
+    except Exception as e:
+        print(f"[instruments] Finnhub profile failed for {ticker}: {e}")
+        if _allow_yfinance:
+            return await _yf_provider.get_fundamentals(ticker)
+        raise
 
 
 async def _get_news_with_fallback(ticker: str):
     """
     News hierarchy:
-      1. Twelve Data /news           (commercial OK, free tier)
-      2. yfinance                    (local dev only)
+      1. Twelve Data /news      (primary — per ticker)
+      2. Finnhub /company-news  (fallback — global)
     """
     if _td_provider:
         result = await _td_provider.get_news(ticker)
         if result:
             return result
-    if _allow_yfinance:
-        return await _yf_provider.get_news(ticker)
-    return []   # TD returned empty — return nothing rather than hit yfinance in prod
+    result = await _finnhub.get_company_news(ticker)
+    if result:
+        return result
+    return []
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -211,26 +210,55 @@ async def get_financials(
     ticker: str,
     period: str = Query("annual", description="'annual' or 'quarterly'"),
 ):
-    """Get full financial statements (IS + BS + CF) + earnings history + analyst data.
+    """Get full financial statements (IS + BS + CF) + earnings + analyst.
 
-    Primary: FMP (commercial-friendly, 72 h cache).
-    Fallback: yfinance — local dev only (no commercial API key configured).
+    Hierarchy:
+      1. SEC EDGAR XBRL (US companies, no key, IS/BS/CF)
+         + Finnhub for earnings + analyst (global)
+      2. Finnhub /stock/financials-reported (non-US fallback, full statements)
+      3. yfinance (local dev only)
+
     Example: GET /api/instruments/financials/AAPL?period=annual
     """
     t = ticker.upper()
+
+    # ── SEC EDGAR (IS/BS/CF for US companies) ────────────────────────────────
+    sec_result: dict | None = None
     try:
-        result = await _fmp.get_financials_data(t, period)
-        if result.get("income_statement"):
-            return result
-        raise ValueError("FMP returned empty income statement")
-    except Exception as fmp_err:
-        if not _allow_yfinance:
-            raise HTTPException(status_code=502, detail=f"Financial data unavailable: {fmp_err}")
-        print(f"[instruments] FMP financials failed for {t}: {fmp_err} — falling back to yfinance (local dev)")
+        sec_result = await _sec.get_financials_data(t, period)
+    except Exception as sec_err:
+        print(f"[instruments] SEC EDGAR failed for {t}: {sec_err}")
+
+    # ── Finnhub (earnings + analyst always; full statements for non-US) ───────
+    fh_result: dict | None = None
     try:
-        return await _yf_provider.get_financials_data(t, period)
-    except Exception as yf_err:
-        raise HTTPException(status_code=400, detail=str(yf_err))
+        fh_result = await _finnhub.get_financials_data(t, period)
+    except Exception as fh_err:
+        print(f"[instruments] Finnhub financials failed for {t}: {fh_err}")
+
+    # ── Merge: prefer SEC EDGAR IS/BS/CF; always use Finnhub earnings/analyst ─
+    if sec_result and sec_result.get("income_statement"):
+        result = sec_result
+        if fh_result:
+            result["earnings"] = fh_result.get("earnings") or []
+            result["analyst"]  = fh_result.get("analyst")  or result["analyst"]
+        return result
+
+    if fh_result and fh_result.get("income_statement"):
+        return fh_result
+
+    # ── Local dev fallback ────────────────────────────────────────────────────
+    if _allow_yfinance:
+        print(f"[instruments] All commercial sources failed for {t} — falling back to yfinance (local dev)")
+        try:
+            return await _yf_provider.get_financials_data(t, period)
+        except Exception as yf_err:
+            raise HTTPException(status_code=400, detail=str(yf_err))
+
+    raise HTTPException(
+        status_code=502,
+        detail=f"No financial data available for {t} (SEC EDGAR: US only; Finnhub: check FINNHUB_API_KEY)",
+    )
 
 
 @router.get("/etf-profile/{ticker}")

@@ -7,8 +7,8 @@ nécessaires à l'analyse de portefeuille.
 
 Provider hierarchy:
   Primary:   Twelve Data /time_series — commercial-friendly, concurrent per ticker.
-  Secondary: FMP /v3/historical-price-full — commercial OK, free tier.
-  (yfinance removed — ToS forbids commercial use.)
+  Secondary: Stooq — no API key, global daily OHLCV, concurrent per ticker.
+  (FMP and yfinance removed from production paths.)
 """
 
 from __future__ import annotations
@@ -16,11 +16,11 @@ from __future__ import annotations
 import os
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
-import httpx
 import numpy as np
 import pandas as pd
 
 from services.instruments.twelvedata_provider import SYMBOL_MAP, PERIOD_TO_OUTPUTSIZE
+from services import stooq_provider as stooq
 
 TD_BASE      = "https://api.twelvedata.com"
 TRADING_DAYS = 252
@@ -65,45 +65,9 @@ def _td_fetch_series(ticker: str, outputsize: int, api_key: str) -> pd.Series:
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# FMP fetch (secondary — one ticker, synchronous)
+# Stooq fetch (secondary — one ticker, synchronous)
+# stooq_provider.fetch_series() already handles the sync HTTP + CSV parsing.
 # ─────────────────────────────────────────────────────────────────────────────
-
-_FMP_BASE = "https://financialmodelingprep.com/api/v3"
-
-# Map period → approximate trading-day count.
-# Uses `timeseries=N` param (free tier OK) — date-range params require paid plan.
-_PERIOD_TIMESERIES: dict[str, int] = {
-    "1m": 22,  "3m": 65,  "6m": 130,
-    "1y": 260, "2y": 520, "3y": 780, "5y": 1300,
-}
-
-
-def _fmp_fetch_series(ticker: str, period: str, fmp_key: str) -> pd.Series:
-    """Synchronous FMP /v3/historical-price-full → pd.Series of daily closes.
-
-    Commercial use: allowed on all FMP plans including free tier.
-    Uses `timeseries=N` (trading-day count) — works on free tier.
-    Returns adjClose when available, otherwise close.
-    """
-    n_points = _PERIOD_TIMESERIES.get(period, 520)
-
-    resp = httpx.get(
-        f"{_FMP_BASE}/historical-price-full/{ticker}",
-        params={"apikey": fmp_key, "timeseries": n_points},
-        timeout=30.0,
-    )
-    resp.raise_for_status()
-    data = resp.json()
-
-    historical = data.get("historical", [])
-    if not historical:
-        raise ValueError(f"FMP returned no data for '{ticker}'")
-
-    # FMP returns DESC order (newest first) — reverse to ASC
-    historical_asc = list(reversed(historical))
-    dates  = [h["date"][:10]                         for h in historical_asc]
-    closes = [float(h.get("adjClose") or h["close"]) for h in historical_asc]
-    return pd.Series(closes, index=pd.to_datetime(dates), name=ticker)
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -174,39 +138,32 @@ def fetch_portfolio_data(tickers: list[str], period: str = "2y") -> dict:
         # Align tickers on common date index
         closes = pd.DataFrame({t: series_map[t] for t in tickers})
 
-    # ── Secondary: FMP (no TD key, or TD failed) ─────────────────────────────
+    # ── Secondary: Stooq (no TD key, or TD failed) ───────────────────────────
     if closes is None:
-        fmp_key = os.getenv("FMP_API_KEY", "")
-        if not fmp_key:
-            raise ValueError(
-                "Aucune clé API disponible. "
-                "Configurez TWELVE_DATA_API_KEY ou FMP_API_KEY."
-            )
-
-        fmp_series_map: dict[str, pd.Series] = {}
-        fmp_errors: list[str] = []
+        stooq_series_map: dict[str, pd.Series] = {}
+        stooq_errors: list[str] = []
 
         workers = min(4, len(tickers))
         with ThreadPoolExecutor(max_workers=workers) as pool:
-            fmp_futures = {
-                pool.submit(_fmp_fetch_series, t, period, fmp_key): t
+            stooq_futures = {
+                pool.submit(stooq.fetch_series, t, period): t
                 for t in tickers
             }
-            for fut in as_completed(fmp_futures):
-                t = fmp_futures[fut]
+            for fut in as_completed(stooq_futures):
+                t = stooq_futures[fut]
                 try:
-                    fmp_series_map[t] = fut.result()
+                    stooq_series_map[t] = fut.result()
                 except Exception as exc:
-                    fmp_errors.append(f"{t}: {exc}")
+                    stooq_errors.append(f"{t}: {exc}")
 
-        missing_fmp = [t for t in tickers if t not in fmp_series_map]
-        if missing_fmp:
+        missing_stooq = [t for t in tickers if t not in stooq_series_map]
+        if missing_stooq:
             raise ValueError(
-                f"Impossible de récupérer les données pour : {missing_fmp}. "
-                f"Erreurs FMP : {fmp_errors}"
+                f"Impossible de récupérer les données pour : {missing_stooq}. "
+                f"Erreurs Stooq : {stooq_errors}"
             )
 
-        closes = pd.DataFrame({t: fmp_series_map[t] for t in tickers})
+        closes = pd.DataFrame({t: stooq_series_map[t] for t in tickers})
 
     # ── Prétraitement commun ─────────────────────────────────────────────────
     closes = closes.ffill().dropna()

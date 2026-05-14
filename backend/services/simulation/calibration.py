@@ -5,8 +5,8 @@ Calibration des paramètres de simulation depuis les données historiques.
 
 Provider hierarchy:
   Primary:   Twelve Data /time_series — commercial-friendly, async-compatible.
-  Secondary: FMP /v3/historical-price-full — commercial OK, free tier.
-  (yfinance removed — ToS forbids commercial use.)
+  Secondary: Stooq — no API key, global daily OHLCV, no call limit.
+  (FMP and yfinance removed from production paths.)
 
 Calcule :
     mu    : drift annualisé (moyenne des log-rendements × 252)
@@ -22,6 +22,7 @@ import httpx
 import numpy as np
 
 from services.instruments.twelvedata_provider import SYMBOL_MAP, PERIOD_TO_OUTPUTSIZE
+from services import stooq_provider as stooq
 
 TD_BASE      = "https://api.twelvedata.com"
 TRADING_DAYS = 252
@@ -62,44 +63,10 @@ def _td_fetch_closes(ticker: str, period: str, api_key: str) -> np.ndarray:
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# FMP fetch (secondary — when no TD key or TD fails)
+# Stooq fetch (secondary — when no TD key or TD fails)
 # ─────────────────────────────────────────────────────────────────────────────
-
-def _fmp_fetch_closes(ticker: str, period: str) -> np.ndarray:
-    """Synchronous FMP /v3/historical-price-full → close prices array (ASC order).
-
-    Commercial use: allowed on all FMP plans including free tier.
-    Uses `timeseries=N` (trading-day count) — works on free tier.
-    Date-range params (from/to) require a paid plan.
-    Returns adjClose when available, otherwise close.
-    """
-    fmp_key = os.getenv("FMP_API_KEY", "")
-    if not fmp_key:
-        raise ValueError("FMP_API_KEY not configured")
-
-    # Map period → approximate trading-day count
-    _PERIOD_TIMESERIES: dict[str, int] = {
-        "1m": 22,  "3m": 65,  "6m": 130,
-        "1y": 260, "2y": 520, "3y": 780, "5y": 1300,
-    }
-    n_points = _PERIOD_TIMESERIES.get(period, 520)
-
-    resp = httpx.get(
-        f"https://financialmodelingprep.com/api/v3/historical-price-full/{ticker}",
-        params={"apikey": fmp_key, "timeseries": n_points},
-        timeout=30.0,
-    )
-    resp.raise_for_status()
-    data = resp.json()
-
-    historical = data.get("historical", [])
-    if not historical:
-        raise ValueError(f"FMP returned no data for '{ticker}'")
-
-    # FMP returns DESC order (newest first) — reverse to ASC
-    historical_asc = list(reversed(historical))
-    closes = [float(h.get("adjClose") or h["close"]) for h in historical_asc]
-    return np.array(closes)
+# stooq_provider.fetch_closes() is synchronous — called directly in the
+# thread pool (calibrate_ticker is already run via run_in_executor by callers).
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -142,17 +109,17 @@ def calibrate_ticker(ticker: str, period: str = "2y") -> dict:
         except Exception as td_err:
             print(
                 f"[calibration] TD failed for {ticker}: {td_err} "
-                "— falling back to FMP"
+                "— falling back to Stooq"
             )
 
-    # ── Secondary: FMP (no TD key, or TD failed) ─────────────────────────────
+    # ── Secondary: Stooq (no TD key, or TD failed) ───────────────────────────
     if closes is None:
         try:
-            closes = _fmp_fetch_closes(ticker, period)
-        except Exception as fmp_err:
+            closes = stooq.fetch_closes(ticker, period)
+        except Exception as stooq_err:
             raise ValueError(
-                f"Impossible de récupérer les données pour '{ticker}': {fmp_err}"
-            ) from fmp_err
+                f"Impossible de récupérer les données pour '{ticker}': {stooq_err}"
+            ) from stooq_err
 
     if len(closes) < 30:
         raise ValueError(
