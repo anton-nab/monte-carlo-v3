@@ -27,7 +27,8 @@ import httpx
 from datetime import datetime, timedelta
 from typing import Any, Dict, List, Optional
 
-BASE_URL = "https://financialmodelingprep.com/api/v3"
+BASE_URL    = "https://financialmodelingprep.com/api/v3"
+FMP_V4_BASE = "https://financialmodelingprep.com/api/v4"
 
 # Map analyst grade strings → our internal bucket
 _GRADE_MAP: Dict[str, str] = {
@@ -79,6 +80,8 @@ class FMPProvider:
 
     CACHE_TTL      = timedelta(hours=24)
     FINANCIALS_TTL = timedelta(hours=72)   # IS/BS/CF barely change
+    BATCH_QUOTE_TTL = timedelta(hours=1)
+    NEWS_TTL        = timedelta(minutes=30)
 
     def __init__(self, api_key: Optional[str] = None) -> None:
         self._api_key = api_key or os.getenv("FMP_API_KEY", "")
@@ -464,6 +467,83 @@ class FMPProvider:
             }
 
         return {"recommendations": recommendations, "price_targets": price_targets}
+
+    # ─────────────────────────────────────────────────────────────────
+    # Public: Batch price quotes (Phase 8.6)
+    # ─────────────────────────────────────────────────────────────────
+
+    async def get_batch_quotes(
+        self, tickers: List[str], cache_key: str = ""
+    ) -> Dict[str, Dict[str, Any]]:
+        """
+        Batch price quotes via FMP /v3/quote/{symbols}.
+        Returns {ticker: {price, change_pct, volume}}.
+        Chunks requests (100 tickers/call) to respect URL limits.
+        Cache: 60 min (caller supplies cache_key for namespacing).
+        """
+        if not tickers:
+            return {}
+        ck = f"batchq:{cache_key or ','.join(sorted(tickers))}"
+        cached = self._get_cache(ck, ttl=self.BATCH_QUOTE_TTL)
+        if cached is not None:
+            return cached
+
+        result: Dict[str, Dict[str, Any]] = {}
+        chunk_size = 100
+        for i in range(0, len(tickers), chunk_size):
+            chunk = tickers[i : i + chunk_size]
+            rows = await self._get(f"/quote/{','.join(chunk)}")
+            for row in rows:
+                sym = (row.get("symbol") or "").strip()
+                if not sym:
+                    continue
+                try:
+                    result[sym] = {
+                        "price":      round(float(row["price"]), 4),
+                        "change_pct": round(float(row.get("changesPercentage") or 0), 3),
+                        "volume":     int(row["volume"]) if row.get("volume") is not None else None,
+                    }
+                except (KeyError, TypeError, ValueError):
+                    continue
+
+        self._set_cache(ck, result)
+        return result
+
+    # ─────────────────────────────────────────────────────────────────
+    # Public: General market news (Phase 8.6)
+    # ─────────────────────────────────────────────────────────────────
+
+    async def get_general_news(self, limit: int = 10) -> List[Dict[str, Any]]:
+        """
+        General financial market news via FMP /v4/general_news.
+        Not tied to a specific ticker — suitable for home-page news feed.
+        Cache: 30 min.
+        """
+        ck = f"general_news:{limit}"
+        cached = self._get_cache(ck, ttl=self.NEWS_TTL)
+        if cached is not None:
+            return cached
+
+        url    = f"{FMP_V4_BASE}/general_news"
+        params = {"page": 0, "apikey": self._api_key}
+        loop   = asyncio.get_event_loop()
+        rows   = await loop.run_in_executor(None, self._sync_get, url, params)
+
+        result = []
+        for item in rows[:limit]:
+            title = item.get("title") or ""
+            url_  = item.get("url")   or ""
+            if not title or not url_:
+                continue
+            result.append({
+                "title":     title,
+                "publisher": item.get("site") or "",
+                "link":      url_,
+                "published": (item.get("publishedDate") or "")[:16],
+            })
+
+        self._set_cache(ck, result)
+        return result
 
     # ─────────────────────────────────────────────────────────────────
     # Internal: HTTP + cache

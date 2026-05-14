@@ -3,8 +3,10 @@ calibration.py
 --------------
 Calibration des paramètres de simulation depuis les données historiques.
 
-Primary:  Twelve Data REST API — commercial-friendly, no ToS issues.
-Fallback: yfinance — used only when TWELVE_DATA_API_KEY is not set (local dev).
+Provider hierarchy:
+  Primary:   Twelve Data /time_series — commercial-friendly, async-compatible.
+  Secondary: FMP /v3/historical-price-full — commercial OK, free tier.
+  (yfinance removed — ToS forbids commercial use.)
 
 Calcule :
     mu    : drift annualisé (moyenne des log-rendements × 252)
@@ -60,6 +62,48 @@ def _td_fetch_closes(ticker: str, period: str, api_key: str) -> np.ndarray:
 
 
 # ─────────────────────────────────────────────────────────────────────────────
+# FMP fetch (secondary — when no TD key or TD fails)
+# ─────────────────────────────────────────────────────────────────────────────
+
+def _fmp_fetch_closes(ticker: str, period: str) -> np.ndarray:
+    """Synchronous FMP /v3/historical-price-full → close prices array (ASC order).
+
+    Commercial use: allowed on all FMP plans including free tier.
+    Returns adjClose when available, otherwise close.
+    """
+    from datetime import date, timedelta
+
+    fmp_key = os.getenv("FMP_API_KEY", "")
+    if not fmp_key:
+        raise ValueError("FMP_API_KEY not configured")
+
+    _PERIOD_DAYS: dict[str, int] = {
+        "1m": 31, "3m": 91, "6m": 182,
+        "1y": 365, "2y": 730, "3y": 1095, "5y": 1825,
+    }
+    days      = _PERIOD_DAYS.get(period, 730)
+    to_date   = date.today().isoformat()
+    from_date = (date.today() - timedelta(days=days)).isoformat()
+
+    resp = httpx.get(
+        f"https://financialmodelingprep.com/api/v3/historical-price-full/{ticker}",
+        params={"apikey": fmp_key, "from": from_date, "to": to_date},
+        timeout=30.0,
+    )
+    resp.raise_for_status()
+    data = resp.json()
+
+    historical = data.get("historical", [])
+    if not historical:
+        raise ValueError(f"FMP returned no data for '{ticker}'")
+
+    # FMP returns DESC order (newest first) — reverse to ASC
+    historical_asc = list(reversed(historical))
+    closes = [float(h.get("adjClose") or h["close"]) for h in historical_asc]
+    return np.array(closes)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
 # Public API
 # ─────────────────────────────────────────────────────────────────────────────
 
@@ -99,24 +143,17 @@ def calibrate_ticker(ticker: str, period: str = "2y") -> dict:
         except Exception as td_err:
             print(
                 f"[calibration] TD failed for {ticker}: {td_err} "
-                "— falling back to yfinance"
+                "— falling back to FMP"
             )
 
-    # ── Fallback: yfinance (dev-only) ────────────────────────────────────────
+    # ── Secondary: FMP (no TD key, or TD failed) ─────────────────────────────
     if closes is None:
         try:
-            import yfinance as yf  # noqa: PLC0415 — optional fallback
-            hist = yf.Ticker(ticker).history(period=period)
-            if hist.empty:
-                raise ValueError(
-                    f"Aucune donnée trouvée pour '{ticker}'. "
-                    "Vérifiez le symbole (ex. AAPL, BTC-USD, ^GSPC)."
-                )
-            closes = hist["Close"].dropna().values.astype(float)
-        except Exception as yf_err:
+            closes = _fmp_fetch_closes(ticker, period)
+        except Exception as fmp_err:
             raise ValueError(
-                f"Impossible de récupérer les données pour '{ticker}': {yf_err}"
-            ) from yf_err
+                f"Impossible de récupérer les données pour '{ticker}': {fmp_err}"
+            ) from fmp_err
 
     if len(closes) < 30:
         raise ValueError(

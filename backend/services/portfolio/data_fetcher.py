@@ -5,8 +5,10 @@ Récupération et prétraitement des données historiques multi-actifs.
 Retourne les rendements, la matrice de covariance et de corrélation
 nécessaires à l'analyse de portefeuille.
 
-Primary:  Twelve Data REST API — commercial-friendly, concurrent per ticker.
-Fallback: yfinance — used only when TWELVE_DATA_API_KEY is not set (local dev).
+Provider hierarchy:
+  Primary:   Twelve Data /time_series — commercial-friendly, concurrent per ticker.
+  Secondary: FMP /v3/historical-price-full — commercial OK, free tier.
+  (yfinance removed — ToS forbids commercial use.)
 """
 
 from __future__ import annotations
@@ -59,6 +61,49 @@ def _td_fetch_series(ticker: str, outputsize: int, api_key: str) -> pd.Series:
 
     dates  = [v["datetime"][:10] for v in values]          # "YYYY-MM-DD"
     closes = [float(v["close"])   for v in values]
+    return pd.Series(closes, index=pd.to_datetime(dates), name=ticker)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# FMP fetch (secondary — one ticker, synchronous)
+# ─────────────────────────────────────────────────────────────────────────────
+
+_FMP_BASE = "https://financialmodelingprep.com/api/v3"
+
+_PERIOD_DAYS: dict[str, int] = {
+    "1m": 31, "3m": 91, "6m": 182,
+    "1y": 365, "2y": 730, "3y": 1095, "5y": 1825,
+}
+
+
+def _fmp_fetch_series(ticker: str, period: str, fmp_key: str) -> pd.Series:
+    """Synchronous FMP /v3/historical-price-full → pd.Series of daily closes.
+
+    Commercial use: allowed on all FMP plans including free tier.
+    Returns adjClose when available, otherwise close.
+    """
+    from datetime import date, timedelta
+
+    days      = _PERIOD_DAYS.get(period, 730)
+    to_date   = date.today().isoformat()
+    from_date = (date.today() - timedelta(days=days)).isoformat()
+
+    resp = httpx.get(
+        f"{_FMP_BASE}/historical-price-full/{ticker}",
+        params={"apikey": fmp_key, "from": from_date, "to": to_date},
+        timeout=30.0,
+    )
+    resp.raise_for_status()
+    data = resp.json()
+
+    historical = data.get("historical", [])
+    if not historical:
+        raise ValueError(f"FMP returned no data for '{ticker}'")
+
+    # FMP returns DESC order (newest first) — reverse to ASC
+    historical_asc = list(reversed(historical))
+    dates  = [h["date"][:10]                              for h in historical_asc]
+    closes = [float(h.get("adjClose") or h["close"])      for h in historical_asc]
     return pd.Series(closes, index=pd.to_datetime(dates), name=ticker)
 
 
@@ -130,45 +175,39 @@ def fetch_portfolio_data(tickers: list[str], period: str = "2y") -> dict:
         # Align tickers on common date index
         closes = pd.DataFrame({t: series_map[t] for t in tickers})
 
-    # ── Fallback: yfinance (dev / no API key) ────────────────────────────────
+    # ── Secondary: FMP (no TD key, or TD failed) ─────────────────────────────
     if closes is None:
-        try:
-            import yfinance as yf  # noqa: PLC0415 — optional fallback
-            raw = yf.download(
-                tickers,
-                period=period,
-                auto_adjust=True,
-                progress=False,
-                threads=True,
-            )
-            if raw.empty:
-                raise ValueError(f"Aucune donnée récupérée pour : {tickers}")
-
-            if isinstance(raw.columns, pd.MultiIndex):
-                level0    = raw.columns.get_level_values(0).unique().tolist()
-                price_col = next((c for c in ("Close", "Adj Close") if c in level0), None)
-                if price_col is None:
-                    raise ValueError("Colonne 'Close' introuvable dans les données")
-                closes = raw[price_col]
-                if isinstance(closes, pd.Series):
-                    closes = closes.to_frame(name=tickers[0])
-                available  = [t for t in tickers if t in closes.columns]
-                missing_yf = [t for t in tickers if t not in closes.columns]
-                if missing_yf:
-                    raise ValueError(f"Aucune donnée pour : {missing_yf}")
-                closes = closes[available]
-            else:
-                price_col = next(
-                    (c for c in ("Close", "Adj Close") if c in raw.columns), None
-                )
-                if price_col is None:
-                    raise ValueError("Format de données non reconnu")
-                closes = raw[[price_col]].rename(columns={price_col: tickers[0]})
-
-        except Exception as yf_err:
+        fmp_key = os.getenv("FMP_API_KEY", "")
+        if not fmp_key:
             raise ValueError(
-                f"Impossible de récupérer les données de portefeuille : {yf_err}"
-            ) from yf_err
+                "Aucune clé API disponible. "
+                "Configurez TWELVE_DATA_API_KEY ou FMP_API_KEY."
+            )
+
+        fmp_series_map: dict[str, pd.Series] = {}
+        fmp_errors: list[str] = []
+
+        workers = min(4, len(tickers))
+        with ThreadPoolExecutor(max_workers=workers) as pool:
+            fmp_futures = {
+                pool.submit(_fmp_fetch_series, t, period, fmp_key): t
+                for t in tickers
+            }
+            for fut in as_completed(fmp_futures):
+                t = fmp_futures[fut]
+                try:
+                    fmp_series_map[t] = fut.result()
+                except Exception as exc:
+                    fmp_errors.append(f"{t}: {exc}")
+
+        missing_fmp = [t for t in tickers if t not in fmp_series_map]
+        if missing_fmp:
+            raise ValueError(
+                f"Impossible de récupérer les données pour : {missing_fmp}. "
+                f"Erreurs FMP : {fmp_errors}"
+            )
+
+        closes = pd.DataFrame({t: fmp_series_map[t] for t in tickers})
 
     # ── Prétraitement commun ─────────────────────────────────────────────────
     closes = closes.ffill().dropna()

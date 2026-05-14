@@ -196,8 +196,9 @@ async def test_echo(data: dict):
 async def debug_sources():
     """
     Diagnostic: test connectivity to each data source used by the indices service.
-    SP500 → GitHub CSV | NDX/DJI → hardcoded | Prices → yfinance
+    SP500 → GitHub CSV | NDX/DJI → hardcoded | Prices → FMP batch quotes
     """
+    import asyncio
     import httpx as _httpx
     result: dict = {}
 
@@ -219,16 +220,21 @@ async def debug_sources():
     except Exception as e:
         result["sp500_csv"] = {"ok": False, "error": str(e)}
 
-    # ── yfinance spot check ──────────────────────────────────────────────────
+    # ── FMP spot check ───────────────────────────────────────────────────────
     try:
-        import yfinance as yf
-        fi = yf.Ticker("AAPL").fast_info
-        result["yfinance"] = {
-            "ok": True,
-            "AAPL_last_price": getattr(fi, "last_price", None),
+        from services.fmp_provider import get_fmp_provider as _get_fmp
+        fmp = _get_fmp()
+        rows = await asyncio.get_event_loop().run_in_executor(
+            None, fmp._sync_get,
+            "https://financialmodelingprep.com/api/v3/profile/AAPL",
+            {"apikey": fmp._api_key},
+        )
+        result["fmp"] = {
+            "ok": bool(rows),
+            "AAPL_name": rows[0].get("companyName") if rows else None,
         }
     except Exception as e:
-        result["yfinance"] = {"ok": False, "error": str(e)}
+        result["fmp"] = {"ok": False, "error": str(e)}
 
     return result
 
@@ -274,7 +280,7 @@ async def startup_event():
     fred_key = os.getenv("FRED_API_KEY", "")
     td_key   = os.getenv("TWELVE_DATA_API_KEY", "")
     print(f"[*] FRED_API_KEY:        {'SET (' + fred_key[:6] + '...)' if fred_key else 'NOT SET'}")
-    print(f"[*] TWELVE_DATA_API_KEY: {'SET (' + td_key[:6] + '...)' if td_key else 'NOT SET — yfinance fallback active'}")
+    print(f"[*] TWELVE_DATA_API_KEY: {'SET (' + td_key[:6] + '...)' if td_key else 'NOT SET — FMP + Twelve Data only'}")
     print("[*] SP500 source : GitHub CSV (datasets/s-and-p-500-companies)")
     print("[*] NDX/DJI source: hardcoded")
     print("[*] Simulation : GBM / Merton / Heston / GARCH (POST /api/simulate)")
