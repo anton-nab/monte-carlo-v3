@@ -515,8 +515,11 @@ class FMPProvider:
 
     async def get_general_news(self, limit: int = 10) -> List[Dict[str, Any]]:
         """
-        General financial market news via FMP /v4/general_news.
-        Not tied to a specific ticker — suitable for home-page news feed.
+        General financial market news.
+
+        Primary:   FMP /v4/general_news  — requires paid plan (403 on free tier)
+        Secondary: FMP /v3/stock_news    — free tier OK, per-ticker news for
+                   a basket of major market names; deduplicated by title.
         Cache: 30 min.
         """
         ck = f"general_news:{limit}"
@@ -524,23 +527,43 @@ class FMPProvider:
         if cached is not None:
             return cached
 
-        url    = f"{FMP_V4_BASE}/general_news"
-        params = {"page": 0, "apikey": self._api_key}
-        loop   = asyncio.get_event_loop()
-        rows   = await loop.run_in_executor(None, self._sync_get, url, params)
+        loop = asyncio.get_event_loop()
 
-        result = []
-        for item in rows[:limit]:
-            title = item.get("title") or ""
-            url_  = item.get("url")   or ""
-            if not title or not url_:
+        # ── Primary: v4 general news (paid plan) ─────────────────────────────
+        rows = await loop.run_in_executor(
+            None, self._sync_get,
+            f"{FMP_V4_BASE}/general_news",
+            {"page": 0, "apikey": self._api_key},
+        )
+
+        # ── Secondary: v3 stock news for major tickers (free tier OK) ────────
+        if not rows:
+            rows = await loop.run_in_executor(
+                None, self._sync_get,
+                f"{BASE_URL}/stock_news",
+                {
+                    "tickers": "AAPL,MSFT,GOOGL,AMZN,TSLA,NVDA,META,JPM,SPY,QQQ",
+                    "limit":   limit * 3,   # fetch more, deduplicate below
+                    "apikey":  self._api_key,
+                },
+            )
+
+        seen_titles: set = set()
+        result: List[Dict[str, Any]] = []
+        for item in rows:
+            title = (item.get("title") or "").strip()
+            url_  = (item.get("url") or item.get("link") or "").strip()
+            if not title or not url_ or title in seen_titles:
                 continue
+            seen_titles.add(title)
             result.append({
                 "title":     title,
                 "publisher": item.get("site") or "",
                 "link":      url_,
                 "published": (item.get("publishedDate") or "")[:16],
             })
+            if len(result) >= limit:
+                break
 
         self._set_cache(ck, result)
         return result

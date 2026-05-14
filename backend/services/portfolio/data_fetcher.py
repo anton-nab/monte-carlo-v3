@@ -70,9 +70,11 @@ def _td_fetch_series(ticker: str, outputsize: int, api_key: str) -> pd.Series:
 
 _FMP_BASE = "https://financialmodelingprep.com/api/v3"
 
-_PERIOD_DAYS: dict[str, int] = {
-    "1m": 31, "3m": 91, "6m": 182,
-    "1y": 365, "2y": 730, "3y": 1095, "5y": 1825,
+# Map period → approximate trading-day count.
+# Uses `timeseries=N` param (free tier OK) — date-range params require paid plan.
+_PERIOD_TIMESERIES: dict[str, int] = {
+    "1m": 22,  "3m": 65,  "6m": 130,
+    "1y": 260, "2y": 520, "3y": 780, "5y": 1300,
 }
 
 
@@ -80,17 +82,14 @@ def _fmp_fetch_series(ticker: str, period: str, fmp_key: str) -> pd.Series:
     """Synchronous FMP /v3/historical-price-full → pd.Series of daily closes.
 
     Commercial use: allowed on all FMP plans including free tier.
+    Uses `timeseries=N` (trading-day count) — works on free tier.
     Returns adjClose when available, otherwise close.
     """
-    from datetime import date, timedelta
-
-    days      = _PERIOD_DAYS.get(period, 730)
-    to_date   = date.today().isoformat()
-    from_date = (date.today() - timedelta(days=days)).isoformat()
+    n_points = _PERIOD_TIMESERIES.get(period, 520)
 
     resp = httpx.get(
         f"{_FMP_BASE}/historical-price-full/{ticker}",
-        params={"apikey": fmp_key, "from": from_date, "to": to_date},
+        params={"apikey": fmp_key, "timeseries": n_points},
         timeout=30.0,
     )
     resp.raise_for_status()
@@ -102,8 +101,8 @@ def _fmp_fetch_series(ticker: str, period: str, fmp_key: str) -> pd.Series:
 
     # FMP returns DESC order (newest first) — reverse to ASC
     historical_asc = list(reversed(historical))
-    dates  = [h["date"][:10]                              for h in historical_asc]
-    closes = [float(h.get("adjClose") or h["close"])      for h in historical_asc]
+    dates  = [h["date"][:10]                         for h in historical_asc]
+    closes = [float(h.get("adjClose") or h["close"]) for h in historical_asc]
     return pd.Series(closes, index=pd.to_datetime(dates), name=ticker)
 
 
