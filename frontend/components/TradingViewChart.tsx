@@ -8,7 +8,9 @@
  *  - Dashed grid lines (LargeDashed, subtle)
  *  - overlays prop: additional LineSeries (EMA, Bollinger …)
  *  - volumeData prop: histogram at bottom ~30% of chart (in-chart, always synced)
- *  - onVisibleRangeChange: fires debounced unix-second range for sub-panel sync
+ *  - rsiData prop: RSI(14) rendered as a native LWC pane below the main chart
+ *  - macdData prop: MACD(12,26,9) rendered as a native LWC pane below RSI
+ *  All panes share the same time scale → perfect pan/zoom sync, no Recharts hacks.
  *
  * Bug fix: init + data loading combined in ONE effect so the chart is never
  * left blank after a theme toggle (the data effect no longer trails behind).
@@ -20,6 +22,7 @@ import {
   ColorType,
   LineStyle,
   IChartApi,
+  IPaneApi,
   LineData,
   Time,
   AreaData,
@@ -53,7 +56,25 @@ export interface VolumePoint {
   color?: string;
 }
 
+/** RSI data point for LWC pane */
+export interface RsiPoint {
+  date: string;
+  rsi:  number;
+}
+
+/** MACD data point for LWC pane */
+export interface MacdPoint {
+  date:    string;
+  hist:    number;
+  macd?:   number;
+  signal?: number;
+}
+
 export type ChartType = 'line' | 'area' | 'candle';
+
+// Sub-pane heights (pixels)
+const RSI_PANE_H  = 110;
+const MACD_PANE_H = 110;
 
 interface TradingViewChartProps {
   data?:         DataPoint[];
@@ -61,6 +82,7 @@ interface TradingViewChartProps {
   chartType?:    ChartType;
   /** Legacy: false → line, true → area. Ignored when chartType is set. */
   fill?:         boolean;
+  /** Height of the MAIN price chart pane (sub-panes are added on top). */
   height?:       number;
   color?:        string;
   showAxes?:     boolean;
@@ -68,13 +90,12 @@ interface TradingViewChartProps {
   visibleRange?: { from: string; to: string };
   /** Additional LineSeries overlays (EMA, Bollinger …) */
   overlays?:     OverlayLine[];
-  /** Volume histogram drawn at the bottom 30 % of the chart */
+  /** Volume histogram drawn at the bottom 30 % of the main pane */
   volumeData?:   VolumePoint[];
-  /**
-   * Fires with the currently visible time window (unix seconds).
-   * Debounced ~100 ms. Used by the instrument page to sync RSI/MACD panels.
-   */
-  onVisibleRangeChange?: (fromTs: number, toTs: number) => void;
+  /** RSI(14) data — rendered as a separate LWC pane below the main chart */
+  rsiData?:      RsiPoint[];
+  /** MACD(12,26,9) data — rendered as a separate LWC pane below RSI */
+  macdData?:     MacdPoint[];
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -90,13 +111,6 @@ function isDarkTheme(): boolean {
   return typeof document !== 'undefined'
     ? document.documentElement.classList.contains('dark')
     : true;
-}
-
-/** Convert a LWC Time value to a Unix-second timestamp */
-function timeToUnix(t: Time): number {
-  if (typeof t === 'number') return t;
-  // 'YYYY-MM-DD' string → midnight UTC
-  return new Date(String(t) + 'T00:00:00Z').getTime() / 1000;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -115,17 +129,14 @@ export function TradingViewChart({
   visibleRange,
   overlays,
   volumeData,
-  onVisibleRangeChange,
+  rsiData,
+  macdData,
 }: TradingViewChartProps) {
   const resolvedChartType: ChartType =
     chartType ?? (fill === false ? 'line' : 'area');
 
   const containerRef = useRef<HTMLDivElement>(null);
   const chartRef     = useRef<IChartApi | null>(null);
-
-  // Keep the callback ref always current without requiring it as an effect dep
-  const onRangeChangeRef = useRef(onVisibleRangeChange);
-  useEffect(() => { onRangeChangeRef.current = onVisibleRangeChange; });
 
   // ── Theme detection ─────────────────────────────────────────────────────────
   const [dark, setDark] = useState(isDarkTheme);
@@ -137,17 +148,20 @@ export function TradingViewChart({
     return () => obs.disconnect();
   }, []);
 
+  // ── Total container height ───────────────────────────────────────────────────
+  const hasRsi  = (rsiData?.length  ?? 0) > 0;
+  const hasMacd = (macdData?.length ?? 0) > 0;
+  const totalHeight = height + (hasRsi ? RSI_PANE_H : 0) + (hasMacd ? MACD_PANE_H : 0);
+
   // ── Overlay structure key ────────────────────────────────────────────────────
-  // Changes only when overlay count/colors/styles change (not on data refresh).
-  // This determines whether the chart needs full re-creation.
   const overlayKey = (overlays ?? [])
     .map((o) => `${o.color}|${o.lineWidth ?? 1}|${o.lineStyle ?? 0}`)
-    .join(',') + (volumeData != null ? '|vol' : '');
+    .join(',')
+    + (volumeData != null ? '|vol' : '')
+    + (hasRsi  ? '|rsi'  : '')
+    + (hasMacd ? '|macd' : '');
 
   // ── Single combined effect — creates chart, series, AND sets data ───────────
-  // Combining init + data in one effect is the safest approach:
-  // a separate data effect would trail a render cycle behind after a theme toggle,
-  // leaving the chart momentarily blank.
   useEffect(() => {
     if (!containerRef.current) return;
 
@@ -157,12 +171,13 @@ export function TradingViewChart({
 
     const chart = createChart(containerRef.current, {
       width:  containerRef.current.clientWidth,
-      height,
+      height: totalHeight,
       layout: {
-        background:  { type: ColorType.Solid, color: 'transparent' },
+        background:       { type: ColorType.Solid, color: 'transparent' },
         textColor,
-        fontFamily:  'JetBrains Mono, monospace',
-        fontSize:    11,
+        fontFamily:       'JetBrains Mono, monospace',
+        fontSize:         11,
+        attributionLogo:  false,
       },
       grid: {
         vertLines: { color: gridColor, style: LineStyle.LargeDashed },
@@ -179,6 +194,10 @@ export function TradingViewChart({
       handleScale:  showAxes,
     });
     chartRef.current = chart;
+
+    // ── Fix main pane height ─────────────────────────────────────────────────
+    const mainPane: IPaneApi<Time> = chart.panes()[0];
+    mainPane.setHeight(height);
 
     // ── Main series ──────────────────────────────────────────────────────────
     let mainSeries;
@@ -232,7 +251,7 @@ export function TradingViewChart({
       );
     }
 
-    // ── Volume histogram at bottom 30 % ─────────────────────────────────────
+    // ── Volume histogram at bottom 30 % of main pane ─────────────────────────
     if (volumeData != null) {
       const vs = chart.addSeries(HistogramSeries, {
         priceScaleId:     'vol',
@@ -249,6 +268,86 @@ export function TradingViewChart({
       );
     }
 
+    // ── RSI pane ─────────────────────────────────────────────────────────────
+    if (hasRsi && rsiData) {
+      const rsiPane: IPaneApi<Time> = chart.addPane();
+      rsiPane.setHeight(RSI_PANE_H);
+
+      const rsiLine = rsiPane.addSeries(LineSeries, {
+        color:                 '#00d9ff',
+        lineWidth:             1,
+        priceLineVisible:      false,
+        lastValueVisible:      false,
+        crosshairMarkerVisible: false,
+        // Lock Y-axis to [0, 100]
+        autoscaleInfoProvider: () => ({
+          priceRange: { minValue: 0, maxValue: 100 },
+          margins:    { above: 0.05, below: 0.05 },
+        }),
+      });
+      rsiLine.setData(
+        rsiData.map((p) => ({ time: toChartTime(p.date, isIntraday), value: p.rsi })),
+      );
+
+      // Reference lines: overbought / midline / oversold
+      rsiLine.createPriceLine({ price: 70, color: '#ef535088', lineWidth: 1, lineStyle: LineStyle.Dashed, axisLabelVisible: false });
+      rsiLine.createPriceLine({ price: 50, color: '#4b5563',   lineWidth: 1, lineStyle: LineStyle.Dotted,  axisLabelVisible: false });
+      rsiLine.createPriceLine({ price: 30, color: '#26a69a88', lineWidth: 1, lineStyle: LineStyle.Dashed, axisLabelVisible: false });
+
+      // Price scale styling
+      rsiPane.priceScale('right').applyOptions({ borderColor, textColor });
+    }
+
+    // ── MACD pane ─────────────────────────────────────────────────────────────
+    if (hasMacd && macdData) {
+      const macdPane: IPaneApi<Time> = chart.addPane();
+      macdPane.setHeight(MACD_PANE_H);
+
+      // Histogram (green/red bars)
+      const histSeries = macdPane.addSeries(HistogramSeries, {
+        priceLineVisible: false,
+        lastValueVisible: false,
+      });
+      histSeries.setData(
+        macdData.map((p) => ({
+          time:  toChartTime(p.date, isIntraday),
+          value: p.hist,
+          color: p.hist >= 0 ? '#009371aa' : '#b92e25aa',
+        })),
+      );
+
+      // MACD line
+      const macdLine = macdPane.addSeries(LineSeries, {
+        color:                 '#00d9ff',
+        lineWidth:             1,
+        priceLineVisible:      false,
+        lastValueVisible:      false,
+        crosshairMarkerVisible: false,
+      });
+      const macdLineData = macdData
+        .filter((p) => p.macd !== undefined)
+        .map((p) => ({ time: toChartTime(p.date, isIntraday), value: p.macd as number }));
+      macdLine.setData(macdLineData);
+
+      // Signal line
+      const signalLine = macdPane.addSeries(LineSeries, {
+        color:                 '#ffa726',
+        lineWidth:             1,
+        priceLineVisible:      false,
+        lastValueVisible:      false,
+        crosshairMarkerVisible: false,
+      });
+      const signalData = macdData
+        .filter((p) => p.signal !== undefined)
+        .map((p) => ({ time: toChartTime(p.date, isIntraday), value: p.signal as number }));
+      signalLine.setData(signalData);
+
+      // Zero line
+      histSeries.createPriceLine({ price: 0, color: '#6b7280', lineWidth: 1, lineStyle: LineStyle.Solid, axisLabelVisible: false });
+
+      macdPane.priceScale('right').applyOptions({ borderColor, textColor });
+    }
+
     // ── Visible range / fit ──────────────────────────────────────────────────
     if (!isIntraday && visibleRange) {
       chart.timeScale().setVisibleRange({
@@ -259,36 +358,22 @@ export function TradingViewChart({
       chart.timeScale().fitContent();
     }
 
-    // ── Subscribe to visible range for sub-panel sync ────────────────────────
-    // Use rAF instead of setTimeout so sub-panels update every frame during
-    // panning — no visible lag between chart and RSI/MACD panels.
-    let rafId: number | null = null;
-    const handleRangeChange = (range: { from: Time; to: Time } | null) => {
-      if (!range) return;
-      if (rafId !== null) cancelAnimationFrame(rafId);
-      rafId = requestAnimationFrame(() => {
-        onRangeChangeRef.current?.(timeToUnix(range.from), timeToUnix(range.to));
-        rafId = null;
-      });
-    };
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    chart.timeScale().subscribeVisibleTimeRangeChange(handleRangeChange as any);
-
     // ── Resize observer ──────────────────────────────────────────────────────
     const handleResize = () => {
-      if (containerRef.current) chart.applyOptions({ width: containerRef.current.clientWidth });
+      if (containerRef.current) {
+        chart.applyOptions({ width: containerRef.current.clientWidth });
+      }
     };
     window.addEventListener('resize', handleResize);
 
     return () => {
-      if (rafId !== null) cancelAnimationFrame(rafId);
       window.removeEventListener('resize', handleResize);
       chart.remove();
       chartRef.current = null;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [height, color, showAxes, resolvedChartType, isIntraday, dark, overlayKey,
-      data, ohlcData, overlays, volumeData, visibleRange]);
+  }, [height, totalHeight, color, showAxes, resolvedChartType, isIntraday, dark, overlayKey,
+      data, ohlcData, overlays, volumeData, rsiData, macdData, visibleRange]);
 
-  return <div ref={containerRef} style={{ width: '100%', height }} />;
+  return <div ref={containerRef} style={{ width: '100%', height: totalHeight }} />;
 }

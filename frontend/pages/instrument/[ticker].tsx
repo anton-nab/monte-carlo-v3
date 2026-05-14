@@ -10,15 +10,14 @@
  */
 
 import { useRouter } from 'next/router';
-import { useState, useMemo, useCallback, useEffect } from 'react';
+import { useState, useMemo, useEffect } from 'react';
 import useSWR from 'swr';
 import { useWebSocket, lookupPrice, isWsUnsupported } from '../../hooks/useWebSocket';
 import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
   PieChart, Pie, Cell, ReferenceLine,
-  ComposedChart, Line,
 } from 'recharts';
-import { TradingViewChart, ChartType, OverlayLine, VolumePoint } from '../../components/TradingViewChart';
+import { TradingViewChart, ChartType, OverlayLine, VolumePoint, RsiPoint, MacdPoint } from '../../components/TradingViewChart';
 import { fetcher } from '../../lib/fetcher';
 import { Header } from '../../components/Header';
 import { ema, rsi as computeRsi, macd as computeMacd, bollinger } from '../../lib/indicators';
@@ -287,22 +286,6 @@ export default function InstrumentPage() {
     return () => window.removeEventListener('keydown', onKey);
   }, []);
 
-  // ── Zoom synchronisation (TradingViewChart → RSI / MACD panels) ───────────
-  const [chartVisibleRange, setChartVisibleRange] = useState<{
-    from: string; to: string; fromTs: number; toTs: number;
-  } | null>(null);
-  // TradingViewChart already batches via rAF — call setState directly here
-  const handleChartRangeChange = useCallback((fromTs: number, toTs: number) => {
-    setChartVisibleRange({
-      from:   new Date(fromTs * 1000).toISOString().substring(0, 10),
-      to:     new Date(toTs   * 1000).toISOString().substring(0, 10),
-      fromTs,
-      toTs,
-    });
-  }, []);
-  // Reset zoom state when timeframe changes
-  useEffect(() => { setChartVisibleRange(null); }, [selectedLabel]);
-
   const tf = TIMEFRAMES.find(t => t.label === selectedLabel) ?? TIMEFRAMES[9];
 
   // ── Live price via WebSocket (Phase 7) ─────────────────────────────────────
@@ -373,55 +356,6 @@ export default function InstrumentPage() {
     return rawHistorical;
   }, [rawHistorical, tf.resampleHours]);
 
-  /**
-   * Filter sub-panel data to the visible chart window, then append phantom
-   * (empty) entries to match any right-side blank space shown by LWC.
-   *
-   * Key insight: use the VISIBLE bars' own time span to compute bar width,
-   * not an average over the full history. LWC extrapolates empty slots using
-   * the same linear spacing, so our estimate is accurate even across weekends.
-   */
-  const applyRange = useCallback(<T extends { date: string }>(arr: T[]): T[] => {
-    if (arr.length === 0) return arr;
-    if (!chartVisibleRange) return arr;
-
-    const { from, to, toTs } = chartVisibleRange;
-    const filtered = arr.filter(p => {
-      const d = p.date.substring(0, 10);
-      return d >= from && d <= to;
-    });
-    if (filtered.length === 0) return filtered;
-
-    // Right-padding: match LWC's empty bar slots on the right edge
-    const lastDate  = filtered[filtered.length - 1].date.substring(0, 10);
-    const lastBarTs = Date.UTC(
-      +lastDate.slice(0, 4), +lastDate.slice(5, 7) - 1, +lastDate.slice(8, 10),
-    ) / 1000;
-
-    if (toTs > lastBarTs + 3600 && filtered.length >= 2) {
-      // Per-bar interval from the visible window (matches LWC's linear extrapolation)
-      const firstDate  = filtered[0].date.substring(0, 10);
-      const firstBarTs = Date.UTC(
-        +firstDate.slice(0, 4), +firstDate.slice(5, 7) - 1, +firstDate.slice(8, 10),
-      ) / 1000;
-      const barWidthSec = (lastBarTs - firstBarTs) / Math.max(filtered.length - 1, 1);
-
-      if (barWidthSec > 0) {
-        const extraBars = Math.min(
-          Math.max(0, Math.round((toTs - lastBarTs) / barWidthSec) - 1),
-          365, // cap at ~1 year of trading days
-        );
-        if (extraBars > 0) {
-          return [
-            ...filtered,
-            ...Array.from({ length: extraBars }, (_, i) => ({ date: `__pad_${i}` }) as unknown as T),
-          ];
-        }
-      }
-    }
-    return filtered;
-  }, [chartVisibleRange]);
-
   const lineData  = useMemo(() => historical.map(p => ({ date: p.date, value: p.close })), [historical]);
   const ohlcData  = useMemo(() => historical.map(p => ({ date: p.date, open: p.open, high: p.high, low: p.low, close: p.close })), [historical]);
   const visibleRange = useMemo(() => {
@@ -474,45 +408,32 @@ export default function InstrumentPage() {
     }));
   }, [activeIndicators, historical]);
 
-  // Sub-panel data: full dataset (applyRange() is called at render time for zoom sync)
-  const rsiPanelData = useMemo(() =>
+  // Sub-panel data passed directly to TradingViewChart native LWC panes
+  const rsiPanelData = useMemo((): RsiPoint[] =>
     activeIndicators.has('rsi')
-      ? dates.map((d, i) => {
+      ? dates.reduce<RsiPoint[]>((acc, d, i) => {
           const v = rsiVals[i];
-          return { date: d.split('T')[0], rsi: v !== null ? +v.toFixed(2) : undefined };
-        }).filter((p): p is { date: string; rsi: number } => p.rsi !== undefined)
+          if (v !== null) acc.push({ date: d, rsi: +v.toFixed(2) });
+          return acc;
+        }, [])
       : [],
   [activeIndicators, dates, rsiVals]);
 
-  const macdPanelData = useMemo(() =>
+  const macdPanelData = useMemo((): MacdPoint[] =>
     activeIndicators.has('macd')
-      ? dates.map((d, i) => {
+      ? dates.reduce<MacdPoint[]>((acc, d, i) => {
           const h = macdVals.hist[i];
-          if (h === null) return null;
-          return {
-            date:   d.split('T')[0],
+          if (h === null) return acc;
+          acc.push({
+            date:   d,
+            hist:   +(h as number).toFixed(4),
             macd:   macdVals.macd[i]   !== null ? +(macdVals.macd[i]   as number).toFixed(4) : undefined,
             signal: macdVals.signal[i] !== null ? +(macdVals.signal[i] as number).toFixed(4) : undefined,
-            hist:   +(h as number).toFixed(4),
-          };
-        }).filter(Boolean) as { date: string; macd?: number; signal?: number; hist: number }[]
+          });
+          return acc;
+        }, [])
       : [],
   [activeIndicators, dates, macdVals]);
-
-  // Fixed Y-domain for MACD — computed once from the FULL dataset so zooming
-  // in never causes the axis to auto-scale to a tiny local range.
-  // Symmetric around 0 (zero-centered) since MACD oscillates around zero.
-  const macdYDomain = useMemo((): [number, number] => {
-    if (macdPanelData.length === 0) return [-1, 1];
-    let absMax = 0.001;
-    for (const p of macdPanelData) {
-      if (p.hist   !== undefined) absMax = Math.max(absMax, Math.abs(p.hist));
-      if (p.macd   !== undefined) absMax = Math.max(absMax, Math.abs(p.macd));
-      if (p.signal !== undefined) absMax = Math.max(absMax, Math.abs(p.signal));
-    }
-    const padded = absMax * 1.15; // 15 % headroom above extreme values
-    return [-padded, padded];
-  }, [macdPanelData]);
 
   // ── FOMO ───────────────────────────────────────────────────────────────────
   const fomoResult = useMemo(
@@ -679,55 +600,10 @@ export default function InstrumentPage() {
                         visibleRange={visibleRange}
                         overlays={tvOverlays.length ? tvOverlays : undefined}
                         volumeData={tvVolumeData.length ? tvVolumeData : undefined}
-                        onVisibleRangeChange={handleChartRangeChange} />
+                        rsiData={rsiPanelData.length ? rsiPanelData : undefined}
+                        macdData={macdPanelData.length ? macdPanelData : undefined} />
                     ) : <div className="h-64 flex items-center justify-center text-terminal-textMuted">No data</div>}
                   </div>
-
-                  {/* FS RSI sub-panel */}
-                  {activeIndicators.has('rsi') && rsiPanelData.length > 0 && (
-                    <div className="mt-2 bg-terminal-bg rounded p-2">
-                      <div className="text-2xs text-terminal-textDim mb-1 font-mono">RSI (14)</div>
-                      <ResponsiveContainer width="100%" height={110}>
-                        <ComposedChart data={applyRange(rsiPanelData)} margin={{ top: 2, right: 0, bottom: 0, left: 0 }}>
-                          <CartesianGrid strokeDasharray="2 6" stroke="rgba(42,48,64,0.4)" vertical={false} />
-                          <XAxis dataKey="date" hide />
-                          <YAxis orientation="right" domain={[0, 100]} tick={{ fill: '#9ca3af', fontSize: 9 }} width={64} tickCount={3} />
-                          <Tooltip contentStyle={{ background: '#1a2035', border: '1px solid #2a3040', borderRadius: 4, fontSize: 10 }} labelStyle={{ color: '#7a8294' }}
-                            formatter={(v: unknown) => [typeof v === 'number' ? v.toFixed(1) : '—', 'RSI']} />
-                          <ReferenceLine y={70} stroke="#ef5350" strokeDasharray="3 3" strokeOpacity={0.6} />
-                          <ReferenceLine y={30} stroke="#26a69a" strokeDasharray="3 3" strokeOpacity={0.6} />
-                          <ReferenceLine y={50} stroke="#4b5563" strokeDasharray="2 4" strokeOpacity={0.4} />
-                          <Line type="monotone" dataKey="rsi" stroke="#00d9ff" strokeWidth={1.5} dot={false} isAnimationActive={false} />
-                        </ComposedChart>
-                      </ResponsiveContainer>
-                    </div>
-                  )}
-
-                  {/* FS MACD sub-panel */}
-                  {activeIndicators.has('macd') && macdPanelData.length > 0 && (() => {
-                    const d = applyRange(macdPanelData);
-                    return (
-                      <div className="mt-2 bg-terminal-bg rounded p-2">
-                        <div className="text-2xs text-terminal-textDim mb-1 font-mono">MACD (12, 26, 9)</div>
-                        <ResponsiveContainer width="100%" height={110}>
-                          <ComposedChart data={d} margin={{ top: 2, right: 0, bottom: 0, left: 0 }}>
-                            <CartesianGrid strokeDasharray="2 6" stroke="rgba(42,48,64,0.4)" vertical={false} />
-                            <XAxis dataKey="date" hide />
-                            <YAxis orientation="right" tick={{ fill: '#9ca3af', fontSize: 9 }} width={64} tickFormatter={v => v.toFixed(2)} />
-                            <Tooltip contentStyle={{ background: '#1a2035', border: '1px solid #2a3040', borderRadius: 4, fontSize: 10 }} labelStyle={{ color: '#7a8294' }}
-                              formatter={(v: unknown, name: unknown) => [typeof v === 'number' ? v.toFixed(4) : '—', name === 'hist' ? 'Hist' : name === 'macd' ? 'MACD' : 'Signal']} />
-                            <ReferenceLine y={0} stroke="#4b5563" strokeOpacity={0.5} />
-                            <Bar dataKey="hist" isAnimationActive={false}>
-                              {d.map((e, i) => <Cell key={i} fill={(e.hist ?? 0) >= 0 ? '#009371' : '#b92e25'} />)}
-                            </Bar>
-                            <Line type="monotone" dataKey="macd"   stroke="#00d9ff" strokeWidth={1.5} dot={false} isAnimationActive={false} />
-                            <Line type="monotone" dataKey="signal" stroke="#ffa726" strokeWidth={1}   dot={false} isAnimationActive={false} />
-                          </ComposedChart>
-                        </ResponsiveContainer>
-                      </div>
-                    );
-                  })()}
-
                 </div>
               </div>
             )}
@@ -807,58 +683,12 @@ export default function InstrumentPage() {
                         visibleRange={visibleRange}
                         overlays={tvOverlays.length ? tvOverlays : undefined}
                         volumeData={tvVolumeData.length ? tvVolumeData : undefined}
-                        onVisibleRangeChange={handleChartRangeChange} />
+                        rsiData={rsiPanelData.length ? rsiPanelData : undefined}
+                        macdData={macdPanelData.length ? macdPanelData : undefined} />
                     ) : (
                       <div className="h-96 flex items-center justify-center text-terminal-textMuted">No chart data</div>
                     )}
                   </div>
-
-                  {/* RSI sub-panel */}
-                  {activeIndicators.has('rsi') && rsiPanelData.length > 0 && (
-                    <div className="mt-2 bg-terminal-bg rounded p-2">
-                      <div className="text-2xs text-terminal-textDim mb-1 font-mono">RSI (14)</div>
-                      <ResponsiveContainer width="100%" height={110}>
-                        <ComposedChart data={applyRange(rsiPanelData)} margin={{ top: 2, right: 0, bottom: 0, left: 0 }}>
-                          <CartesianGrid strokeDasharray="2 6" stroke="rgba(42,48,64,0.4)" vertical={false} />
-                          <XAxis dataKey="date" hide />
-                          <YAxis orientation="right" domain={[0, 100]} tick={{ fill: '#9ca3af', fontSize: 9 }} width={64} tickCount={3} />
-                          <Tooltip contentStyle={{ background: '#1a2035', border: '1px solid #2a3040', borderRadius: 4, fontSize: 10 }}
-                            labelStyle={{ color: '#7a8294' }} formatter={(v: unknown) => [typeof v === 'number' ? v.toFixed(1) : '—', 'RSI']} />
-                          <ReferenceLine y={70} stroke="#ef5350" strokeDasharray="3 3" strokeOpacity={0.6} />
-                          <ReferenceLine y={30} stroke="#26a69a" strokeDasharray="3 3" strokeOpacity={0.6} />
-                          <ReferenceLine y={50} stroke="#4b5563" strokeDasharray="2 4" strokeOpacity={0.4} />
-                          <Line type="monotone" dataKey="rsi" stroke="#00d9ff" strokeWidth={1.5} dot={false} isAnimationActive={false} />
-                        </ComposedChart>
-                      </ResponsiveContainer>
-                    </div>
-                  )}
-
-                  {/* MACD sub-panel */}
-                  {activeIndicators.has('macd') && macdPanelData.length > 0 && (() => {
-                    const d = applyRange(macdPanelData);
-                    return (
-                      <div className="mt-2 bg-terminal-bg rounded p-2">
-                        <div className="text-2xs text-terminal-textDim mb-1 font-mono">MACD (12, 26, 9)</div>
-                        <ResponsiveContainer width="100%" height={110}>
-                          <ComposedChart data={d} margin={{ top: 2, right: 0, bottom: 0, left: 0 }}>
-                            <CartesianGrid strokeDasharray="2 6" stroke="rgba(42,48,64,0.4)" vertical={false} />
-                            <XAxis dataKey="date" hide />
-                            <YAxis orientation="right" domain={macdYDomain} tick={{ fill: '#9ca3af', fontSize: 9 }} width={64} tickFormatter={v => v.toFixed(2)} />
-                            <Tooltip contentStyle={{ background: '#1a2035', border: '1px solid #2a3040', borderRadius: 4, fontSize: 10 }}
-                              labelStyle={{ color: '#7a8294' }}
-                              formatter={(v: unknown, name: unknown) => [typeof v === 'number' ? v.toFixed(4) : '—', name === 'hist' ? 'Hist' : name === 'macd' ? 'MACD' : 'Signal']} />
-                            <ReferenceLine y={0} stroke="#4b5563" strokeOpacity={0.5} />
-                            <Bar dataKey="hist" isAnimationActive={false} maxBarSize={6}>
-                              {d.map((e, i) => <Cell key={i} fill={(e.hist ?? 0) >= 0 ? '#009371' : '#b92e25'} />)}
-                            </Bar>
-                            <Line type="monotone" dataKey="macd"   stroke="#00d9ff" strokeWidth={1.5} dot={false} isAnimationActive={false} />
-                            <Line type="monotone" dataKey="signal" stroke="#ffa726" strokeWidth={1}   dot={false} isAnimationActive={false} />
-                          </ComposedChart>
-                        </ResponsiveContainer>
-                      </div>
-                    );
-                  })()}
-
                 </>
               )}
 
