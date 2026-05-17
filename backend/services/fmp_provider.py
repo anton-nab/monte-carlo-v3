@@ -577,8 +577,8 @@ class FMPProvider:
         """
         Build screener universe: S&P 500 constituents + full batch quotes.
 
-        Uses /v3/quote/{batch} which returns price, changesPercentage,
-        volume, pe, beta, marketCap, lastDiv — all on the free tier.
+        Constituents come from the free GitHub CSV (same source as /indices/SP500).
+        Quotes come from FMP /v3/quote batch — includes PE, beta, marketCap.
         Cache key is filter-independent (30 min) so all filter combinations
         reuse the same cached universe.
         """
@@ -587,15 +587,18 @@ class FMPProvider:
         if cached is not None:
             return cached
 
-        # Step 1: S&P 500 constituents → sector + name (cached 24 h)
-        constituents = await self.get_index_constituents("SP500")
-        sector_map   = {c["ticker"]: c.get("sector", "")      for c in constituents}
-        name_map     = {c["ticker"]: c.get("name", "")         for c in constituents}
-        industry_map = {c["ticker"]: c.get("sub_sector", "")  for c in constituents}
+        # Step 1: S&P 500 constituents from GitHub CSV (free, 24h cache)
+        from services.indices.csv_provider import CsvProvider
+        csv = CsvProvider()
+        constituents = await csv.get_constituents("SP500")
+
+        sector_map   = {c["ticker"]: c.get("sector", "")  for c in constituents}
+        name_map     = {c["ticker"]: c.get("name", "")    for c in constituents}
+        industry_map = {c["ticker"]: c.get("sector", "")  for c in constituents}
         tickers = [c["ticker"] for c in constituents if c.get("ticker")]
 
         if not tickers:
-            print("[FMP screener] SP500 constituents returned empty — check FMP key")
+            print("[FMP screener] SP500 CSV returned empty")
             return []
 
         # Step 2: Batch quotes (100 per call) → price, PE, beta, marketCap …
