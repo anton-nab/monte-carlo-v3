@@ -110,7 +110,8 @@ async def get_screener(
     stocks.sort(key=key_fn, reverse=reverse)
 
     return {
-        "count":   len(stocks),
+        "count":       len(stocks),
+        "has_fmp_key": bool(fmp._api_key),
         "filters": {
             "sector":         sector,
             "exchange":       fmp_exchange,

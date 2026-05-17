@@ -601,11 +601,9 @@ class FMPProvider:
             return cached
 
         params: Dict[str, Any] = {
-            "apikey":            self._api_key,
-            "isEtf":             "false",
-            "isActivelyTrading": "true",
-            "country":           "US",
-            "limit":             limit,
+            "apikey": self._api_key,
+            "isEtf":  "false",
+            "limit":  limit,
         }
         if sector:
             params["sector"] = sector
@@ -631,6 +629,7 @@ class FMPProvider:
             f"{BASE_URL}/stock-screener",
             params,
         )
+        print(f"[FMP screener] params={params} → {len(raw)} rows")
 
         # Enrich with live quotes for PE + change% (batch, up to 100)
         symbols = [
@@ -713,11 +712,16 @@ class FMPProvider:
                     return data
                 if isinstance(data, dict):
                     if "Error Message" in data:
-                        print(f"[FMP] API error: {data['Error Message']}")
+                        print(f"[FMP] API error ({url}): {data['Error Message']}")
+                        return []
+                    if "message" in data:
+                        print(f"[FMP] API message ({url}): {data['message']}")
                         return []
                     # Some endpoints return {"symbol": ..., "data": [...]}
                     if "data" in data and isinstance(data["data"], list):
                         return data["data"]
+                    # Log unexpected dict so we can debug
+                    print(f"[FMP] Unexpected dict response ({url}): {list(data.keys())}")
                 return []
         except Exception as exc:
             print(f"[FMP] Request failed ({url}): {exc}")
