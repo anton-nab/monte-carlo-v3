@@ -13,6 +13,7 @@ import { useEffect, useState, useMemo } from 'react';
 import Head from 'next/head';
 import Link from 'next/link';
 import { Header } from '@/components/Header';
+import { MacroIndicator } from '@/components/MacroIndicator';
 import { apiFetch } from '@/lib/api';
 import { useWebSocket, lookupPrice } from '@/hooks/useWebSocket';
 
@@ -174,11 +175,55 @@ function NewsCard({ item }: { item: NewsItem }) {
 // ─────────────────────────────────────────────────────────────────────────────
 
 const MODULES = [
-  { href: '/dashboard', emoji: '▦',  title: 'Macro',      desc: '17 indicateurs — Fed, BCE, OCDE, FRED',           color: '#00d9ff' },
   { href: '/indices',   emoji: '◫',  title: 'Indices',    desc: 'SP500, NASDAQ, DAX, Nikkei — heatmap sectorielle', color: '#26a69a' },
   { href: '/simulate',  emoji: '∿',  title: 'Simulate',   desc: 'GBM · Merton · Heston · GARCH — calibration auto', color: '#ffa726' },
   { href: '/compare',   emoji: '⊕',  title: 'Compare',    desc: '4 modèles simultanés + stress géopolitique',       color: '#ce93d8' },
   { href: '/portfolio', emoji: '◈',  title: 'Portfolio',  desc: 'Markowitz · frontière efficiente · Monte Carlo',   color: '#81c784' },
+  { href: '/backtest',  emoji: '⟲',  title: 'Backtest',   desc: 'Rolling-window MC · Sharpe · VaR coverage',        color: '#00d9ff' },
+];
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Macro config (same as former /dashboard)
+// ─────────────────────────────────────────────────────────────────────────────
+
+const MACRO_COUNTRIES = [
+  {
+    code: 'us', flag: '🇺🇸', name: 'United States',
+    indicators: [
+      { indicator: 'inflation',     title: 'Inflation (CPI)',    decimals: 2 },
+      { indicator: 'unemployment',  title: 'Unemployment',       decimals: 1 },
+      { indicator: 'fed_rate',      title: 'Fed Funds Rate',     decimals: 2 },
+      { indicator: 'gdp',           title: 'Real GDP Growth',    decimals: 2 },
+      { indicator: 'yield_10y',     title: '10Y Treasury Yield', decimals: 3 },
+    ],
+  },
+  {
+    code: 'eu', flag: '🇪🇺', name: 'Eurozone',
+    indicators: [
+      { indicator: 'inflation',     title: 'Inflation (HICP)',   decimals: 2 },
+      { indicator: 'unemployment',  title: 'Unemployment',       decimals: 1 },
+      { indicator: 'ecb_rate',      title: 'ECB Deposit Rate',   decimals: 2 },
+      { indicator: 'gdp',           title: 'Real GDP',           decimals: 0 },
+      { indicator: 'bund_10y',      title: 'Bund 10Y Yield',     decimals: 3 },
+    ],
+  },
+  {
+    code: 'gb', flag: '🇬🇧', name: 'United Kingdom',
+    indicators: [
+      { indicator: 'inflation',     title: 'Inflation (CPI)',    decimals: 2 },
+      { indicator: 'unemployment',  title: 'Unemployment',       decimals: 1 },
+      { indicator: 'gdp',           title: 'Real GDP',           decimals: 0 },
+      { indicator: 'gilt_10y',      title: 'Gilt 10Y Yield',     decimals: 3 },
+    ],
+  },
+  {
+    code: 'jp', flag: '🇯🇵', name: 'Japan',
+    indicators: [
+      { indicator: 'inflation',     title: 'Inflation (CPI)',    decimals: 2 },
+      { indicator: 'unemployment',  title: 'Unemployment',       decimals: 1 },
+      { indicator: 'gdp',           title: 'Real GDP',           decimals: 0 },
+    ],
+  },
 ];
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -394,6 +439,34 @@ export default function Home() {
             </div>
           </section>
         )}
+
+        {/* ── Global Macro ────────────────────────────────────────── */}
+        <section>
+          <h2 className="text-2xs uppercase tracking-widest text-terminal-textDim mb-4">
+            Global Macro — FRED · BCE · OCDE
+          </h2>
+          <div className="space-y-5">
+            {MACRO_COUNTRIES.map((country) => (
+              <div key={country.code}>
+                <h3 className="text-xs font-semibold text-terminal-textMuted mb-2 flex items-center gap-2">
+                  <span>{country.flag}</span>
+                  <span>{country.name}</span>
+                </h3>
+                <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-2">
+                  {country.indicators.map((cfg) => (
+                    <MacroIndicator
+                      key={`${country.code}-${cfg.indicator}`}
+                      country={country.code}
+                      indicator={cfg.indicator}
+                      title={cfg.title}
+                      decimals={cfg.decimals}
+                    />
+                  ))}
+                </div>
+              </div>
+            ))}
+          </div>
+        </section>
 
         {/* ── Modules ────────────────────────────────────────────── */}
         <section>

@@ -25,14 +25,6 @@ const IconHome = () => (
   </svg>
 );
 
-const IconMacro = () => (
-  <svg width="14" height="14" viewBox="0 0 24 24" fill="none"
-    stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-    <path d="M3 3v18h18" />
-    <path d="M7 16l4-7 4 5 3-4" />
-  </svg>
-);
-
 const IconSimulate = () => (
   <svg width="14" height="14" viewBox="0 0 24 24" fill="none"
     stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -68,7 +60,6 @@ const IconBacktest = () => (
 
 const NAV_ITEMS: NavItem[] = [
   { href: '/',          label: 'Home',      icon: <IconHome />      },
-  { href: '/dashboard', label: 'Macro',     icon: <IconMacro />     },
   { href: '/simulate',  label: 'Simulate',  icon: <IconSimulate />  },
   { href: '/compare',   label: 'Compare',   icon: <IconCompare />   },
   { href: '/portfolio', label: 'Portfolio', icon: <IconPortfolio /> },
