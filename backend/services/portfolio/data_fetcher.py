@@ -16,6 +16,7 @@ from __future__ import annotations
 import os
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
+import httpx
 import numpy as np
 import pandas as pd
 
