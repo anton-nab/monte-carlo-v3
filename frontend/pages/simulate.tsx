@@ -115,10 +115,22 @@ interface SimResult {
 type ModelId = 'gbm' | 'merton' | 'heston' | 'garch';
 
 const MODELS: { id: ModelId; label: string; desc: string }[] = [
-  { id: 'gbm',    label: 'GBM',    desc: 'Geometric Brownian Motion — modèle de base. µ et σ constants, trajectoires log-normales.' },
-  { id: 'merton', label: 'Merton', desc: 'Jump-Diffusion — ajoute des sauts brusques (crash, news). Queues de distribution plus épaisses.' },
-  { id: 'heston', label: 'Heston', desc: 'Volatilité stochastique — σ évolue dans le temps avec mean-reversion. Modèle le plus réaliste.' },
-  { id: 'garch',  label: 'GARCH',  desc: 'Bootstrap GARCH(1,1) — clustering de volatilité (les chocs créent des chocs). Calibré sur les résidus historiques.' },
+  {
+    id: 'gbm', label: 'GBM',
+    desc: 'Geometric Brownian Motion — le modèle de Black-Scholes. Drift µ et volatilité σ sont constants dans le temps. Distribution log-normale : jamais de prix négatif, trajectoires lisses et continues. Idéal comme référence de base pour comparer les autres modèles.',
+  },
+  {
+    id: 'merton', label: 'Merton',
+    desc: 'Jump-Diffusion de Merton — GBM + sauts brusques aléatoires (processus de Poisson). Modélise les chocs soudains : publications trimestrielles, crises, upgrades/downgrades. Queues de distribution plus épaisses qu\'un GBM pur. Paramètres avancés : λ (fréquence des sauts/an), jump mean (taille moyenne), jump σ (dispersion).',
+  },
+  {
+    id: 'heston', label: 'Heston',
+    desc: 'Volatilité stochastique de Heston — σ n\'est plus constante mais évolue aléatoirement autour d\'une moyenne long-terme θ, avec une vitesse de retour κ. Capture le clustering de volatilité et le smile d\'options. Plus réaliste sur horizons > 6 mois. Paramètres : κ (vitesse de mean-reversion), σᵥ (volatilité de la vol), ρ (corrélation prix-vol, généralement négatif).',
+  },
+  {
+    id: 'garch', label: 'GARCH',
+    desc: 'Bootstrap GARCH(1,1) — calibré sur les résidus historiques réels. Simule le clustering de volatilité : les périodes agitées se regroupent, les chocs appellent les chocs. Dépend moins de µ/σ théoriques et plus de la structure temporelle des rendements passés. Nécessite un historique suffisant (≥ 6 mois).',
+  },
 ];
 
 const HORIZONS: { label: string; days: number }[] = [
@@ -141,14 +153,26 @@ const pct = (v: number, digits = 1) => `${(v * 100).toFixed(digits)}%`;
 const fmt = (v: number, digits = 2) =>
   v.toLocaleString('en-US', { minimumFractionDigits: digits, maximumFractionDigits: digits });
 
-/** Petit cercle ⓘ avec tooltip natif au survol */
+/** Badge "?" avec tooltip personnalisé visible au survol */
 function InfoBadge({ text }: { text: string }) {
   return (
-    <span
-      title={text}
-      className="inline-flex items-center justify-center w-3.5 h-3.5 rounded-full border border-terminal-textDim text-terminal-textDim text-[9px] cursor-help ml-1 select-none hover:border-terminal-cyan hover:text-terminal-cyan transition-colors"
-    >
-      i
+    <span className="relative inline-flex group ml-1" style={{ verticalAlign: 'middle' }}>
+      <span className="inline-flex items-center justify-center w-4 h-4 rounded-full
+                       border border-terminal-textDim text-terminal-textDim text-[9px]
+                       cursor-help select-none
+                       group-hover:border-terminal-cyan group-hover:text-terminal-cyan
+                       transition-colors">
+        ?
+      </span>
+      <span className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2
+                       w-64 bg-terminal-bg border border-terminal-border rounded-lg
+                       px-3 py-2 text-xs text-terminal-textMuted leading-relaxed
+                       shadow-xl z-50
+                       opacity-0 pointer-events-none group-hover:opacity-100
+                       transition-opacity duration-150
+                       whitespace-normal text-left font-normal">
+        {text}
+      </span>
     </span>
   );
 }

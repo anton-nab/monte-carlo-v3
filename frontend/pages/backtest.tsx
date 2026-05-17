@@ -86,10 +86,22 @@ type ModelId = 'gbm' | 'merton' | 'heston' | 'garch';
 // ─────────────────────────────────────────────────────────────────────────────
 
 const MODELS: { id: ModelId; label: string; desc: string }[] = [
-  { id: 'gbm',    label: 'GBM',    desc: 'Geometric Brownian Motion — drift & vol constants.' },
-  { id: 'merton', label: 'Merton', desc: 'Jump-Diffusion — adds sudden price jumps.' },
-  { id: 'heston', label: 'Heston', desc: 'Stochastic volatility — vol itself is random (mean-reverting).' },
-  { id: 'garch',  label: 'GARCH',  desc: 'GARCH(1,1) bootstrap — volatility clustering.' },
+  {
+    id: 'gbm', label: 'GBM',
+    desc: 'Geometric Brownian Motion — le modèle de Black-Scholes. Drift µ et volatilité σ sont constants dans le temps. Distribution log-normale : jamais de prix négatif, trajectoires lisses et continues. Idéal comme référence de base pour comparer les autres modèles.',
+  },
+  {
+    id: 'merton', label: 'Merton',
+    desc: 'Jump-Diffusion de Merton — GBM + sauts brusques aléatoires (processus de Poisson). Modélise les chocs soudains : publications trimestrielles, crises, upgrades/downgrades. Queues de distribution plus épaisses qu\'un GBM pur. Produit en général une VaR plus élevée.',
+  },
+  {
+    id: 'heston', label: 'Heston',
+    desc: 'Volatilité stochastique de Heston — σ n\'est plus constante mais évolue aléatoirement autour d\'une moyenne long-terme, avec un retour à la moyenne (kappa=2, rho=−0.7). Capture le clustering de volatilité et le smile d\'options. Modèle le plus réaliste pour les indices sur horizons longs.',
+  },
+  {
+    id: 'garch', label: 'GARCH',
+    desc: 'Bootstrap GARCH(1,1) — calibré sur les résidus historiques réels. Simule le clustering de volatilité : les crises appellent les crises. Dépend peu de µ/σ théoriques ; reproduit la dynamique temporelle des rendements passés. Peut être plus lent sur les longues séries.',
+  },
 ];
 
 const PERIODS = ['3y', '5y', '10y', 'max'];
@@ -125,15 +137,26 @@ const C_GRID   = 'var(--chart-grid)';
 const pct   = (v: number, d = 1) => `${(v * 100).toFixed(d)}%`;
 const round = (v: number, d = 2) => v.toFixed(d);
 
+/** Badge "?" avec tooltip personnalisé visible au survol */
 function InfoBadge({ text }: { text: string }) {
   return (
-    <span
-      title={text}
-      className="inline-flex items-center justify-center w-3.5 h-3.5 rounded-full border border-terminal-textDim
-                 text-terminal-textDim text-[9px] cursor-help ml-1 select-none
-                 hover:border-terminal-cyan hover:text-terminal-cyan transition-colors"
-    >
-      i
+    <span className="relative inline-flex group ml-1" style={{ verticalAlign: 'middle' }}>
+      <span className="inline-flex items-center justify-center w-4 h-4 rounded-full
+                       border border-terminal-textDim text-terminal-textDim text-[9px]
+                       cursor-help select-none
+                       group-hover:border-terminal-cyan group-hover:text-terminal-cyan
+                       transition-colors">
+        ?
+      </span>
+      <span className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2
+                       w-64 bg-terminal-bg border border-terminal-border rounded-lg
+                       px-3 py-2 text-xs text-terminal-textMuted leading-relaxed
+                       shadow-xl z-50
+                       opacity-0 pointer-events-none group-hover:opacity-100
+                       transition-opacity duration-150
+                       whitespace-normal text-left font-normal">
+        {text}
+      </span>
     </span>
   );
 }
@@ -363,12 +386,14 @@ export default function BacktestPage() {
                     key={mod.id}
                     active={model === mod.id}
                     onClick={() => setModel(mod.id)}
-                    title={mod.desc}
                   >
                     {mod.label}
                   </SegBtn>
                 ))}
               </div>
+              <p className="text-xs text-terminal-textDim mt-1.5 max-w-xl leading-relaxed">
+                {MODELS.find((m) => m.id === model)?.desc}
+              </p>
             </div>
 
             {/* Lookback + Horizon + N sims */}
@@ -454,8 +479,11 @@ export default function BacktestPage() {
                   <span className="text-terminal-textDim">Model </span>
                   <span className="font-mono font-semibold text-terminal-text">{result.model.toUpperCase()}</span>
                 </div>
-                <div>
-                  <span className="text-terminal-textDim">µ (ann.) </span>
+                <div className="flex items-center gap-1">
+                  <span className="text-terminal-textDim flex items-center">
+                    µ (ann.)
+                    <InfoBadge text="µ (mu) — drift annualisé. Rendement moyen attendu par an, calibré sur l'ensemble de la période historique via les log-rendements journaliers × 252. Représente la tendance directionnelle du modèle : +15% signifie que le modèle suppose une hausse moyenne de 15%/an." />
+                  </span>
                   <span
                     className="num font-semibold"
                     style={{ color: result.calibration.mu_pct >= 0 ? C_GREEN : C_RED }}
@@ -463,26 +491,38 @@ export default function BacktestPage() {
                     {result.calibration.mu_pct >= 0 ? '+' : ''}{result.calibration.mu_pct.toFixed(1)}%
                   </span>
                 </div>
-                <div>
-                  <span className="text-terminal-textDim">σ (ann.) </span>
+                <div className="flex items-center gap-1">
+                  <span className="text-terminal-textDim flex items-center">
+                    σ (ann.)
+                    <InfoBadge text="σ (sigma) — volatilité annualisée. Écart-type des log-rendements journaliers multiplié par √252. Mesure l'amplitude typique des fluctuations : 20% est courant pour une action, 60-80% pour une crypto. Plus σ est élevé, plus les trajectoires simulées sont dispersées." />
+                  </span>
                   <span className="num font-semibold text-warn">
                     {result.calibration.sigma_pct.toFixed(1)}%
                   </span>
                 </div>
-                <div>
-                  <span className="text-terminal-textDim">Last price </span>
+                <div className="flex items-center gap-1">
+                  <span className="text-terminal-textDim flex items-center">
+                    Last price
+                    <InfoBadge text="Dernier cours de clôture ajusté disponible dans les données yfinance. Utilisé comme S₀ (prix initial) pour la dernière fenêtre de simulation." />
+                  </span>
                   <span className="num font-semibold">
                     ${result.calibration.S0.toLocaleString('en-US', {
                       minimumFractionDigits: 2, maximumFractionDigits: 2,
                     })}
                   </span>
                 </div>
-                <div>
-                  <span className="text-terminal-textDim">Obs. </span>
+                <div className="flex items-center gap-1">
+                  <span className="text-terminal-textDim flex items-center">
+                    Obs.
+                    <InfoBadge text="Nombre total de jours de trading disponibles dans l'historique. Utilisé pour la calibration globale (µ et σ du strip) et pour déterminer le nombre de fenêtres possibles." />
+                  </span>
                   <span className="num font-semibold">{result.calibration.n_obs}</span>
                 </div>
-                <div>
-                  <span className="text-terminal-textDim">Windows </span>
+                <div className="flex items-center gap-1">
+                  <span className="text-terminal-textDim flex items-center">
+                    Windows
+                    <InfoBadge text="Nombre de fenêtres de backtesting calculées = (obs. − lookback) ÷ horizon. Chaque fenêtre calibre µ/σ sur le lookback, simule l'horizon suivant, puis compare à la réalité." />
+                  </span>
                   <span className="num font-semibold">{result.n_windows}</span>
                 </div>
                 <div>
