@@ -5,10 +5,10 @@ Récupération et prétraitement des données historiques multi-actifs.
 Retourne les rendements, la matrice de covariance et de corrélation
 nécessaires à l'analyse de portefeuille.
 
-Provider hierarchy:
-  Primary:   Twelve Data /time_series — commercial-friendly, concurrent per ticker.
-  Secondary: Stooq — no API key, global daily OHLCV, concurrent per ticker.
-  (FMP and yfinance removed from production paths.)
+Provider hierarchy (demo project — yfinance primary):
+  Primary:   yfinance batch download — free, handles equities/ETFs/indices/crypto
+  Secondary: Twelve Data /time_series — if yfinance fails and key available
+  Tertiary:  Stooq — no key, global daily OHLCV
 """
 
 from __future__ import annotations
@@ -19,6 +19,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 import httpx
 import numpy as np
 import pandas as pd
+import yfinance as yf
 
 from services.instruments.twelvedata_provider import SYMBOL_MAP, PERIOD_TO_OUTPUTSIZE
 from services import stooq_provider as stooq
@@ -28,7 +29,48 @@ TRADING_DAYS = 252
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Twelve Data fetch (one ticker, synchronous)
+# yfinance batch fetch (primary)
+# ─────────────────────────────────────────────────────────────────────────────
+
+def _yf_fetch_all(tickers: list[str], period: str) -> pd.DataFrame:
+    """
+    yfinance batch download → DataFrame of adjusted close prices, tickers as columns.
+    Uses a single HTTP session for all tickers — fast even for 10+ symbols.
+    """
+    # Pass list for multi-ticker (produces MultiIndex), single string for one ticker
+    symbols = tickers if len(tickers) > 1 else tickers[0]
+    raw = yf.download(
+        symbols,
+        period=period,
+        auto_adjust=True,
+        progress=False,
+        threads=True,
+    )
+
+    if raw is None or raw.empty:
+        raise ValueError(f"yfinance returned no data for {tickers}")
+
+    if isinstance(raw.columns, pd.MultiIndex):
+        # Multi-ticker: columns are (metric, ticker) — pick "Close"
+        closes = raw["Close"].copy()
+        if isinstance(closes, pd.Series):
+            # Edge case: single ticker passed as list
+            closes = closes.to_frame(name=tickers[0])
+    else:
+        # Single ticker (string passed): flat columns [Open, High, Low, Close, Volume]
+        closes = raw[["Close"]].copy()
+        closes.columns = [tickers[0]]
+
+    # Validate all tickers are present
+    missing = [t for t in tickers if t not in closes.columns]
+    if missing:
+        raise ValueError(f"yfinance returned no data for: {missing}")
+
+    return closes
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Twelve Data fetch (secondary — one ticker, synchronous)
 # ─────────────────────────────────────────────────────────────────────────────
 
 def _td_fetch_series(ticker: str, outputsize: int, api_key: str) -> pd.Series:
@@ -60,15 +102,9 @@ def _td_fetch_series(ticker: str, outputsize: int, api_key: str) -> pd.Series:
     if not values:
         raise ValueError(f"Twelve Data returned no data for '{ticker}'")
 
-    dates  = [v["datetime"][:10] for v in values]          # "YYYY-MM-DD"
+    dates  = [v["datetime"][:10] for v in values]
     closes = [float(v["close"])   for v in values]
     return pd.Series(closes, index=pd.to_datetime(dates), name=ticker)
-
-
-# ─────────────────────────────────────────────────────────────────────────────
-# Stooq fetch (secondary — one ticker, synchronous)
-# stooq_provider.fetch_series() already handles the sync HTTP + CSV parsing.
-# ─────────────────────────────────────────────────────────────────────────────
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -83,14 +119,14 @@ def fetch_portfolio_data(tickers: list[str], period: str = "2y") -> dict:
     Parameters
     ----------
     tickers : list[str]
-        Liste de symboles (Yahoo Finance format accepted: '^GSPC', 'BTC-USD'…).
+        Liste de symboles (ex. 'AAPL', 'BTC-USD', '^GSPC'…).
     period : str
         Période historique ('1y', '2y', '5y'…).
 
     Returns
     -------
     dict :
-        tickers        : ordre utilisé (cohérent dans toutes les matrices)
+        tickers        : ordre utilisé
         current_prices : dernier prix de clôture par actif
         mean_returns   : rendement log moyen JOURNALIER (vecteur)
         cov_matrix     : matrice de covariance JOURNALIÈRE (n × n)
@@ -110,13 +146,19 @@ def fetch_portfolio_data(tickers: list[str], period: str = "2y") -> dict:
     api_key = os.getenv("TWELVE_DATA_API_KEY", "")
     closes: pd.DataFrame | None = None
 
-    # ── Primary: Twelve Data (concurrent — max 4 parallel) ───────────────────
-    if api_key:
+    # ── Primary: yfinance (batch) ────────────────────────────────────────────
+    try:
+        closes = _yf_fetch_all(tickers, period)
+    except Exception as yf_err:
+        print(f"[data_fetcher] yfinance failed: {yf_err} — trying Twelve Data")
+
+    # ── Secondary: Twelve Data (concurrent — max 4 parallel) ─────────────────
+    if closes is None and api_key:
         outputsize  = PERIOD_TO_OUTPUTSIZE.get(period, 730)
         series_map: dict[str, pd.Series] = {}
         fetch_errors: list[str]          = []
 
-        workers = min(4, len(tickers))   # stay within 8 req/min on free tier
+        workers = min(4, len(tickers))
         with ThreadPoolExecutor(max_workers=workers) as pool:
             futures = {
                 pool.submit(_td_fetch_series, t, outputsize, api_key): t
@@ -131,17 +173,16 @@ def fetch_portfolio_data(tickers: list[str], period: str = "2y") -> dict:
 
         missing = [t for t in tickers if t not in series_map]
         if missing:
-            raise ValueError(
-                f"Impossible de récupérer les données pour : {missing}. "
-                f"Erreurs Twelve Data : {fetch_errors}"
+            print(
+                f"[data_fetcher] TD missing: {missing} errors: {fetch_errors} "
+                "— trying Stooq"
             )
+        else:
+            closes = pd.DataFrame({t: series_map[t] for t in tickers})
 
-        # Align tickers on common date index
-        closes = pd.DataFrame({t: series_map[t] for t in tickers})
-
-    # ── Secondary: Stooq (no TD key, or TD failed) ───────────────────────────
+    # ── Tertiary: Stooq (concurrent) ─────────────────────────────────────────
     if closes is None:
-        stooq_series_map: dict[str, pd.Series] = {}
+        stooq_map: dict[str, pd.Series] = {}
         stooq_errors: list[str] = []
 
         workers = min(4, len(tickers))
@@ -153,18 +194,18 @@ def fetch_portfolio_data(tickers: list[str], period: str = "2y") -> dict:
             for fut in as_completed(stooq_futures):
                 t = stooq_futures[fut]
                 try:
-                    stooq_series_map[t] = fut.result()
+                    stooq_map[t] = fut.result()
                 except Exception as exc:
                     stooq_errors.append(f"{t}: {exc}")
 
-        missing_stooq = [t for t in tickers if t not in stooq_series_map]
+        missing_stooq = [t for t in tickers if t not in stooq_map]
         if missing_stooq:
             raise ValueError(
                 f"Impossible de récupérer les données pour : {missing_stooq}. "
                 f"Erreurs Stooq : {stooq_errors}"
             )
 
-        closes = pd.DataFrame({t: stooq_series_map[t] for t in tickers})
+        closes = pd.DataFrame({t: stooq_map[t] for t in tickers})
 
     # ── Prétraitement commun ─────────────────────────────────────────────────
     closes = closes.ffill().dropna()
@@ -177,12 +218,11 @@ def fetch_portfolio_data(tickers: list[str], period: str = "2y") -> dict:
     # ── Log-rendements ────────────────────────────────────────────────────────
     log_ret = np.log(closes / closes.shift(1)).dropna()
 
-    mean_r   = log_ret.mean().values.astype(float)   # (n,)
-    cov      = log_ret.cov().values.astype(float)    # (n, n) — daily
-    corr     = log_ret.corr().values.astype(float)   # (n, n)
+    mean_r   = log_ret.mean().values.astype(float)
+    cov      = log_ret.cov().values.astype(float)
+    corr     = log_ret.corr().values.astype(float)
     prices   = closes.iloc[-1].values.astype(float)
 
-    # Annualised (for display)
     ann_ret  = mean_r * TRADING_DAYS
     ann_vols = np.sqrt(np.diag(cov) * TRADING_DAYS)
 

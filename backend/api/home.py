@@ -4,9 +4,9 @@ api/home.py
 Home page data (MSN Finance style).
 
 Provider hierarchy:
-  Tape / movers → Twelve Data batch quotes
+  Tape / movers → Twelve Data batch quotes  (primary, if key set)
+               → yfinance download          (fallback — free, no key)
   News          → Finnhub /news?category=general
-  Fallback: empty arrays if provider unavailable
 """
 
 from __future__ import annotations
@@ -17,6 +17,8 @@ import time
 from datetime import datetime, timezone
 from typing import Optional
 
+import pandas as pd
+import yfinance as yf
 from fastapi import APIRouter
 from services.instruments.twelvedata_provider import TwelveDataProvider
 from services.finnhub_provider import get_finnhub_provider
@@ -77,7 +79,7 @@ _CACHE_TTL   = 300  # 5 minutes
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Twelve Data helpers
+# Twelve Data helpers (primary when key is available)
 # ─────────────────────────────────────────────────────────────────────────────
 
 async def _td_fetch_tape(tickers: list[str]) -> list[dict]:
@@ -123,12 +125,89 @@ async def _td_fetch_movers(tickers: list[str]) -> tuple[list[dict], list[dict]]:
 
 
 # ─────────────────────────────────────────────────────────────────────────────
+# yfinance helpers (fallback — no API key needed)
+# ─────────────────────────────────────────────────────────────────────────────
+
+def _yf_batch_quotes(tickers: list[str]) -> dict[str, dict]:
+    """
+    Fetch last 2 days of close prices for a batch of tickers via yfinance.
+    Returns {ticker: {price, change_pct}}.
+    Works with all ticker formats: ^GSPC, BTC-USD, GC=F, EURUSD=X, etc.
+    """
+    try:
+        symbols = tickers if len(tickers) > 1 else tickers[0]
+        raw = yf.download(
+            symbols,
+            period="5d",       # 5 days to ensure we always get 2 trading days
+            interval="1d",
+            auto_adjust=True,
+            progress=False,
+            threads=True,
+        )
+        if raw is None or raw.empty:
+            return {}
+
+        if isinstance(raw.columns, pd.MultiIndex):
+            closes = raw["Close"]
+        else:
+            closes = raw[["Close"]].rename(columns={"Close": tickers[0]})
+
+        result: dict[str, dict] = {}
+        for sym in tickers:
+            if sym not in closes.columns:
+                continue
+            prices = closes[sym].dropna()
+            if len(prices) < 1:
+                continue
+            price = float(prices.iloc[-1])
+            prev  = float(prices.iloc[-2]) if len(prices) >= 2 else price
+            change_pct = round((price - prev) / prev * 100, 2) if prev else 0.0
+            result[sym] = {"price": round(price, 6), "change_pct": change_pct}
+        return result
+    except Exception as e:
+        print(f"[home] yfinance batch_quotes failed: {e}")
+        return {}
+
+
+async def _yf_fetch_tape(tickers: list[str]) -> list[dict]:
+    loop   = asyncio.get_event_loop()
+    quotes = await loop.run_in_executor(None, _yf_batch_quotes, tickers)
+    result = []
+    for sym in tickers:
+        q = quotes.get(sym)
+        if q and q.get("price"):
+            result.append({
+                "ticker":     sym,
+                "label":      TAPE_LABELS.get(sym, sym),
+                "price":      q["price"],
+                "change_pct": q["change_pct"],
+            })
+    return result
+
+
+async def _yf_fetch_movers(tickers: list[str]) -> tuple[list[dict], list[dict]]:
+    loop   = asyncio.get_event_loop()
+    quotes = await loop.run_in_executor(None, _yf_batch_quotes, tickers)
+    rows   = [
+        {
+            "ticker":     sym,
+            "price":      round(q["price"], 2),
+            "change_pct": q["change_pct"],
+        }
+        for sym, q in quotes.items() if q.get("price")
+    ]
+    rows.sort(key=lambda x: x["change_pct"], reverse=True)
+    return rows[:5], rows[-5:][::-1]
+
+
+# ─────────────────────────────────────────────────────────────────────────────
 # Market data builder
 # ─────────────────────────────────────────────────────────────────────────────
 
 async def _build_market_data_async() -> dict:
-    """Build full market payload. TD for tape/movers, Finnhub for news."""
+    """Build full market payload. TD (primary) or yfinance (fallback) for tape/movers."""
     if _td:
+        # Twelve Data primary
         tape_task   = asyncio.create_task(_td_fetch_tape(TAPE_TICKERS))
         movers_task = asyncio.create_task(_td_fetch_movers(MOVERS_UNIVERSE))
         news_task   = asyncio.create_task(_finnhub.get_market_news(limit=9))
@@ -136,10 +215,18 @@ async def _build_market_data_async() -> dict:
         tape            = await tape_task
         gainers, losers = await movers_task
         news            = await news_task
+        source = "twelvedata+finnhub"
     else:
-        print("[home] No TWELVE_DATA_API_KEY configured — returning empty market data")
-        tape, gainers, losers = [], [], []
-        news = await _finnhub.get_market_news(limit=9)
+        # yfinance fallback — works without any API key
+        print("[home] No TWELVE_DATA_API_KEY — using yfinance for tape/movers")
+        tape_task   = asyncio.create_task(_yf_fetch_tape(TAPE_TICKERS))
+        movers_task = asyncio.create_task(_yf_fetch_movers(MOVERS_UNIVERSE))
+        news_task   = asyncio.create_task(_finnhub.get_market_news(limit=9))
+
+        tape            = await tape_task
+        gainers, losers = await movers_task
+        news            = await news_task
+        source = "yfinance+finnhub"
 
     tape_map = {t["ticker"]: t for t in tape}
     indices  = [tape_map[s] for s in KEY_INDICES if s in tape_map]
@@ -150,7 +237,7 @@ async def _build_market_data_async() -> dict:
         "gainers":   gainers,
         "losers":    losers,
         "news":      news,
-        "source":    "twelvedata+finnhub",
+        "source":    source,
         "cached_at": datetime.now(tz=timezone.utc).isoformat(),
     }
 
@@ -165,12 +252,12 @@ async def get_market_data():
     Returns in one request:
     - tape    : 16 symbols (price + Δ%) for the scrolling ticker
     - indices : key indices grid
-    - gainers : top 5 daily gainers (from Twelve Data)
+    - gainers : top 5 daily gainers
     - losers  : top 5 daily losers
-    - news    : latest market news (FMP general_news)
+    - news    : latest market news
 
     Cached server-side for 5 minutes.
-    Source: Twelve Data (tape/movers) + FMP (news). No yfinance.
+    Source: Twelve Data (if key set) or yfinance — both free for demo use.
     """
     global _cache
     now = time.time()
