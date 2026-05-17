@@ -573,6 +573,76 @@ class FMPProvider:
     # Public: Stock Screener (Phase 11)
     # ─────────────────────────────────────────────────────────────────
 
+    async def _get_screener_universe(self) -> List[Dict[str, Any]]:
+        """
+        Build screener universe: S&P 500 constituents + full batch quotes.
+
+        Uses /v3/quote/{batch} which returns price, changesPercentage,
+        volume, pe, beta, marketCap, lastDiv — all on the free tier.
+        Cache key is filter-independent (30 min) so all filter combinations
+        reuse the same cached universe.
+        """
+        ck = "screener_universe_sp500"
+        cached = self._get_cache(ck, ttl=self.SCREENER_TTL)
+        if cached is not None:
+            return cached
+
+        # Step 1: S&P 500 constituents → sector + name (cached 24 h)
+        constituents = await self.get_index_constituents("SP500")
+        sector_map   = {c["ticker"]: c.get("sector", "")      for c in constituents}
+        name_map     = {c["ticker"]: c.get("name", "")         for c in constituents}
+        industry_map = {c["ticker"]: c.get("sub_sector", "")  for c in constituents}
+        tickers = [c["ticker"] for c in constituents if c.get("ticker")]
+
+        if not tickers:
+            print("[FMP screener] SP500 constituents returned empty — check FMP key")
+            return []
+
+        # Step 2: Batch quotes (100 per call) → price, PE, beta, marketCap …
+        quote_map: Dict[str, Dict] = {}
+        for i in range(0, len(tickers), 100):
+            chunk = tickers[i : i + 100]
+            rows  = await self._get(f"/quote/{','.join(chunk)}")
+            for row in rows:
+                sym = (row.get("symbol") or "").strip()
+                if sym:
+                    quote_map[sym] = row
+
+        print(
+            f"[FMP screener] SP500 universe: {len(tickers)} tickers, "
+            f"{len(quote_map)} quotes fetched"
+        )
+
+        # Step 3: Merge
+        result: List[Dict[str, Any]] = []
+        for ticker in tickers:
+            q = quote_map.get(ticker)
+            if not q:
+                continue
+            price    = self._sf(q.get("price"))
+            last_div = self._sf(q.get("lastDiv"))
+            div_yield: Optional[float] = None
+            if last_div and price and price > 0:
+                div_yield = round(last_div / price * 100, 2)
+
+            result.append({
+                "ticker":         ticker,
+                "name":           name_map.get(ticker) or q.get("name") or ticker,
+                "price":          price,
+                "change_pct":     self._sf(q.get("changesPercentage")),
+                "market_cap":     self._sf(q.get("marketCap")),
+                "sector":         sector_map.get(ticker, ""),
+                "industry":       industry_map.get(ticker, ""),
+                "beta":           self._sf(q.get("beta")),
+                "pe":             self._sf(q.get("pe")),
+                "volume":         int(q.get("volume") or 0),
+                "exchange":       q.get("exchange") or q.get("exchangeShortName") or "",
+                "dividend_yield": div_yield,
+            })
+
+        self._set_cache(ck, result)
+        return result
+
     async def get_screener(
         self,
         sector: str = "",
@@ -586,96 +656,42 @@ class FMPProvider:
         limit: int = 50,
     ) -> List[Dict[str, Any]]:
         """
-        Stock screener via FMP /v3/stock-screener.
+        Stock screener over the S&P 500 universe.
 
-        Returns list of US equities matching criteria, enriched with
-        live price, change%, and PE ratio from /v3/quote batch call.
-        Cache: 30 min.
+        Fetches universe once (S&P 500 constituents + batch quotes) then
+        applies all filters in-memory — avoids /v3/stock-screener which
+        returns empty on FMP free tier.
         """
-        ck = (
-            f"screener:{sector}:{exchange}:{market_cap_min}:{market_cap_max}:"
-            f"{beta_min}:{beta_max}:{price_min}:{price_max}:{limit}"
-        )
-        cached = self._get_cache(ck, ttl=self.SCREENER_TTL)
-        if cached is not None:
-            return cached
+        universe = await self._get_screener_universe()
 
-        params: Dict[str, Any] = {
-            "apikey": self._api_key,
-            "isEtf":  "false",
-            "limit":  limit,
-        }
-        if sector:
-            params["sector"] = sector
-        if exchange:
-            params["exchange"] = exchange
-        if market_cap_min > 0:
-            params["marketCapMoreThan"] = int(market_cap_min * 1_000_000_000)
-        if market_cap_max > 0:
-            params["marketCapLowerThan"] = int(market_cap_max * 1_000_000_000)
-        if beta_min > 0:
-            params["betaMoreThan"] = beta_min
-        if beta_max > 0:
-            params["betaLowerThan"] = beta_max
-        if price_min > 0:
-            params["priceMoreThan"] = price_min
-        if price_max > 0:
-            params["priceLowerThan"] = price_max
-
-        loop = asyncio.get_event_loop()
-        raw: List[Dict] = await loop.run_in_executor(
-            None,
-            self._sync_get,
-            f"{BASE_URL}/stock-screener",
-            params,
-        )
-        print(f"[FMP screener] params={params} → {len(raw)} rows")
-
-        # Enrich with live quotes for PE + change% (batch, up to 100)
-        symbols = [
-            (r.get("symbol") or "").strip()
-            for r in raw
-            if (r.get("symbol") or "").strip()
-        ][:100]
-
-        quote_map: Dict[str, Dict] = {}
-        if symbols:
-            q_rows = await self._get(f"/quote/{','.join(symbols)}")
-            for q in q_rows:
-                sym = (q.get("symbol") or "").strip()
-                if sym:
-                    quote_map[sym] = q
-
+        # ── In-memory filtering ───────────────────────────────────────────
         result: List[Dict[str, Any]] = []
-        for r in raw:
-            sym = (r.get("symbol") or "").strip()
-            if not sym:
+        cap_min_raw = market_cap_min * 1_000_000_000
+        cap_max_raw = market_cap_max * 1_000_000_000
+
+        for s in universe:
+            if sector and s.get("sector") != sector:
                 continue
-            q = quote_map.get(sym, {})
+            if exchange and s.get("exchange", "").upper() != exchange.upper():
+                continue
+            mc = s.get("market_cap") or 0
+            if cap_min_raw > 0 and mc < cap_min_raw:
+                continue
+            if cap_max_raw > 0 and mc > cap_max_raw:
+                continue
+            bv = s.get("beta") or 0
+            if beta_min > 0 and bv < beta_min:
+                continue
+            if beta_max > 0 and bv > beta_max:
+                continue
+            pv = s.get("price") or 0
+            if price_min > 0 and pv < price_min:
+                continue
+            if price_max > 0 and pv > price_max:
+                continue
+            result.append(s)
 
-            price = self._sf(q.get("price") or r.get("price"))
-            ann_div = self._sf(r.get("lastAnnualDividend"))
-            div_yield: Optional[float] = None
-            if ann_div and price and price > 0:
-                div_yield = round(ann_div / price * 100, 2)
-
-            result.append({
-                "ticker":         sym,
-                "name":           r.get("companyName") or sym,
-                "price":          price,
-                "change_pct":     self._sf(q.get("changesPercentage")),
-                "market_cap":     self._sf(r.get("marketCap")),
-                "sector":         r.get("sector") or "",
-                "industry":       r.get("industry") or "",
-                "beta":           self._sf(r.get("beta") or q.get("beta")),
-                "pe":             self._sf(q.get("pe")),
-                "volume":         int(r.get("volume") or q.get("volume") or 0),
-                "exchange":       r.get("exchangeShortName") or r.get("exchange") or "",
-                "dividend_yield": div_yield,
-            })
-
-        self._set_cache(ck, result)
-        return result
+        return result[:limit]
 
     # ─────────────────────────────────────────────────────────────────
     # Internal: HTTP + cache

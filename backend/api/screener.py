@@ -112,6 +112,7 @@ async def get_screener(
     return {
         "count":       len(stocks),
         "has_fmp_key": bool(fmp._api_key),
+        "universe":    "S&P 500",
         "filters": {
             "sector":         sector,
             "exchange":       fmp_exchange,

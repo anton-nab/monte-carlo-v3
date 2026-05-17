@@ -34,6 +34,7 @@ interface Stock {
 interface ScreenerResponse {
   count:       number;
   has_fmp_key: boolean;
+  universe:    string;
   filters:     Record<string, unknown>;
   stocks:      Stock[];
 }
@@ -312,17 +313,6 @@ export default function ScreenerPage() {
           </div>
         </div>
 
-        {/* ── No FMP key warning ───────────────────────────────────────── */}
-        {data && !data.has_fmp_key && (
-          <div className="bg-warn/10 border border-warn/40 rounded-lg px-4 py-2.5 text-xs text-warn flex items-center gap-2">
-            <span>⚠</span>
-            <span>
-              <strong>FMP_API_KEY</strong> non configurée — le screener nécessite une clé Financial Modeling Prep.
-              {' '}<a href="https://financialmodelingprep.com/developer/docs" target="_blank" rel="noopener noreferrer" className="underline">Obtenir une clé gratuite →</a>
-            </span>
-          </div>
-        )}
-
         {/* ── Error ────────────────────────────────────────────────────── */}
         {error && (
           <div className="bg-bear/10 border border-bear/40 rounded-lg p-3 text-sm text-bear">
@@ -463,10 +453,10 @@ export default function ScreenerPage() {
           </div>
 
           {/* Footer row */}
-          {data && !loading && stocks.length > 0 && (
+          {data && !loading && (
             <div className="px-4 py-2 border-t border-terminal-border/40 text-xs text-terminal-textMuted font-mono bg-terminal-bg/40 flex items-center justify-between">
-              <span>{data.count} actions affichées</span>
-              <span>Source: FMP · 30 min cache</span>
+              <span>{data.count} actions · univers {data.universe ?? 'S&P 500'}</span>
+              <span>Source: FMP · cache 30 min</span>
             </div>
           )}
         </div>
