@@ -175,11 +175,11 @@ function NewsCard({ item }: { item: NewsItem }) {
 // ─────────────────────────────────────────────────────────────────────────────
 
 const MODULES = [
-  { href: '/indices',   emoji: '◫',  title: 'Indices',    desc: 'SP500, NASDAQ, DAX, Nikkei — heatmap sectorielle', color: '#26a69a' },
   { href: '/simulate',  emoji: '∿',  title: 'Simulate',   desc: 'GBM · Merton · Heston · GARCH — calibration auto', color: '#ffa726' },
   { href: '/compare',   emoji: '⊕',  title: 'Compare',    desc: '4 modèles simultanés + stress géopolitique',       color: '#ce93d8' },
   { href: '/portfolio', emoji: '◈',  title: 'Portfolio',  desc: 'Markowitz · frontière efficiente · Monte Carlo',   color: '#81c784' },
   { href: '/backtest',  emoji: '⟲',  title: 'Backtest',   desc: 'Rolling-window MC · Sharpe · VaR coverage',        color: '#00d9ff' },
+  { href: '/calendar',  emoji: '📅', title: 'Calendar',   desc: 'FOMC · ECB · BOE · BOJ · CPI · NFP · Earnings',    color: '#ab47bc' },
 ];
 
 // ─────────────────────────────────────────────────────────────────────────────
