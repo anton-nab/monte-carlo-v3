@@ -13,6 +13,7 @@ import Head from 'next/head';
 import {
   ComposedChart,
   Bar,
+  Cell,
   Line,
   XAxis,
   YAxis,
@@ -684,9 +685,16 @@ export default function BacktestPage() {
                       name="Realized return"
                       isAnimationActive={false}
                       radius={[1, 1, 0, 0]}
-                      // Per-cell color: breach = red, normal = cyan
-                      fill="rgba(0,229,255,0.55)"
-                    />
+                    >
+                      {returnsData.map((entry, i) => (
+                        <Cell
+                          key={i}
+                          fill={entry.real_return >= 0
+                            ? 'rgba(0,229,255,0.60)'
+                            : 'rgba(255,80,80,0.70)'}
+                        />
+                      ))}
+                    </Bar>
                     <Line
                       type="monotone"
                       dataKey="pred_var_95"
