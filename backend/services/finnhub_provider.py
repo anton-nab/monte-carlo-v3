@@ -376,6 +376,97 @@ class FinnhubProvider:
         return result
 
     # ─────────────────────────────────────────────────────────────────────
+    # Calendar
+    # ─────────────────────────────────────────────────────────────────────
+
+    CALENDAR_TTL = timedelta(minutes=30)
+
+    async def get_economic_calendar(
+        self, from_date: str, to_date: str
+    ) -> List[Dict[str, Any]]:
+        """
+        Economic event calendar — Finnhub /calendar/economic.
+        Returns [] if no API key is set.
+        """
+        ck = f"fh_eco_cal:{from_date}:{to_date}"
+        cached = self._get_cache(ck, self.CALENDAR_TTL)
+        if cached is not None:
+            return cached
+
+        raw = await self._get("/calendar/economic", {"from": from_date, "to": to_date})
+        events = raw.get("economicCalendar", []) if isinstance(raw, dict) else []
+
+        _FLAG = {
+            "US": "🇺🇸", "EU": "🇪🇺", "GB": "🇬🇧", "UK": "🇬🇧",
+            "JP": "🇯🇵", "CN": "🇨🇳", "DE": "🇩🇪", "CA": "🇨🇦",
+            "AU": "🇦🇺", "CH": "🇨🇭", "FR": "🇫🇷",
+        }
+
+        result: List[Dict[str, Any]] = []
+        for e in events:
+            impact = (e.get("impact") or "low").lower()
+            if impact not in ("high", "medium", "low"):
+                impact = "low"
+            country = (e.get("country") or "").upper()
+            result.append({
+                "date":     (e.get("date") or "")[:10],
+                "time":     e.get("time") or "—",
+                "type":     "macro",
+                "country":  country,
+                "flag":     _FLAG.get(country, "🌐"),
+                "title":    e.get("event") or "—",
+                "impact":   impact,
+                "previous": str(e["prev"])  + (e.get("unit") or "") if e.get("prev") is not None else None,
+                "estimate": str(e["estimate"]) + (e.get("unit") or "") if e.get("estimate") is not None else None,
+                "actual":   str(e["actual"])  + (e.get("unit") or "") if e.get("actual")   is not None else None,
+                "ticker":   None,
+            })
+
+        result.sort(key=lambda x: (x["date"], x["time"]))
+        self._set_cache(ck, result)
+        return result
+
+    async def get_earnings_calendar(
+        self, from_date: str, to_date: str
+    ) -> List[Dict[str, Any]]:
+        """
+        Earnings calendar — Finnhub /calendar/earnings.
+        Returns [] if no API key is set.
+        """
+        ck = f"fh_earn_cal:{from_date}:{to_date}"
+        cached = self._get_cache(ck, self.CALENDAR_TTL)
+        if cached is not None:
+            return cached
+
+        raw = await self._get("/calendar/earnings", {"from": from_date, "to": to_date})
+        events = raw.get("earningsCalendar", []) if isinstance(raw, dict) else []
+
+        _HOUR = {"bmo": "Pre-mkt", "amc": "After-mkt", "dmh": "During mkt"}
+
+        result: List[Dict[str, Any]] = []
+        for e in events:
+            sym  = (e.get("symbol") or "").upper()
+            hour = (e.get("hour") or "").lower()
+            est  = e.get("epsEstimate")
+            result.append({
+                "date":     (e.get("date") or "")[:10],
+                "time":     _HOUR.get(hour, "—"),
+                "type":     "earnings",
+                "country":  "US",
+                "flag":     "📊",
+                "title":    f"{sym} Earnings",
+                "impact":   "medium",
+                "previous": None,
+                "estimate": f"EPS {est:+.2f}" if est is not None else None,
+                "actual":   None,
+                "ticker":   sym,
+            })
+
+        result.sort(key=lambda x: x["date"])
+        self._set_cache(ck, result)
+        return result
+
+    # ─────────────────────────────────────────────────────────────────────
     # HTTP helpers
     # ─────────────────────────────────────────────────────────────────────
 
