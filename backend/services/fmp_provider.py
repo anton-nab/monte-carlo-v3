@@ -573,81 +573,127 @@ class FMPProvider:
     # Public: Stock Screener (Phase 11)
     # ─────────────────────────────────────────────────────────────────
 
+    @staticmethod
+    def _sync_yahoo_quotes(tickers: List[str]) -> Dict[str, Dict]:
+        """
+        Bulk quotes from Yahoo Finance — free, no API key required.
+
+        Fetches up to 100 tickers per call.  Returns a dict keyed by
+        ticker symbol with fields: price, change_pct, volume, market_cap,
+        pe, beta, exchange, dividend_yield.
+        """
+        result: Dict[str, Dict] = {}
+        headers = {
+            "User-Agent": (
+                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                "AppleWebKit/537.36 (KHTML, like Gecko) "
+                "Chrome/124.0.0.0 Safari/537.36"
+            ),
+            "Accept":          "application/json, text/plain, */*",
+            "Accept-Language": "en-US,en;q=0.9",
+        }
+        for i in range(0, len(tickers), 100):
+            chunk = tickers[i : i + 100]
+            try:
+                with httpx.Client(
+                    timeout=25, headers=headers, follow_redirects=True
+                ) as c:
+                    resp = c.get(
+                        "https://query1.finance.yahoo.com/v7/finance/quote",
+                        params={"symbols": ",".join(chunk),
+                                "lang": "en-US", "region": "US"},
+                    )
+                    if resp.status_code != 200:
+                        print(
+                            f"[Yahoo quotes] chunk {i//100+1}: "
+                            f"HTTP {resp.status_code}"
+                        )
+                        continue
+                    quotes = resp.json().get("quoteResponse", {}).get("result", [])
+                    for q in quotes:
+                        sym = (q.get("symbol") or "").strip()
+                        if not sym:
+                            continue
+                        price    = q.get("regularMarketPrice")
+                        last_div = q.get("trailingAnnualDividendRate") or 0
+                        div_yield = (
+                            round(float(last_div) / float(price) * 100, 2)
+                            if last_div and price else None
+                        )
+                        result[sym] = {
+                            "price":          price,
+                            "change_pct":     q.get("regularMarketChangePercent"),
+                            "volume":         int(q.get("regularMarketVolume") or 0),
+                            "market_cap":     q.get("marketCap"),
+                            "pe":             q.get("trailingPE"),
+                            "beta":           q.get("beta"),
+                            "exchange":       (
+                                q.get("fullExchangeName")
+                                or q.get("exchange") or ""
+                            ),
+                            "dividend_yield": div_yield,
+                        }
+            except Exception as exc:
+                print(f"[Yahoo quotes] chunk {i//100+1} error: {exc}")
+
+        print(f"[Yahoo quotes] {len(result)}/{len(tickers)} tickers fetched")
+        return result
+
     async def _get_screener_universe(self) -> List[Dict[str, Any]]:
         """
-        Build screener universe: S&P 500 constituents + full batch quotes.
+        Build screener universe: S&P 500 constituents + Yahoo Finance bulk quotes.
 
-        Constituents come from the free GitHub CSV (same source as /indices/SP500).
-        Quotes come from FMP /v3/quote batch — includes PE, beta, marketCap.
-        Cache key is filter-independent (30 min) so all filter combinations
-        reuse the same cached universe.
+        Constituents: GitHub CSV (free, no key, cached 24 h).
+        Quotes:       Yahoo Finance /v7/finance/quote (free, no key, 100/call).
+        Universe cached 30 min — all filter combos reuse the same data.
         """
         ck = "screener_universe_sp500"
         cached = self._get_cache(ck, ttl=self.SCREENER_TTL)
         if cached is not None:
             return cached
 
-        # Step 1: S&P 500 constituents from GitHub CSV (free, 24h cache)
+        # Step 1: S&P 500 tickers + sectors from GitHub CSV
         from services.indices.csv_provider import CsvProvider
-        csv = CsvProvider()
-        constituents = await csv.get_constituents("SP500")
+        constituents = await CsvProvider().get_constituents("SP500")
 
-        sector_map   = {c["ticker"]: c.get("sector", "")  for c in constituents}
-        name_map     = {c["ticker"]: c.get("name", "")    for c in constituents}
-        industry_map = {c["ticker"]: c.get("sector", "")  for c in constituents}
-        tickers = [c["ticker"] for c in constituents if c.get("ticker")]
+        sector_map = {c["ticker"]: c.get("sector", "") for c in constituents}
+        name_map   = {c["ticker"]: c.get("name",   "") for c in constituents}
+        tickers    = [c["ticker"] for c in constituents if c.get("ticker")]
 
         if not tickers:
-            print("[FMP screener] SP500 CSV returned empty")
+            print("[Screener] SP500 CSV empty")
             return []
 
-        # Step 2: Batch quotes (50 per call, 0.35 s gap) → price, PE, beta, marketCap …
-        quote_map: Dict[str, Dict] = {}
-        chunk_size = 50
-        for i in range(0, len(tickers), chunk_size):
-            chunk = tickers[i : i + chunk_size]
-            rows  = await self._get(f"/quote/{','.join(chunk)}")
-            for row in rows:
-                sym = (row.get("symbol") or "").strip()
-                if sym:
-                    quote_map[sym] = row
-            # Small gap to stay within FMP free-tier rate limit (5 req/min)
-            if i + chunk_size < len(tickers):
-                await asyncio.sleep(0.35)
-
-        print(
-            f"[FMP screener] SP500 universe: {len(tickers)} tickers, "
-            f"{len(quote_map)} quotes fetched"
+        # Step 2: Bulk quotes via Yahoo Finance (runs in thread pool)
+        loop      = asyncio.get_event_loop()
+        quote_map = await loop.run_in_executor(
+            None, self._sync_yahoo_quotes, tickers
         )
 
-        # Step 3: Merge
+        # Step 3: Merge CSV + quotes
         result: List[Dict[str, Any]] = []
         for ticker in tickers:
             q = quote_map.get(ticker)
             if not q:
                 continue
-            price    = self._sf(q.get("price"))
-            last_div = self._sf(q.get("lastDiv"))
-            div_yield: Optional[float] = None
-            if last_div and price and price > 0:
-                div_yield = round(last_div / price * 100, 2)
-
             result.append({
                 "ticker":         ticker,
-                "name":           name_map.get(ticker) or q.get("name") or ticker,
-                "price":          price,
-                "change_pct":     self._sf(q.get("changesPercentage")),
-                "market_cap":     self._sf(q.get("marketCap")),
+                "name":           name_map.get(ticker) or ticker,
+                "price":          self._sf(q.get("price")),
+                "change_pct":     self._sf(q.get("change_pct")),
+                "market_cap":     self._sf(q.get("market_cap")),
                 "sector":         sector_map.get(ticker, ""),
-                "industry":       industry_map.get(ticker, ""),
+                "industry":       sector_map.get(ticker, ""),
                 "beta":           self._sf(q.get("beta")),
                 "pe":             self._sf(q.get("pe")),
                 "volume":         int(q.get("volume") or 0),
-                "exchange":       q.get("exchange") or q.get("exchangeShortName") or "",
-                "dividend_yield": div_yield,
+                "exchange":       q.get("exchange") or "",
+                "dividend_yield": q.get("dividend_yield"),
             })
 
-        self._set_cache(ck, result)
+        print(f"[Screener] universe ready: {len(result)} stocks")
+        if result:                        # don't cache empty (network failure)
+            self._set_cache(ck, result)
         return result
 
     async def get_screener(
