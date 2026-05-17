@@ -576,32 +576,60 @@ class FMPProvider:
     @staticmethod
     def _sync_yahoo_quotes(tickers: List[str]) -> Dict[str, Dict]:
         """
-        Bulk quotes from Yahoo Finance — free, no API key required.
+        Bulk quotes from Yahoo Finance (free, no API key).
 
-        Fetches up to 100 tickers per call.  Returns a dict keyed by
-        ticker symbol with fields: price, change_pct, volume, market_cap,
-        pe, beta, exchange, dividend_yield.
+        Yahoo requires cookie + crumb authentication since 2024.
+        Flow (mirrors yfinance internals):
+          1. GET fc.yahoo.com  → sets cookie in client jar
+          2. GET /v1/test/getcrumb (with cookie) → returns crumb string
+          3. GET /v7/finance/quote?symbols=...&crumb=... (with cookie)
+
+        Uses a single persistent httpx.Client so cookies are shared
+        across all three steps.
         """
         result: Dict[str, Dict] = {}
         headers = {
             "User-Agent": (
-                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
                 "AppleWebKit/537.36 (KHTML, like Gecko) "
                 "Chrome/124.0.0.0 Safari/537.36"
             ),
-            "Accept":          "application/json, text/plain, */*",
+            "Accept":          "*/*",
             "Accept-Language": "en-US,en;q=0.9",
+            "Referer":         "https://finance.yahoo.com/",
         }
-        for i in range(0, len(tickers), 100):
-            chunk = tickers[i : i + 100]
-            try:
-                with httpx.Client(
-                    timeout=25, headers=headers, follow_redirects=True
-                ) as c:
-                    resp = c.get(
+
+        try:
+            with httpx.Client(
+                timeout=30, headers=headers, follow_redirects=True
+            ) as client:
+                # ── Step 1: acquire session cookie ───────────────────────
+                client.get("https://fc.yahoo.com")
+
+                # ── Step 2: get crumb ────────────────────────────────────
+                crumb_r = client.get(
+                    "https://query2.finance.yahoo.com/v1/test/getcrumb"
+                )
+                if crumb_r.status_code != 200 or not crumb_r.text.strip():
+                    print(
+                        f"[Yahoo auth] crumb failed "
+                        f"(HTTP {crumb_r.status_code}): {crumb_r.text[:80]}"
+                    )
+                    return {}
+                crumb = crumb_r.text.strip()
+                print(f"[Yahoo auth] crumb acquired ({len(crumb)} chars)")
+
+                # ── Step 3: fetch quotes in chunks of 100 ────────────────
+                for i in range(0, len(tickers), 100):
+                    chunk = tickers[i : i + 100]
+                    resp  = client.get(
                         "https://query1.finance.yahoo.com/v7/finance/quote",
-                        params={"symbols": ",".join(chunk),
-                                "lang": "en-US", "region": "US"},
+                        params={
+                            "symbols": ",".join(chunk),
+                            "crumb":   crumb,
+                            "lang":    "en-US",
+                            "region":  "US",
+                        },
                     )
                     if resp.status_code != 200:
                         print(
@@ -609,8 +637,7 @@ class FMPProvider:
                             f"HTTP {resp.status_code}"
                         )
                         continue
-                    quotes = resp.json().get("quoteResponse", {}).get("result", [])
-                    for q in quotes:
+                    for q in resp.json().get("quoteResponse", {}).get("result", []):
                         sym = (q.get("symbol") or "").strip()
                         if not sym:
                             continue
@@ -633,8 +660,9 @@ class FMPProvider:
                             ),
                             "dividend_yield": div_yield,
                         }
-            except Exception as exc:
-                print(f"[Yahoo quotes] chunk {i//100+1} error: {exc}")
+
+        except Exception as exc:
+            print(f"[Yahoo quotes] fatal error: {exc}")
 
         print(f"[Yahoo quotes] {len(result)}/{len(tickers)} tickers fetched")
         return result
