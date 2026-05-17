@@ -40,6 +40,7 @@ from api.simulate import router as simulate_router
 from api.compare import router as compare_router
 from api.portfolio import router as portfolio_router
 from api.ws import router as ws_router           # Phase 7: WebSocket
+from api.backtest import router as backtest_router  # Phase 9: Backtesting
 
 # ===========================================================================
 # 1. CRÉER L'APPLICATION FASTAPI
@@ -88,6 +89,7 @@ app.include_router(simulate_router)        # /api/simulate        (Phase 3)
 app.include_router(compare_router)        # /api/simulate/compare (Phase 4.5)
 app.include_router(portfolio_router)      # /api/portfolio/*     (Phase 4)
 app.include_router(ws_router)             # /ws/quotes           (Phase 7)
+app.include_router(backtest_router)       # /api/backtest        (Phase 9)
 
 # ===========================================================================
 # 3. ROUTES (Endpoints API)

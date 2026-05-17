@@ -58,12 +58,21 @@ const IconPortfolio = () => (
   </svg>
 );
 
+const IconBacktest = () => (
+  <svg width="14" height="14" viewBox="0 0 24 24" fill="none"
+    stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <polyline points="23 6 13.5 15.5 8.5 10.5 1 18" />
+    <polyline points="17 6 23 6 23 12" />
+  </svg>
+);
+
 const NAV_ITEMS: NavItem[] = [
   { href: '/',          label: 'Home',      icon: <IconHome />      },
   { href: '/dashboard', label: 'Macro',     icon: <IconMacro />     },
   { href: '/simulate',  label: 'Simulate',  icon: <IconSimulate />  },
   { href: '/compare',   label: 'Compare',   icon: <IconCompare />   },
   { href: '/portfolio', label: 'Portfolio', icon: <IconPortfolio /> },
+  { href: '/backtest',  label: 'Backtest',  icon: <IconBacktest />  },
 ];
 
 export function Header() {
