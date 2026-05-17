@@ -601,15 +601,19 @@ class FMPProvider:
             print("[FMP screener] SP500 CSV returned empty")
             return []
 
-        # Step 2: Batch quotes (100 per call) → price, PE, beta, marketCap …
+        # Step 2: Batch quotes (50 per call, 0.35 s gap) → price, PE, beta, marketCap …
         quote_map: Dict[str, Dict] = {}
-        for i in range(0, len(tickers), 100):
-            chunk = tickers[i : i + 100]
+        chunk_size = 50
+        for i in range(0, len(tickers), chunk_size):
+            chunk = tickers[i : i + chunk_size]
             rows  = await self._get(f"/quote/{','.join(chunk)}")
             for row in rows:
                 sym = (row.get("symbol") or "").strip()
                 if sym:
                     quote_map[sym] = row
+            # Small gap to stay within FMP free-tier rate limit (5 req/min)
+            if i + chunk_size < len(tickers):
+                await asyncio.sleep(0.35)
 
         print(
             f"[FMP screener] SP500 universe: {len(tickers)} tickers, "
