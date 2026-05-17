@@ -180,6 +180,7 @@ const MODULES = [
   { href: '/portfolio', emoji: '◈',  title: 'Portfolio',  desc: 'Markowitz · frontière efficiente · Monte Carlo',   color: '#81c784' },
   { href: '/backtest',  emoji: '⟲',  title: 'Backtest',   desc: 'Rolling-window MC · Sharpe · VaR coverage',        color: '#00d9ff' },
   { href: '/calendar',  emoji: '📅', title: 'Calendar',   desc: 'FOMC · ECB · BOE · BOJ · CPI · NFP · Earnings',    color: '#ab47bc' },
+  { href: '/screener',  emoji: '⊟',  title: 'Screener',   desc: 'Filtrer par secteur · market cap · beta · P/E',    color: '#26c6da' },
 ];
 
 // ─────────────────────────────────────────────────────────────────────────────

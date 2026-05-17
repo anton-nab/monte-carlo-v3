@@ -82,6 +82,7 @@ class FMPProvider:
     FINANCIALS_TTL = timedelta(hours=72)   # IS/BS/CF barely change
     BATCH_QUOTE_TTL = timedelta(hours=1)
     NEWS_TTL        = timedelta(minutes=30)
+    SCREENER_TTL    = timedelta(minutes=30)
 
     def __init__(self, api_key: Optional[str] = None) -> None:
         self._api_key = api_key or os.getenv("FMP_API_KEY", "")
@@ -564,6 +565,115 @@ class FMPProvider:
             })
             if len(result) >= limit:
                 break
+
+        self._set_cache(ck, result)
+        return result
+
+    # ─────────────────────────────────────────────────────────────────
+    # Public: Stock Screener (Phase 11)
+    # ─────────────────────────────────────────────────────────────────
+
+    async def get_screener(
+        self,
+        sector: str = "",
+        exchange: str = "",
+        market_cap_min: float = 0,
+        market_cap_max: float = 0,
+        beta_min: float = 0,
+        beta_max: float = 0,
+        price_min: float = 0,
+        price_max: float = 0,
+        limit: int = 50,
+    ) -> List[Dict[str, Any]]:
+        """
+        Stock screener via FMP /v3/stock-screener.
+
+        Returns list of US equities matching criteria, enriched with
+        live price, change%, and PE ratio from /v3/quote batch call.
+        Cache: 30 min.
+        """
+        ck = (
+            f"screener:{sector}:{exchange}:{market_cap_min}:{market_cap_max}:"
+            f"{beta_min}:{beta_max}:{price_min}:{price_max}:{limit}"
+        )
+        cached = self._get_cache(ck, ttl=self.SCREENER_TTL)
+        if cached is not None:
+            return cached
+
+        params: Dict[str, Any] = {
+            "apikey":            self._api_key,
+            "isEtf":             "false",
+            "isActivelyTrading": "true",
+            "country":           "US",
+            "limit":             limit,
+        }
+        if sector:
+            params["sector"] = sector
+        if exchange:
+            params["exchange"] = exchange
+        if market_cap_min > 0:
+            params["marketCapMoreThan"] = int(market_cap_min * 1_000_000_000)
+        if market_cap_max > 0:
+            params["marketCapLowerThan"] = int(market_cap_max * 1_000_000_000)
+        if beta_min > 0:
+            params["betaMoreThan"] = beta_min
+        if beta_max > 0:
+            params["betaLowerThan"] = beta_max
+        if price_min > 0:
+            params["priceMoreThan"] = price_min
+        if price_max > 0:
+            params["priceLowerThan"] = price_max
+
+        loop = asyncio.get_event_loop()
+        raw: List[Dict] = await loop.run_in_executor(
+            None,
+            self._sync_get,
+            f"{BASE_URL}/stock-screener",
+            params,
+        )
+
+        # Enrich with live quotes for PE + change% (batch, up to 100)
+        symbols = [
+            (r.get("symbol") or "").strip()
+            for r in raw
+            if (r.get("symbol") or "").strip()
+        ][:100]
+
+        quote_map: Dict[str, Dict] = {}
+        if symbols:
+            q_rows = await self._get(f"/quote/{','.join(symbols)}")
+            for q in q_rows:
+                sym = (q.get("symbol") or "").strip()
+                if sym:
+                    quote_map[sym] = q
+
+        result: List[Dict[str, Any]] = []
+        for r in raw:
+            sym = (r.get("symbol") or "").strip()
+            if not sym:
+                continue
+            q = quote_map.get(sym, {})
+
+            price = self._sf(q.get("price") or r.get("price"))
+            ann_div = self._sf(r.get("lastAnnualDividend"))
+            div_yield: Optional[float] = None
+            if ann_div and price and price > 0:
+                div_yield = round(ann_div / price * 100, 2)
+
+            result.append({
+                "ticker":         sym,
+                "name":           r.get("companyName") or sym,
+                "price":          price,
+                "change_pct":     self._sf(q.get("changesPercentage")),
+                "market_cap":     self._sf(r.get("marketCap")),
+                "sector":         r.get("sector") or "",
+                "industry":       r.get("industry") or "",
+                "beta":           self._sf(r.get("beta") or q.get("beta")),
+                "pe":             self._sf(q.get("pe")),
+                "volume":         int(r.get("volume") or q.get("volume") or 0),
+                "exchange":       r.get("exchangeShortName") or r.get("exchange") or "",
+                "dividend_yield": div_yield,
+            })
 
         self._set_cache(ck, result)
         return result
