@@ -573,6 +573,22 @@ class FMPProvider:
     # Public: Stock Screener (Phase 11)
     # ─────────────────────────────────────────────────────────────────
 
+    # Map GICS sector names (used in GitHub CSV) → friendly UI names
+    _GICS_SECTOR_MAP: Dict[str, str] = {
+        "Information Technology": "Technology",
+        "Health Care":            "Healthcare",
+        "Consumer Discretionary": "Consumer Cyclical",
+        "Consumer Staples":       "Consumer Defensive",
+        "Materials":              "Basic Materials",
+        # These map to themselves (no rename needed)
+        "Financials":             "Financials",
+        "Energy":                 "Energy",
+        "Industrials":            "Industrials",
+        "Communication Services": "Communication Services",
+        "Real Estate":            "Real Estate",
+        "Utilities":              "Utilities",
+    }
+
     @staticmethod
     def _sync_td_quotes(tickers: List[str]) -> Dict[str, Dict]:
         """
@@ -580,18 +596,22 @@ class FMPProvider:
 
         Multi-symbol: ?symbol=AAPL,MSFT,... → {AAPL: {...}, MSFT: {...}}
         Each symbol = 1 API credit.  Free plan: 800 credits/day.
-        With 503 S&P 500 tickers and 12h cache → ~2 loads/day ≈ 1006 credits.
+        With 503 S&P 500 tickers → ~503 credits per load (fits in daily budget).
+        Throttled at 0.5 s between chunks to stay under 8 req/min rate limit.
         """
+        import time
+
         api_key = os.getenv("TWELVE_DATA_API_KEY", "")
         if not api_key:
-            print("[TD screener] TWELVE_DATA_API_KEY not set")
+            print("[TD screener] WARNING: TWELVE_DATA_API_KEY not set — screener will show names only, no prices")
             return {}
 
         result: Dict[str, Dict] = {}
-        chunk_size = 100
+        chunk_size = 55   # stay well under 60 symbol/request TD limit
 
         for i in range(0, len(tickers), chunk_size):
             chunk = tickers[i : i + chunk_size]
+            chunk_num = i // chunk_size + 1
             try:
                 with httpx.Client(timeout=30) as c:
                     resp = c.get(
@@ -601,6 +621,12 @@ class FMPProvider:
                     resp.raise_for_status()
                     data = resp.json()
 
+                # Top-level error (e.g. {"code": 429, "message": "..."})
+                if isinstance(data, dict) and data.get("code"):
+                    print(f"[TD screener] chunk {chunk_num} top-level error: "
+                          f"code={data.get('code')} msg={data.get('message', '')}")
+                    break
+
                 # Multi-symbol → dict of {sym: quote}; single → bare quote
                 if isinstance(data, dict):
                     items = (
@@ -609,21 +635,29 @@ class FMPProvider:
                         else [(chunk[0], data)]
                     )
                     for sym, q in items:
-                        if not isinstance(q, dict) or q.get("code"):
-                            continue  # error entry
+                        if not isinstance(q, dict):
+                            continue
+                        if q.get("code") or q.get("status") == "error":
+                            continue  # per-symbol error entry
                         try:
+                            price = float(q.get("close") or 0)
+                            if price <= 0:
+                                continue  # skip if no valid price
                             result[sym] = {
-                                "price":      float(q.get("close") or 0),
+                                "price":      price,
                                 "change_pct": float(q.get("percent_change") or 0),
-                                "volume":     int(q.get("volume") or 0),
+                                "volume":     int(float(q.get("volume") or 0)),
                                 "exchange":   q.get("exchange") or "",
                                 "name":       q.get("name") or "",
                             }
                         except (TypeError, ValueError):
                             pass
 
+                if i + chunk_size < len(tickers):
+                    time.sleep(0.5)   # stay under 8 req/min free-tier limit
+
             except Exception as exc:
-                print(f"[TD screener] chunk {i//chunk_size+1} error: {exc}")
+                print(f"[TD screener] chunk {chunk_num} error: {exc}")
 
         print(f"[TD screener] {len(result)}/{len(tickers)} quotes fetched")
         return result
@@ -634,8 +668,9 @@ class FMPProvider:
 
         Constituents: GitHub CSV (free, cached 24 h).
         Quotes:       TD /quote multi-symbol (API key required, free plan OK).
-                      503 tickers × 1 credit × ~2 loads/day ≈ 1006 credits/day.
+                      503 tickers × 1 credit per load — within 800/day free plan.
         Universe cached 12 h — all filter combos reuse the same data.
+        Sectors normalised from GICS (CSV) → friendly UI names via _GICS_SECTOR_MAP.
         """
         ck = "screener_universe_sp500"
         cached = self._get_cache(ck, ttl=self.SCREENER_TTL)
@@ -651,7 +686,7 @@ class FMPProvider:
         tickers    = [c["ticker"] for c in constituents if c.get("ticker")]
 
         if not tickers:
-            print("[Screener] SP500 CSV empty")
+            print("[Screener] SP500 CSV empty — cannot build universe")
             return []
 
         # Step 2: Bulk quotes via Twelve Data (runs in thread pool)
@@ -660,18 +695,21 @@ class FMPProvider:
             None, self._sync_td_quotes, tickers
         )
 
-        # Step 3: Merge — include CSV-only stocks too (no quote = no price shown)
+        # Step 3: Merge — include CSV-only stocks (no quote = null price, still shown)
         result: List[Dict[str, Any]] = []
         for ticker in tickers:
-            q = quote_map.get(ticker, {})
+            q = quote_map.get(ticker)   # None when not in quote_map
+            # Normalise GICS → friendly sector name
+            gics_sector = sector_map.get(ticker, "")
+            friendly_sector = self._GICS_SECTOR_MAP.get(gics_sector, gics_sector)
             result.append({
                 "ticker":     ticker,
-                "name":       name_map.get(ticker) or q.get("name") or ticker,
-                "price":      self._sf(q.get("price")) if q else None,
-                "change_pct": self._sf(q.get("change_pct")) if q else None,
-                "volume":     int(q.get("volume") or 0) if q else 0,
-                "exchange":   q.get("exchange") or "",
-                "sector":     sector_map.get(ticker, ""),
+                "name":       name_map.get(ticker) or (q.get("name") if q else None) or ticker,
+                "price":      self._sf(q["price"])      if q else None,
+                "change_pct": self._sf(q["change_pct"]) if q else None,
+                "volume":     int(q["volume"])           if q else 0,
+                "exchange":   q["exchange"]              if q else "",
+                "sector":     friendly_sector,
                 # fundamentals not available in bulk on free tier
                 "market_cap": None,
                 "pe":         None,
@@ -679,7 +717,7 @@ class FMPProvider:
             })
 
         print(f"[Screener] universe ready: {len(result)} stocks "
-              f"({len(quote_map)} with live quotes)")
+              f"({len(quote_map)} with live TD quotes)")
         if result:
             self._set_cache(ck, result)
         return result

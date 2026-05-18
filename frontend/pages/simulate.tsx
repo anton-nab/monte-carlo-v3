@@ -12,6 +12,7 @@
 
 import { useState, useEffect, useCallback } from 'react';
 import Head from 'next/head';
+import { useRouter } from 'next/router';
 import {
   ComposedChart,
   Area,
@@ -278,6 +279,8 @@ function FanTooltip({
 // ─────────────────────────────────────────────────────────────────────────────
 
 export default function SimulatePage() {
+  const router = useRouter();
+
   // ── Formulaire ───────────────────────────────────────────────────────────
   const [tickerInput, setTickerInput]   = useState('AAPL');
   const [model, setModel]               = useState<ModelId>('gbm');
@@ -304,6 +307,14 @@ export default function SimulatePage() {
   const [result, setResult]           = useState<SimResult | null>(null);
   const [running, setRunning]         = useState(false);
   const [runError, setRunError]       = useState<string | null>(null);
+
+  // ── Lire ?ticker= depuis l'URL (venant du screener ou d'une fiche) ─────────
+  useEffect(() => {
+    const t = router.query.ticker;
+    if (typeof t === 'string' && t.trim()) {
+      setTickerInput(t.trim().toUpperCase());
+    }
+  }, [router.query.ticker]);
 
   // ── Chargement info ticker (debounce 600ms) ───────────────────────────────
   useEffect(() => {
