@@ -88,7 +88,7 @@ const IconWatchlist = () => (
 );
 
 const NAV_ITEMS: NavItem[] = [
-  { href: '/',           label: 'Home',      icon: <IconHome />      },
+  { href: '/markets',    label: 'Markets',   icon: <IconHome />      },
   { href: '/simulate',   label: 'Simulate',  icon: <IconSimulate />  },
   { href: '/compare',    label: 'Compare',   icon: <IconCompare />   },
   { href: '/portfolio',  label: 'Portfolio', icon: <IconPortfolio /> },

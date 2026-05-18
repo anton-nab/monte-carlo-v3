@@ -1,500 +1,427 @@
 /**
- * Home — MSN Finance-style terminal dashboard (Phase 5)
+ * / — Landing Page (Phase 15)
  *
- * Layout :
- *  1. Ticker tape défilant (prix + Δ% des principaux marchés)
- *  2. Grille indices clés
- *  3. Movers du jour (top 5 gainers + top 5 losers)
- *  4. Actualités financières
- *  5. Navigation rapide vers les modules
+ * Portfolio showcase. Fully static — no API calls.
+ * Dark hero (always dark regardless of theme) + theme-aware sections below.
  */
 
-import { useEffect, useState, useMemo } from 'react';
 import Head from 'next/head';
 import Link from 'next/link';
-import { Header } from '@/components/Header';
-import { MacroIndicator } from '@/components/MacroIndicator';
-import { apiFetch } from '@/lib/api';
-import { useWebSocket, lookupPrice } from '@/hooks/useWebSocket';
+import { ThemeToggle } from '@/components/ThemeToggle';
+
+const GITHUB = 'https://github.com/anton-nab/monte-carlo-v3';
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Types
+// Data
 // ─────────────────────────────────────────────────────────────────────────────
 
-interface TapeItem {
-  ticker: string;
-  label:  string;
-  price:  number;
-  change_pct: number;
-}
+const STATS = [
+  { value: '4',    label: 'Stochastic models'  },
+  { value: '500+', label: 'S&P 500 stocks'     },
+  { value: 'Live', label: 'WebSocket feed'     },
+  { value: '12',   label: 'API endpoints'      },
+];
 
-interface Mover {
-  ticker:     string;
-  price:      number;
-  change_pct: number;
-}
+const FEATURES = [
+  {
+    href: '/simulate',
+    icon: '∿',
+    title: 'Monte Carlo Simulation',
+    desc: '4 stochastic models (GBM, Merton Jump-Diffusion, Heston Stochastic Vol, GARCH) auto-calibrated from live price history. VaR 95/99, CVaR, max drawdown, P5/P50/P95 fan chart.',
+    tags: ['GBM', 'Heston', 'GARCH', 'Merton'],
+    color: '#ffa726',
+    border: 'hover:border-[#ffa726]/40',
+  },
+  {
+    href: '/compare',
+    icon: '⊕',
+    title: 'Multi-Model Comparison',
+    desc: 'Run all 4 models simultaneously with a coupled seed — divergence shows model dynamics, not noise. Stress sliders for vol shocks, geopolitical risk and crash scenarios. 6 presets.',
+    tags: ['Stress Tests', 'Consensus Fan', 'Model Spread'],
+    color: '#ce93d8',
+    border: 'hover:border-[#ce93d8]/40',
+  },
+  {
+    href: '/portfolio',
+    icon: '◈',
+    title: 'Portfolio Optimizer',
+    desc: 'Markowitz efficient frontier across up to 15 assets. Correlated Monte Carlo via Cholesky decomposition. Sharpe/Sortino optimization. Correlation heatmap.',
+    tags: ['Markowitz', 'Cholesky', 'Efficient Frontier'],
+    color: '#81c784',
+    border: 'hover:border-[#81c784]/40',
+  },
+  {
+    href: '/backtest',
+    icon: '↺',
+    title: 'Backtesting Engine',
+    desc: 'Rolling-window walk-forward validation. Historical stress scenario replays. Sharpe, Sortino and max drawdown analysis across arbitrary date ranges.',
+    tags: ['Walk-Forward', 'VaR Coverage', 'Drawdown'],
+    color: '#00d9ff',
+    border: 'hover:border-[#00d9ff]/40',
+  },
+  {
+    href: '/calendar',
+    icon: '▦',
+    title: 'Economic Calendar',
+    desc: 'FOMC, ECB, BOE, BOJ, SNB, RBA, BOC central bank decisions + CPI, NFP, GDP, PMI events. Ex-dividend dates for S&P 500 payers. Each event maps to affected equities and forex pairs.',
+    tags: ['Central Banks', 'Macro Events', 'Dividends'],
+    color: '#ab47bc',
+    border: 'hover:border-[#ab47bc]/40',
+  },
+  {
+    href: '/screener',
+    icon: '⊟',
+    title: 'Stock Screener',
+    desc: 'Full S&P 500 universe with live Twelve Data bulk quotes. Filter by sector and exchange in real-time. Sort by momentum, volume, or price.',
+    tags: ['S&P 500', 'Live Quotes', 'Sector Filter'],
+    color: '#26c6da',
+    border: 'hover:border-[#26c6da]/40',
+  },
+];
 
-interface NewsItem {
-  title:     string;
-  publisher: string;
-  link:      string;
-  published: string;
-}
-
-interface MarketData {
-  tape:    TapeItem[];
-  indices: TapeItem[];
-  gainers: Mover[];
-  losers:  Mover[];
-  news:    NewsItem[];
-  cached_at: string;
-}
+const STACK = [
+  { label: 'FastAPI',         sub: 'Python async backend'  },
+  { label: 'Next.js 14',      sub: 'React + SSR'           },
+  { label: 'TypeScript',      sub: 'Full type safety'      },
+  { label: 'Tailwind CSS',    sub: 'Design system'         },
+  { label: 'Twelve Data',     sub: 'Live market data'      },
+  { label: 'FMP API',         sub: 'Fundamentals & history'},
+  { label: 'FRED API',        sub: 'Macro indicators'      },
+  { label: 'WebSocket',       sub: 'Real-time prices'      },
+  { label: 'LWC Charts',      sub: 'TradingView engine'    },
+  { label: 'NumPy / SciPy',   sub: 'Quant models'         },
+  { label: 'Railway',         sub: 'API deployment'        },
+  { label: 'Vercel',          sub: 'Frontend CDN'          },
+];
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Helpers
+// Hero chart — animated SVG (decorative)
 // ─────────────────────────────────────────────────────────────────────────────
 
-const fmtPrice = (v: number) => {
-  if (v >= 10_000) return v.toLocaleString('en-US', { maximumFractionDigits: 0 });
-  if (v >= 1_000)  return v.toLocaleString('en-US', { maximumFractionDigits: 1 });
-  if (v >= 100)    return v.toLocaleString('en-US', { maximumFractionDigits: 2 });
-  if (v >= 1)      return v.toLocaleString('en-US', { maximumFractionDigits: 4 });
-  return v.toFixed(6);
-};
-
-const clrPct = (pct: number) =>
-  pct > 0 ? 'text-bull' : pct < 0 ? 'text-bear' : 'text-terminal-textMuted';
-
-const signPct = (pct: number) => `${pct >= 0 ? '+' : ''}${pct.toFixed(2)}%`;
-
-// ─────────────────────────────────────────────────────────────────────────────
-// Ticker Tape
-// ─────────────────────────────────────────────────────────────────────────────
-
-function TickerTape({ items }: { items: TapeItem[] }) {
-  if (!items.length) return null;
-  // Duplicate for seamless loop
-  const doubled = [...items, ...items];
-
+function HeroChart() {
   return (
-    <div className="overflow-hidden bg-terminal-bg border-b border-terminal-border py-1.5 select-none">
-      <div className="ticker-track">
-        {doubled.map((item, i) => (
-          <Link
-            key={i}
-            href={`/instrument/${encodeURIComponent(item.ticker)}`}
-            className="inline-flex items-center gap-2 px-5 text-xs whitespace-nowrap border-r border-terminal-border last:border-0 hover:bg-terminal-surfaceHi transition-colors cursor-pointer"
-          >
-            <span className="text-terminal-textDim font-mono">{item.label}</span>
-            <span className="num font-semibold text-terminal-text">{fmtPrice(item.price)}</span>
-            <span className={`num font-semibold ${clrPct(item.change_pct)}`}>
-              {signPct(item.change_pct)}
-            </span>
-          </Link>
-        ))}
-      </div>
-    </div>
-  );
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// Index card
-// ─────────────────────────────────────────────────────────────────────────────
-
-function IndexCard({ item }: { item: TapeItem }) {
-  const up = item.change_pct > 0;
-  const down = item.change_pct < 0;
-  return (
-    <Link
-      href={`/instrument/${encodeURIComponent(item.ticker)}`}
-      className={`bg-terminal-surface border rounded-lg p-3 flex flex-col gap-1 transition hover:bg-terminal-surfaceHi cursor-pointer ${
-        up ? 'border-bull-border hover:border-bull' : down ? 'border-bear-border hover:border-bear' : 'border-terminal-border hover:border-terminal-cyan'
-      }`}
+    <svg
+      viewBox="0 0 1200 320"
+      className="absolute inset-0 w-full h-full pointer-events-none"
+      preserveAspectRatio="xMidYMid slice"
+      aria-hidden="true"
     >
-      <div className="text-2xs text-terminal-textDim uppercase tracking-wider font-mono">
-        {item.label}
-      </div>
-      <div className="num text-terminal-text font-semibold text-base leading-tight">
-        {fmtPrice(item.price)}
-      </div>
-      <div className={`num text-sm font-bold ${clrPct(item.change_pct)}`}>
-        {signPct(item.change_pct)}
-      </div>
-    </Link>
+      {/* Horizontal reference grid lines */}
+      {[70, 140, 210, 280].map((y) => (
+        <line
+          key={y} x1="0" y1={y} x2="1200" y2={y}
+          stroke="rgba(42,48,64,0.9)" strokeWidth="1" strokeDasharray="4 10"
+        />
+      ))}
+
+      {/* Main uptrend — cyan */}
+      <polyline
+        points="0,275 90,255 180,268 270,222 360,238 450,190 540,205 630,158 720,172 810,128 900,142 990,98 1080,112 1170,68 1200,60"
+        fill="none"
+        stroke="#00d9ff"
+        strokeWidth="2.5"
+        strokeLinejoin="round"
+        strokeLinecap="round"
+        opacity="0.7"
+        style={{
+          strokeDasharray: 1900,
+          strokeDashoffset: 1900,
+          animation: 'draw-chart 3.5s cubic-bezier(0.4,0,0.2,1) 0.4s forwards',
+        }}
+      />
+      {/* Area fill under cyan line */}
+      <polyline
+        points="0,275 90,255 180,268 270,222 360,238 450,190 540,205 630,158 720,172 810,128 900,142 990,98 1080,112 1170,68 1200,60 1200,320 0,320"
+        fill="url(#cyanGrad)"
+        stroke="none"
+        opacity="0.08"
+      />
+
+      {/* Secondary — crimson, offset by ~30px */}
+      <polyline
+        points="0,298 90,282 180,295 270,255 360,268 450,228 540,242 630,200 720,214 810,170 900,182 990,142 1080,156 1170,112 1200,102"
+        fill="none"
+        stroke="#b92e25"
+        strokeWidth="1.5"
+        strokeLinejoin="round"
+        strokeLinecap="round"
+        opacity="0.5"
+        style={{
+          strokeDasharray: 1900,
+          strokeDashoffset: 1900,
+          animation: 'draw-chart 3.5s cubic-bezier(0.4,0,0.2,1) 0.9s forwards',
+        }}
+      />
+
+      {/* Gradient definition */}
+      <defs>
+        <linearGradient id="cyanGrad" x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0%"   stopColor="#00d9ff" stopOpacity="1" />
+          <stop offset="100%" stopColor="#00d9ff" stopOpacity="0" />
+        </linearGradient>
+      </defs>
+    </svg>
   );
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Mover row
+// Landing page
 // ─────────────────────────────────────────────────────────────────────────────
 
-function MoverRow({ mover, type }: { mover: Mover; type: 'gain' | 'loss' }) {
-  return (
-    <Link href={`/instrument/${mover.ticker}`}
-      className="flex items-center justify-between px-3 py-2 hover:bg-terminal-surfaceHi transition rounded border border-transparent hover:border-terminal-border">
-      <div className="flex items-center gap-3">
-        <span className={`text-xs w-1.5 h-1.5 rounded-full ${type === 'gain' ? 'bg-bull' : 'bg-bear'}`} />
-        <span className="font-mono font-semibold text-terminal-cyan text-sm">{mover.ticker}</span>
-      </div>
-      <div className="flex items-center gap-3">
-        <span className="num text-xs text-terminal-textMuted">${fmtPrice(mover.price)}</span>
-        <span className={`num text-sm font-bold min-w-[60px] text-right ${type === 'gain' ? 'text-bull' : 'text-bear'}`}>
-          {signPct(mover.change_pct)}
-        </span>
-      </div>
-    </Link>
-  );
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// News card
-// ─────────────────────────────────────────────────────────────────────────────
-
-function NewsCard({ item }: { item: NewsItem }) {
-  return (
-    <a href={item.link} target="_blank" rel="noopener noreferrer"
-      className="block bg-terminal-surface border border-terminal-border rounded-lg p-3 hover:bg-terminal-surfaceHi hover:border-terminal-cyanDim transition group">
-      <p className="text-sm text-terminal-text font-medium leading-snug group-hover:text-terminal-cyan transition line-clamp-3">
-        {item.title}
-      </p>
-      <div className="flex items-center gap-2 mt-2 text-2xs text-terminal-textDim">
-        <span className="font-semibold text-terminal-textMuted">{item.publisher}</span>
-        {item.published && (
-          <>
-            <span>·</span>
-            <span className="num">{item.published}</span>
-          </>
-        )}
-      </div>
-    </a>
-  );
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// Module quick-access cards
-// ─────────────────────────────────────────────────────────────────────────────
-
-const MODULES = [
-  { href: '/simulate',  emoji: '∿',  title: 'Simulate',   desc: 'GBM · Merton · Heston · GARCH — calibration auto', color: '#ffa726' },
-  { href: '/compare',   emoji: '⊕',  title: 'Compare',    desc: '4 modèles simultanés + stress géopolitique',       color: '#ce93d8' },
-  { href: '/portfolio', emoji: '◈',  title: 'Portfolio',  desc: 'Markowitz · frontière efficiente · Monte Carlo',   color: '#81c784' },
-  { href: '/backtest',  emoji: '⟲',  title: 'Backtest',   desc: 'Rolling-window MC · Sharpe · VaR coverage',        color: '#00d9ff' },
-  { href: '/calendar',  emoji: '📅', title: 'Calendar',   desc: 'FOMC · ECB · BOE · BOJ · CPI · NFP · Earnings',    color: '#ab47bc' },
-  { href: '/screener',  emoji: '⊟',  title: 'Screener',   desc: 'Filtrer par secteur · market cap · beta · P/E',    color: '#26c6da' },
-];
-
-// ─────────────────────────────────────────────────────────────────────────────
-// Macro config (same as former /dashboard)
-// ─────────────────────────────────────────────────────────────────────────────
-
-const MACRO_COUNTRIES = [
-  {
-    code: 'us', flag: '🇺🇸', name: 'United States',
-    indicators: [
-      { indicator: 'inflation',     title: 'Inflation (CPI)',    decimals: 2 },
-      { indicator: 'unemployment',  title: 'Unemployment',       decimals: 1 },
-      { indicator: 'fed_rate',      title: 'Fed Funds Rate',     decimals: 2 },
-      { indicator: 'gdp',           title: 'Real GDP Growth',    decimals: 2 },
-      { indicator: 'yield_10y',     title: '10Y Treasury Yield', decimals: 3 },
-    ],
-  },
-  {
-    code: 'eu', flag: '🇪🇺', name: 'Eurozone',
-    indicators: [
-      { indicator: 'inflation',     title: 'Inflation (HICP)',   decimals: 2 },
-      { indicator: 'unemployment',  title: 'Unemployment',       decimals: 1 },
-      { indicator: 'ecb_rate',      title: 'ECB Deposit Rate',   decimals: 2 },
-      { indicator: 'gdp',           title: 'Real GDP',           decimals: 0 },
-      { indicator: 'bund_10y',      title: 'Bund 10Y Yield',     decimals: 3 },
-    ],
-  },
-  {
-    code: 'gb', flag: '🇬🇧', name: 'United Kingdom',
-    indicators: [
-      { indicator: 'inflation',     title: 'Inflation (CPI)',    decimals: 2 },
-      { indicator: 'unemployment',  title: 'Unemployment',       decimals: 1 },
-      { indicator: 'gdp',           title: 'Real GDP',           decimals: 0 },
-      { indicator: 'gilt_10y',      title: 'Gilt 10Y Yield',     decimals: 3 },
-    ],
-  },
-  {
-    code: 'jp', flag: '🇯🇵', name: 'Japan',
-    indicators: [
-      { indicator: 'inflation',     title: 'Inflation (CPI)',    decimals: 2 },
-      { indicator: 'unemployment',  title: 'Unemployment',       decimals: 1 },
-      { indicator: 'gdp',           title: 'Real GDP',           decimals: 0 },
-    ],
-  },
-];
-
-// ─────────────────────────────────────────────────────────────────────────────
-// Skeleton
-// ─────────────────────────────────────────────────────────────────────────────
-
-function Skeleton({ className }: { className?: string }) {
-  return <div className={`animate-pulse bg-terminal-surface rounded ${className ?? ''}`} />;
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// Page
-// ─────────────────────────────────────────────────────────────────────────────
-
-// Tape tickers for WebSocket subscription
-const TAPE_WS_SYMBOLS = [
-  '^GSPC', '^NDX', '^DJI', '^VIX', '^RUT', '^FTSE', '^N225',
-  'GC=F', 'CL=F', 'BTC-USD', 'ETH-USD', 'EURUSD=X', '^TNX',
-  'AAPL', 'NVDA', 'MSFT',
-];
-
-export default function Home() {
-  const [data,    setData]    = useState<MarketData | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [error,   setError]   = useState<string | null>(null);
-  const [lastUpdate, setLastUpdate] = useState<string>('');
-
-  // Live price feed via WebSocket
-  const { prices: liveWs } = useWebSocket(TAPE_WS_SYMBOLS);
-
-  // Merge WS prices into tape / indices (keep change_pct from REST, update price from WS)
-  const liveTape = useMemo(() => {
-    if (!data?.tape) return [];
-    return data.tape.map(item => {
-      const live = lookupPrice(liveWs, item.ticker);
-      return live ? { ...item, price: live.price } : item;
-    });
-  }, [data?.tape, liveWs]);
-
-  const liveIndices = useMemo(() => {
-    if (!data?.indices) return [];
-    return data.indices.map(item => {
-      const live = lookupPrice(liveWs, item.ticker);
-      return live ? { ...item, price: live.price } : item;
-    });
-  }, [data?.indices, liveWs]);
-
-  useEffect(() => {
-    let cancelled = false;
-    setLoading(true);
-    apiFetch<MarketData>('/api/home/market')
-      .then((d) => {
-        if (cancelled) return;
-        setData(d);
-        setLastUpdate(new Date().toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' }));
-      })
-      .catch((e) => {
-        if (cancelled) return;
-        setError(e instanceof Error ? e.message : 'Erreur de chargement');
-      })
-      .finally(() => {
-        if (!cancelled) setLoading(false);
-      });
-
-    // Rafraîchissement toutes les 5 minutes
-    const interval = setInterval(() => {
-      apiFetch<MarketData>('/api/home/market').then((d) => {
-        if (!cancelled) {
-          setData(d);
-          setLastUpdate(new Date().toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' }));
-        }
-      }).catch(() => {});
-    }, 5 * 60 * 1000);
-
-    return () => {
-      cancelled = true;
-      clearInterval(interval);
-    };
-  }, []);
-
+export default function LandingPage() {
   return (
     <>
       <Head>
-        <title>Monte Carlo v3 — Marchés & Simulations</title>
+        <title>Monte Carlo v3 — Equity Analysis Platform</title>
+        <meta name="description" content="Professional-grade equity analysis platform. Monte Carlo simulations, portfolio optimization, live market data, technical indicators and macro dashboard." />
+        <meta property="og:title"       content="Monte Carlo v3 — Equity Analysis Platform" />
+        <meta property="og:description" content="4 stochastic models · Markowitz optimizer · Live WebSocket prices · S&P 500 screener · Economic calendar" />
+        <meta property="og:type"        content="website" />
       </Head>
 
-      <Header />
-
-      {/* ── Ticker tape ─────────────────────────────────────────── */}
-      {liveTape.length > 0 ? (
-        <TickerTape items={liveTape} />
-      ) : data?.tape ? (
-        <TickerTape items={data.tape} />
-      ) : (
-        <div className="h-8 bg-terminal-bg border-b border-terminal-border animate-pulse" />
-      )}
-
-      <main className="max-w-7xl mx-auto px-4 py-5 space-y-6">
-
-        {/* ── En-tête + status ────────────────────────────────── */}
-        <div className="flex items-center justify-between flex-wrap gap-2">
-          <div>
-            <h1 className="text-xl font-bold text-terminal-text">
-              Marchés <span className="text-terminal-cyan">·</span> Actualités
-            </h1>
-            <p className="text-xs text-terminal-textDim mt-0.5">
-              Twelve Data · prix en temps réel · snapshot 5 min
-            </p>
-          </div>
-          {lastUpdate && (
-            <div className="flex items-center gap-2 text-xs text-terminal-textDim num">
-              <span className="inline-block w-1.5 h-1.5 rounded-full bg-bull animate-pulse" />
-              Mis à jour {lastUpdate}
-            </div>
-          )}
-          {error && (
-            <div className="text-xs text-bear bg-bear bg-opacity-10 border border-bear border-opacity-30 rounded px-3 py-1.5">
-              ⚠ {error}
-            </div>
-          )}
-        </div>
-
-        {/* ── Indices clés ─────────────────────────────────────── */}
-        <section>
-          <h2 className="text-2xs uppercase tracking-widest text-terminal-textDim mb-2">
-            Marchés mondiaux
-          </h2>
-          {loading ? (
-            <div className="grid grid-cols-3 sm:grid-cols-5 lg:grid-cols-9 gap-2">
-              {Array.from({ length: 9 }).map((_, i) => <Skeleton key={i} className="h-20" />)}
-            </div>
-          ) : (
-            <div className="grid grid-cols-3 sm:grid-cols-5 lg:grid-cols-9 gap-2">
-              {(liveIndices.length > 0 ? liveIndices : data?.indices ?? []).map((item) => (
-                <IndexCard key={item.ticker} item={item} />
-              ))}
-            </div>
-          )}
-        </section>
-
-        {/* ── Movers + News ─────────────────────────────────────── */}
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-5">
-
-          {/* Gainers */}
-          <div className="bg-terminal-surface border border-terminal-border rounded-lg p-4">
-            <h2 className="text-2xs uppercase tracking-widest text-terminal-textDim mb-3 flex items-center gap-2">
-              <span className="inline-block w-2 h-2 rounded-full bg-bull" />
-              Meilleures performances
-            </h2>
-            {loading ? (
-              <div className="space-y-2">
-                {Array.from({ length: 5 }).map((_, i) => <Skeleton key={i} className="h-10" />)}
-              </div>
-            ) : data?.gainers?.length ? (
-              <div className="space-y-1">
-                {data.gainers.map((m) => <MoverRow key={m.ticker} mover={m} type="gain" />)}
-              </div>
-            ) : (
-              <p className="text-xs text-terminal-textDim">Marché fermé ou données indisponibles</p>
-            )}
+      {/* ── Top nav (always dark) ────────────────────────────────────── */}
+      <nav className="fixed top-0 w-full z-50 border-b border-white/10 bg-[#0a0e1a]/90 backdrop-blur-md">
+        <div className="max-w-7xl mx-auto px-5 h-14 flex items-center justify-between">
+          {/* Logo */}
+          <div className="flex items-center gap-2.5">
+            <span className="w-7 h-7 rounded flex items-center justify-center text-white text-xs font-bold"
+              style={{ background: '#b92e25' }}>
+              MC
+            </span>
+            <span className="font-serif text-[15px] text-white">Monte Carlo</span>
+            <span className="text-xs text-white/35 font-mono">v3</span>
           </div>
 
-          {/* Losers */}
-          <div className="bg-terminal-surface border border-terminal-border rounded-lg p-4">
-            <h2 className="text-2xs uppercase tracking-widest text-terminal-textDim mb-3 flex items-center gap-2">
-              <span className="inline-block w-2 h-2 rounded-full bg-bear" />
-              Plus fortes baisses
-            </h2>
-            {loading ? (
-              <div className="space-y-2">
-                {Array.from({ length: 5 }).map((_, i) => <Skeleton key={i} className="h-10" />)}
-              </div>
-            ) : data?.losers?.length ? (
-              <div className="space-y-1">
-                {data.losers.map((m) => <MoverRow key={m.ticker} mover={m} type="loss" />)}
-              </div>
-            ) : (
-              <p className="text-xs text-terminal-textDim">Données indisponibles</p>
-            )}
-          </div>
-
-          {/* News column */}
-          <div className="bg-terminal-surface border border-terminal-border rounded-lg p-4">
-            <h2 className="text-2xs uppercase tracking-widest text-terminal-textDim mb-3">
-              Actualités financières
-            </h2>
-            {loading ? (
-              <div className="space-y-2">
-                {Array.from({ length: 4 }).map((_, i) => <Skeleton key={i} className="h-20" />)}
-              </div>
-            ) : data?.news?.length ? (
-              <div className="space-y-2">
-                {data.news.slice(0, 5).map((item, i) => (
-                  <NewsCard key={i} item={item} />
-                ))}
-              </div>
-            ) : (
-              <p className="text-xs text-terminal-textDim">Actualités indisponibles</p>
-            )}
+          {/* Actions */}
+          <div className="flex items-center gap-2">
+            <ThemeToggle />
+            <a
+              href={GITHUB}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="hidden sm:inline-flex items-center gap-1.5 text-xs text-white/55 hover:text-white/90 px-3 py-1.5 rounded border border-white/15 hover:border-white/35 transition"
+            >
+              GitHub ↗
+            </a>
+            <Link
+              href="/markets"
+              className="inline-flex items-center gap-1.5 text-xs font-semibold px-4 py-1.5 rounded transition"
+              style={{ background: '#b92e25', color: 'white' }}
+            >
+              Launch App →
+            </Link>
           </div>
         </div>
+      </nav>
 
-        {/* ── Actualités détaillées (ligne du bas) ───────────────── */}
-        {!loading && data?.news && data.news.length > 5 && (
-          <section>
-            <h2 className="text-2xs uppercase tracking-widest text-terminal-textDim mb-3">
-              Plus d'actualités
-            </h2>
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
-              {data.news.slice(5, 9).map((item, i) => (
-                <NewsCard key={i} item={item} />
-              ))}
-            </div>
-          </section>
-        )}
+      {/* ── Hero (always dark) ───────────────────────────────────────── */}
+      <section
+        className="relative min-h-screen flex flex-col items-center justify-center overflow-hidden pt-14"
+        style={{ background: '#0a0e1a' }}
+      >
+        {/* CSS grid background */}
+        <div
+          className="absolute inset-0"
+          style={{
+            backgroundImage:
+              'linear-gradient(rgba(42,48,64,0.55) 1px, transparent 1px), linear-gradient(90deg, rgba(42,48,64,0.55) 1px, transparent 1px)',
+            backgroundSize: '60px 60px',
+          }}
+        />
 
-        {/* ── Global Macro ────────────────────────────────────────── */}
-        <section>
-          <h2 className="text-2xs uppercase tracking-widest text-terminal-textDim mb-4">
-            Global Macro — FRED · BCE · OCDE
-          </h2>
-          <div className="space-y-5">
-            {MACRO_COUNTRIES.map((country) => (
-              <div key={country.code}>
-                <h3 className="text-xs font-semibold text-terminal-textMuted mb-2 flex items-center gap-2">
-                  <span>{country.flag}</span>
-                  <span>{country.name}</span>
-                </h3>
-                <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-2">
-                  {country.indicators.map((cfg) => (
-                    <MacroIndicator
-                      key={`${country.code}-${cfg.indicator}`}
-                      country={country.code}
-                      indicator={cfg.indicator}
-                      title={cfg.title}
-                      decimals={cfg.decimals}
-                    />
-                  ))}
-                </div>
+        {/* Radial fade — dims grid toward center */}
+        <div
+          className="absolute inset-0"
+          style={{
+            background:
+              'radial-gradient(ellipse 90% 70% at 50% 50%, transparent 10%, #0a0e1a 75%)',
+          }}
+        />
+
+        {/* Animated chart lines */}
+        <div className="absolute inset-0 opacity-20">
+          <HeroChart />
+        </div>
+
+        {/* Content */}
+        <div
+          className="relative z-10 text-center px-6 max-w-4xl mx-auto"
+          style={{ animation: 'fade-up 0.8s ease-out 0.1s both' }}
+        >
+          {/* Badge */}
+          <div className="inline-flex items-center gap-2 px-3.5 py-1 rounded-full border mb-8 text-xs font-mono"
+            style={{ borderColor: 'rgba(0,217,255,0.3)', background: 'rgba(0,217,255,0.08)', color: '#00d9ff' }}>
+            <span className="w-1.5 h-1.5 rounded-full animate-pulse" style={{ background: '#00d9ff' }} />
+            Full-Stack Financial Analytics Platform
+          </div>
+
+          {/* Main title */}
+          <h1 className="font-serif text-6xl sm:text-7xl md:text-8xl mb-4 tracking-tight"
+            style={{ color: 'white' }}>
+            Monte Carlo{' '}
+            <span style={{ color: '#00d9ff' }}>v3</span>
+          </h1>
+
+          {/* Tagline */}
+          <p className="text-lg sm:text-xl md:text-2xl mb-5 font-light"
+            style={{ color: 'rgba(255,255,255,0.55)' }}>
+            Equity analysis, simulation &amp; portfolio optimization
+          </p>
+
+          {/* Description */}
+          <p className="text-sm leading-relaxed max-w-2xl mx-auto mb-10"
+            style={{ color: 'rgba(255,255,255,0.35)' }}>
+            Professional-grade financial platform built with FastAPI + Next.js 14.
+            Monte Carlo simulations across 4 stochastic models, Markowitz efficient frontier,
+            WebSocket live prices, TradingView charts with RSI/MACD, and a macro dashboard
+            for US, EU, UK &amp; JP markets.
+          </p>
+
+          {/* CTAs */}
+          <div className="flex flex-wrap items-center justify-center gap-4 mb-14">
+            <Link
+              href="/markets"
+              className="inline-flex items-center gap-2 px-8 py-3 rounded-lg text-sm font-semibold text-white transition-all hover:scale-[1.03] hover:brightness-110"
+              style={{ background: '#b92e25' }}
+            >
+              Launch Platform
+              <span className="text-base">→</span>
+            </Link>
+            <a
+              href={GITHUB}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="inline-flex items-center gap-2 px-8 py-3 rounded-lg text-sm transition-all"
+              style={{ border: '1px solid rgba(255,255,255,0.2)', color: 'rgba(255,255,255,0.6)' }}
+              onMouseEnter={e => { (e.currentTarget as HTMLElement).style.borderColor = 'rgba(255,255,255,0.4)'; (e.currentTarget as HTMLElement).style.color = 'rgba(255,255,255,0.9)'; }}
+              onMouseLeave={e => { (e.currentTarget as HTMLElement).style.borderColor = 'rgba(255,255,255,0.2)'; (e.currentTarget as HTMLElement).style.color = 'rgba(255,255,255,0.6)'; }}
+            >
+              View on GitHub
+              <span className="text-base">↗</span>
+            </a>
+          </div>
+
+          {/* Stats */}
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-6 max-w-lg mx-auto">
+            {STATS.map((s) => (
+              <div key={s.label} className="text-center">
+                <div className="text-2xl font-bold font-mono" style={{ color: 'white' }}>{s.value}</div>
+                <div className="text-xs mt-1" style={{ color: 'rgba(255,255,255,0.35)' }}>{s.label}</div>
               </div>
             ))}
           </div>
-        </section>
+        </div>
 
-        {/* ── Modules ────────────────────────────────────────────── */}
-        <section>
-          <h2 className="text-2xs uppercase tracking-widest text-terminal-textDim mb-3">
-            Modules d'analyse
-          </h2>
-          <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-3">
-            {MODULES.map((m) => (
-              <Link key={m.href} href={m.href}
-                className="bg-terminal-surface border border-terminal-border rounded-lg p-3 hover:bg-terminal-surfaceHi hover:border-terminal-cyanDim transition group block">
-                <div className="flex items-start justify-between mb-2">
-                  <span className="text-xl">{m.emoji}</span>
-                  <span className="text-2xs font-semibold" style={{ color: m.color }}>● Live</span>
+        {/* Scroll indicator */}
+        <div
+          className="absolute bottom-8 left-1/2 -translate-x-1/2 animate-bounce"
+          style={{ color: 'rgba(255,255,255,0.25)' }}
+        >
+          ↓
+        </div>
+      </section>
+
+      {/* ── Features (theme-aware) ───────────────────────────────────── */}
+      <section className="bg-terminal-bg py-24 px-6">
+        <div className="max-w-6xl mx-auto">
+
+          <div className="text-center mb-14">
+            <h2 className="font-serif text-3xl text-terminal-text mb-3">Platform Modules</h2>
+            <p className="text-sm text-terminal-textMuted max-w-xl mx-auto">
+              Each module is powered by real market data — Twelve Data, FMP and FRED APIs.
+              No mock data, no static fixtures.
+            </p>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
+            {FEATURES.map((f) => (
+              <Link
+                key={f.href}
+                href={f.href}
+                className={`group bg-terminal-surface border border-terminal-border rounded-xl p-6 transition-all duration-200 hover:-translate-y-0.5 hover:shadow-lg ${f.border}`}
+              >
+                <div className="flex items-start justify-between mb-4">
+                  <span className="text-3xl font-mono leading-none" style={{ color: f.color }}>
+                    {f.icon}
+                  </span>
+                  <span
+                    className="text-[10px] font-mono px-2 py-0.5 rounded-full border opacity-60"
+                    style={{ color: f.color, borderColor: f.color }}
+                  >
+                    {f.tags[0]}
+                  </span>
                 </div>
-                <div className="font-semibold text-sm text-terminal-text group-hover:text-terminal-cyan transition">
-                  {m.title} →
+
+                <h3 className="font-semibold text-terminal-text group-hover:text-terminal-cyan transition text-[15px] mb-2">
+                  {f.title} →
+                </h3>
+
+                <p className="text-xs text-terminal-textMuted leading-relaxed mb-4">
+                  {f.desc}
+                </p>
+
+                <div className="flex flex-wrap gap-1.5">
+                  {f.tags.map((tag) => (
+                    <span
+                      key={tag}
+                      className="text-[10px] font-mono px-2 py-0.5 rounded border border-terminal-border text-terminal-textDim"
+                    >
+                      {tag}
+                    </span>
+                  ))}
                 </div>
-                <p className="text-2xs text-terminal-textMuted mt-1 leading-snug">{m.desc}</p>
               </Link>
             ))}
           </div>
-        </section>
+        </div>
+      </section>
 
-      </main>
+      {/* ── Stack (theme-aware) ──────────────────────────────────────── */}
+      <section className="bg-terminal-surface border-y border-terminal-border py-16 px-6">
+        <div className="max-w-5xl mx-auto">
+          <h2 className="text-center text-xs font-mono text-terminal-textMuted uppercase tracking-[0.2em] mb-10">
+            Built with
+          </h2>
+          <div className="flex flex-wrap justify-center gap-3">
+            {STACK.map((s) => (
+              <div
+                key={s.label}
+                className="px-4 py-2.5 rounded-lg border border-terminal-border bg-terminal-bg hover:border-terminal-cyanDim transition-colors"
+              >
+                <div className="text-sm font-medium text-terminal-text">{s.label}</div>
+                <div className="text-[10px] text-terminal-textDim mt-0.5">{s.sub}</div>
+              </div>
+            ))}
+          </div>
+        </div>
+      </section>
 
-      <footer className="border-t border-terminal-border mt-8 px-4 py-3 text-center text-2xs text-terminal-textDim num">
-        Monte Carlo v3 · FastAPI + Next.js · Données : Yahoo Finance (yfinance), FRED API, OECD
+      {/* ── Footer (always dark) ─────────────────────────────────────── */}
+      <footer
+        className="py-10 px-6 text-center"
+        style={{ background: '#0a0e1a' }}
+      >
+        <div className="flex items-center justify-center gap-2 mb-3">
+          <span className="w-6 h-6 rounded flex items-center justify-center text-white text-[10px] font-bold"
+            style={{ background: '#b92e25' }}>
+            MC
+          </span>
+          <span className="font-serif text-sm" style={{ color: 'rgba(255,255,255,0.6)' }}>Monte Carlo v3</span>
+        </div>
+        <p className="text-xs font-mono mb-2" style={{ color: 'rgba(255,255,255,0.3)' }}>
+          FastAPI + Next.js 14 · Deployed on Railway + Vercel
+        </p>
+        <a
+          href={GITHUB}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="text-xs font-mono transition"
+          style={{ color: 'rgba(255,255,255,0.3)' }}
+          onMouseEnter={e => ((e.currentTarget as HTMLElement).style.color = 'rgba(255,255,255,0.6)')}
+          onMouseLeave={e => ((e.currentTarget as HTMLElement).style.color = 'rgba(255,255,255,0.3)')}
+        >
+          github.com/anton-nab/monte-carlo-v3 ↗
+        </a>
       </footer>
     </>
   );
