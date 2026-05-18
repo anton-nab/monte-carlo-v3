@@ -95,71 +95,171 @@ const STACK = [
 ];
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Hero chart — animated SVG (decorative)
+// Hero chart — candlesticks + Monte Carlo fan (decorative, deterministic)
 // ─────────────────────────────────────────────────────────────────────────────
 
+// Candle data: SVG y-axis (lower y = higher price). bull = c < o.
+const CANDLES = [
+  { x:  20, o: 288, c: 274, h: 270, l: 292 },
+  { x:  48, o: 274, c: 281, h: 270, l: 284 },
+  { x:  76, o: 281, c: 266, h: 263, l: 284 },
+  { x: 104, o: 266, c: 273, h: 263, l: 277 },
+  { x: 132, o: 273, c: 258, h: 254, l: 276 },
+  { x: 160, o: 258, c: 265, h: 254, l: 269 },
+  { x: 188, o: 265, c: 249, h: 245, l: 268 },
+  { x: 216, o: 249, c: 257, h: 245, l: 260 },
+  { x: 244, o: 257, c: 241, h: 238, l: 260 },
+  { x: 272, o: 241, c: 249, h: 238, l: 252 },
+  { x: 300, o: 249, c: 232, h: 229, l: 252 },
+  { x: 328, o: 232, c: 220, h: 217, l: 235 },
+  { x: 356, o: 220, c: 214, h: 211, l: 223 },
+];
+
+// Deterministic pseudo-random MC trajectories (no runtime randomness = SSR safe)
+function genMCPaths(): string[] {
+  const xs = [385, 437, 495, 555, 615, 675, 735, 795, 855, 915, 975, 1035, 1095, 1155, 1200];
+  const result: string[] = [];
+  let s = 0x9e3779b9;
+  const rng = () => {
+    s = ((s ^ (s >>> 16)) * 0x45d9f3b) | 0;
+    s = ((s ^ (s >>> 16)) * 0x45d9f3b) | 0;
+    return ((s >>> 0) / 0x100000000);
+  };
+  for (let i = 0; i < 30; i++) {
+    const drift = -2.6 + (i / 29) * 5.8; // strong bull → strong bear
+    const vol = 4 + rng() * 9;
+    let y = 214;
+    const pts = [`${xs[0]},${Math.round(y)}`];
+    for (let j = 1; j < xs.length; j++) {
+      y += drift * 2.6 + (rng() - 0.5) * vol;
+      y = Math.max(38, Math.min(388, y));
+      pts.push(`${xs[j]},${Math.round(y)}`);
+    }
+    result.push(pts.join(' '));
+  }
+  return result;
+}
+
+const MC_PATHS = genMCPaths();
+
 function HeroChart() {
+  const closeLine = CANDLES.map(c => `${c.x + 7},${c.c}`).join(' ');
+  const histArea  = `${CANDLES[0].x + 7},420 ` + closeLine + ` ${CANDLES[CANDLES.length - 1].x + 7},420`;
+
   return (
     <svg
-      viewBox="0 0 1200 320"
+      viewBox="0 0 1200 420"
       className="absolute inset-0 w-full h-full pointer-events-none"
       preserveAspectRatio="xMidYMid slice"
       aria-hidden="true"
     >
-      {/* Horizontal reference grid lines */}
-      {[70, 140, 210, 280].map((y) => (
-        <line
-          key={y} x1="0" y1={y} x2="1200" y2={y}
-          stroke="rgba(42,48,64,0.9)" strokeWidth="1" strokeDasharray="4 10"
-        />
-      ))}
-
-      {/* Main uptrend — cyan */}
-      <polyline
-        points="0,275 90,255 180,268 270,222 360,238 450,190 540,205 630,158 720,172 810,128 900,142 990,98 1080,112 1170,68 1200,60"
-        fill="none"
-        stroke="#00d9ff"
-        strokeWidth="2.5"
-        strokeLinejoin="round"
-        strokeLinecap="round"
-        opacity="0.7"
-        style={{
-          strokeDasharray: 1900,
-          strokeDashoffset: 1900,
-          animation: 'draw-chart 3.5s cubic-bezier(0.4,0,0.2,1) 0.4s forwards',
-        }}
-      />
-      {/* Area fill under cyan line */}
-      <polyline
-        points="0,275 90,255 180,268 270,222 360,238 450,190 540,205 630,158 720,172 810,128 900,142 990,98 1080,112 1170,68 1200,60 1200,320 0,320"
-        fill="url(#cyanGrad)"
-        stroke="none"
-        opacity="0.08"
-      />
-
-      {/* Secondary — crimson, offset by ~30px */}
-      <polyline
-        points="0,298 90,282 180,295 270,255 360,268 450,228 540,242 630,200 720,214 810,170 900,182 990,142 1080,156 1170,112 1200,102"
-        fill="none"
-        stroke="#b92e25"
-        strokeWidth="1.5"
-        strokeLinejoin="round"
-        strokeLinecap="round"
-        opacity="0.5"
-        style={{
-          strokeDasharray: 1900,
-          strokeDashoffset: 1900,
-          animation: 'draw-chart 3.5s cubic-bezier(0.4,0,0.2,1) 0.9s forwards',
-        }}
-      />
-
-      {/* Gradient definition */}
       <defs>
-        <linearGradient id="cyanGrad" x1="0" y1="0" x2="0" y2="1">
-          <stop offset="0%"   stopColor="#00d9ff" stopOpacity="1" />
-          <stop offset="100%" stopColor="#00d9ff" stopOpacity="0" />
+        <linearGradient id="histGrad" x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0%"   stopColor="rgba(255,255,255,0.18)" />
+          <stop offset="100%" stopColor="rgba(255,255,255,0)" />
+        </linearGradient>
+        <linearGradient id="fanGrad" x1="0" y1="0" x2="1" y2="0">
+          <stop offset="0%"   stopColor="transparent" />
+          <stop offset="50%"  stopColor="rgba(0,217,255,0.05)" />
+          <stop offset="100%" stopColor="rgba(0,217,255,0.13)" />
         </linearGradient>
       </defs>
+
+      {/* ── Grid lines ───────────────────────────────────────────── */}
+      {[80, 160, 240, 320, 400].map(y => (
+        <line key={y} x1="0" y1={y} x2="1200" y2={y}
+          stroke="rgba(42,48,64,0.85)" strokeWidth="1" strokeDasharray="3 14" />
+      ))}
+
+      {/* ── Historical area fill (under close line) ────────────── */}
+      <polygon points={histArea} fill="url(#histGrad)" opacity="0.14" />
+
+      {/* ── Close-price connector ───────────────────────────────── */}
+      <polyline points={closeLine}
+        fill="none" stroke="rgba(255,255,255,0.25)" strokeWidth="1.2"
+        strokeLinejoin="round" strokeLinecap="round" />
+
+      {/* ── Candlestick bars ────────────────────────────────────── */}
+      {CANDLES.map((c, i) => {
+        const bull  = c.c < c.o;
+        const color = bull ? '#4ade80' : '#f87171';
+        const bodyY = Math.min(c.o, c.c);
+        const bodyH = Math.max(2, Math.abs(c.o - c.c));
+        return (
+          <g key={i} opacity="0.72">
+            {/* Wick */}
+            <line x1={c.x + 7} y1={c.h} x2={c.x + 7} y2={c.l}
+              stroke={color} strokeWidth="1.2" />
+            {/* Body */}
+            <rect x={c.x} y={bodyY} width="14" height={bodyH}
+              fill={color} rx="1.5" />
+          </g>
+        );
+      })}
+
+      {/* ── "TODAY" separator ───────────────────────────────────── */}
+      <line x1="385" y1="8" x2="385" y2="412"
+        stroke="rgba(255,255,255,0.16)" strokeWidth="1"
+        strokeDasharray="4 8" />
+      <text x="390" y="24"
+        fill="rgba(255,255,255,0.25)" fontSize="9"
+        fontFamily="monospace" letterSpacing="1.5">TODAY</text>
+
+      {/* ── MC background trajectories (30 paths, staggered) ────── */}
+      {MC_PATHS.map((pts, i) => {
+        const isBull = i < 9;
+        const isBear = i > 20;
+        const color  = isBull ? '#34d399' : isBear ? '#f87171' : '#6b7280';
+        const op     = isBull ? (i < 3 ? 0.28 : 0.15) : isBear ? (i > 27 ? 0.28 : 0.14) : 0.1;
+        return (
+          <polyline key={i} points={pts} fill="none"
+            stroke={color} strokeWidth="0.75" opacity={op}
+            strokeLinejoin="round"
+            style={{
+              strokeDasharray: 2000,
+              strokeDashoffset: 2000,
+              animation: `draw-chart ${2.4 + i * 0.04}s ease-out ${0.4 + i * 0.04}s forwards`,
+            }}
+          />
+        );
+      })}
+
+      {/* ── Fan area P5–P95 ─────────────────────────────────────── */}
+      <path
+        d="M 385,214 C 590,192 870,148 1200,88 L 1200,336 C 870,310 590,272 385,214 Z"
+        fill="url(#fanGrad)"
+      />
+
+      {/* ── P95 ─────────────────────────────────────────────────── */}
+      <path d="M 385,214 C 580,192 870,145 1200,88"
+        fill="none" stroke="#00d9ff" strokeWidth="2.2" opacity="0.85"
+        strokeLinecap="round"
+        style={{ strokeDasharray: 1100, strokeDashoffset: 1100,
+          animation: 'draw-chart 2.2s ease-out 1.3s forwards' }} />
+
+      {/* ── P50 ─────────────────────────────────────────────────── */}
+      <path d="M 385,214 C 640,208 920,200 1200,194"
+        fill="none" stroke="rgba(255,255,255,0.9)" strokeWidth="2.6" opacity="0.9"
+        strokeLinecap="round"
+        style={{ strokeDasharray: 960, strokeDashoffset: 960,
+          animation: 'draw-chart 2.2s ease-out 1.5s forwards' }} />
+
+      {/* ── P5 ──────────────────────────────────────────────────── */}
+      <path d="M 385,214 C 580,232 870,295 1200,336"
+        fill="none" stroke="#f87171" strokeWidth="2.2" opacity="0.8"
+        strokeLinecap="round"
+        style={{ strokeDasharray: 1100, strokeDashoffset: 1100,
+          animation: 'draw-chart 2.2s ease-out 1.4s forwards' }} />
+
+      {/* ── Percentile labels ───────────────────────────────────── */}
+      <text x="1150" y="80"  fill="#00d9ff" fontSize="9.5" fontFamily="monospace" opacity="0.7">P95</text>
+      <text x="1150" y="188" fill="rgba(255,255,255,0.7)" fontSize="9.5" fontFamily="monospace">P50</text>
+      <text x="1150" y="330" fill="#f87171" fontSize="9.5" fontFamily="monospace" opacity="0.7">P5</text>
+
+      {/* ── Origin dot (TODAY anchor) ────────────────────────────── */}
+      <circle cx="385" cy="214" r="4" fill="#00d9ff" opacity="0.95" />
+      <circle cx="385" cy="214" r="9" fill="none"
+        stroke="#00d9ff" strokeWidth="1" opacity="0.35" />
     </svg>
   );
 }
