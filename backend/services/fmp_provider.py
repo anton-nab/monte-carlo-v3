@@ -82,7 +82,7 @@ class FMPProvider:
     FINANCIALS_TTL = timedelta(hours=72)   # IS/BS/CF barely change
     BATCH_QUOTE_TTL = timedelta(hours=1)
     NEWS_TTL        = timedelta(minutes=30)
-    SCREENER_TTL    = timedelta(minutes=30)
+    SCREENER_TTL    = timedelta(hours=12)   # 503 tickers × 1 TD credit × 2/day ≈ 1006 credits
 
     def __init__(self, api_key: Optional[str] = None) -> None:
         self._api_key = api_key or os.getenv("FMP_API_KEY", "")
@@ -574,106 +574,68 @@ class FMPProvider:
     # ─────────────────────────────────────────────────────────────────
 
     @staticmethod
-    def _sync_yahoo_quotes(tickers: List[str]) -> Dict[str, Dict]:
+    def _sync_td_quotes(tickers: List[str]) -> Dict[str, Dict]:
         """
-        Bulk quotes from Yahoo Finance (free, no API key).
+        Bulk quotes via Twelve Data /quote (commercial-OK, free tier).
 
-        Yahoo requires cookie + crumb authentication since 2024.
-        Flow (mirrors yfinance internals):
-          1. GET fc.yahoo.com  → sets cookie in client jar
-          2. GET /v1/test/getcrumb (with cookie) → returns crumb string
-          3. GET /v7/finance/quote?symbols=...&crumb=... (with cookie)
-
-        Uses a single persistent httpx.Client so cookies are shared
-        across all three steps.
+        Multi-symbol: ?symbol=AAPL,MSFT,... → {AAPL: {...}, MSFT: {...}}
+        Each symbol = 1 API credit.  Free plan: 800 credits/day.
+        With 503 S&P 500 tickers and 12h cache → ~2 loads/day ≈ 1006 credits.
         """
+        api_key = os.getenv("TWELVE_DATA_API_KEY", "")
+        if not api_key:
+            print("[TD screener] TWELVE_DATA_API_KEY not set")
+            return {}
+
         result: Dict[str, Dict] = {}
-        headers = {
-            "User-Agent": (
-                "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
-                "AppleWebKit/537.36 (KHTML, like Gecko) "
-                "Chrome/124.0.0.0 Safari/537.36"
-            ),
-            "Accept":          "*/*",
-            "Accept-Language": "en-US,en;q=0.9",
-            "Referer":         "https://finance.yahoo.com/",
-        }
+        chunk_size = 100
 
-        try:
-            with httpx.Client(
-                timeout=30, headers=headers, follow_redirects=True
-            ) as client:
-                # ── Step 1: acquire session cookie ───────────────────────
-                client.get("https://fc.yahoo.com")
-
-                # ── Step 2: get crumb ────────────────────────────────────
-                crumb_r = client.get(
-                    "https://query2.finance.yahoo.com/v1/test/getcrumb"
-                )
-                if crumb_r.status_code != 200 or not crumb_r.text.strip():
-                    print(
-                        f"[Yahoo auth] crumb failed "
-                        f"(HTTP {crumb_r.status_code}): {crumb_r.text[:80]}"
+        for i in range(0, len(tickers), chunk_size):
+            chunk = tickers[i : i + chunk_size]
+            try:
+                with httpx.Client(timeout=30) as c:
+                    resp = c.get(
+                        "https://api.twelvedata.com/quote",
+                        params={"symbol": ",".join(chunk), "apikey": api_key},
                     )
-                    return {}
-                crumb = crumb_r.text.strip()
-                print(f"[Yahoo auth] crumb acquired ({len(crumb)} chars)")
+                    resp.raise_for_status()
+                    data = resp.json()
 
-                # ── Step 3: fetch quotes in chunks of 100 ────────────────
-                for i in range(0, len(tickers), 100):
-                    chunk = tickers[i : i + 100]
-                    resp  = client.get(
-                        "https://query1.finance.yahoo.com/v7/finance/quote",
-                        params={
-                            "symbols": ",".join(chunk),
-                            "crumb":   crumb,
-                            "lang":    "en-US",
-                            "region":  "US",
-                        },
+                # Multi-symbol → dict of {sym: quote}; single → bare quote
+                if isinstance(data, dict):
+                    items = (
+                        data.items()
+                        if len(chunk) > 1
+                        else [(chunk[0], data)]
                     )
-                    if resp.status_code != 200:
-                        print(
-                            f"[Yahoo quotes] chunk {i//100+1}: "
-                            f"HTTP {resp.status_code}"
-                        )
-                        continue
-                    for q in resp.json().get("quoteResponse", {}).get("result", []):
-                        sym = (q.get("symbol") or "").strip()
-                        if not sym:
-                            continue
-                        price    = q.get("regularMarketPrice")
-                        last_div = q.get("trailingAnnualDividendRate") or 0
-                        div_yield = (
-                            round(float(last_div) / float(price) * 100, 2)
-                            if last_div and price else None
-                        )
-                        result[sym] = {
-                            "price":          price,
-                            "change_pct":     q.get("regularMarketChangePercent"),
-                            "volume":         int(q.get("regularMarketVolume") or 0),
-                            "market_cap":     q.get("marketCap"),
-                            "pe":             q.get("trailingPE"),
-                            "beta":           q.get("beta"),
-                            "exchange":       (
-                                q.get("fullExchangeName")
-                                or q.get("exchange") or ""
-                            ),
-                            "dividend_yield": div_yield,
-                        }
+                    for sym, q in items:
+                        if not isinstance(q, dict) or q.get("code"):
+                            continue  # error entry
+                        try:
+                            result[sym] = {
+                                "price":      float(q.get("close") or 0),
+                                "change_pct": float(q.get("percent_change") or 0),
+                                "volume":     int(q.get("volume") or 0),
+                                "exchange":   q.get("exchange") or "",
+                                "name":       q.get("name") or "",
+                            }
+                        except (TypeError, ValueError):
+                            pass
 
-        except Exception as exc:
-            print(f"[Yahoo quotes] fatal error: {exc}")
+            except Exception as exc:
+                print(f"[TD screener] chunk {i//chunk_size+1} error: {exc}")
 
-        print(f"[Yahoo quotes] {len(result)}/{len(tickers)} tickers fetched")
+        print(f"[TD screener] {len(result)}/{len(tickers)} quotes fetched")
         return result
 
     async def _get_screener_universe(self) -> List[Dict[str, Any]]:
         """
-        Build screener universe: S&P 500 constituents + Yahoo Finance bulk quotes.
+        Build screener universe: S&P 500 constituents + Twelve Data bulk quotes.
 
-        Constituents: GitHub CSV (free, no key, cached 24 h).
-        Quotes:       Yahoo Finance /v7/finance/quote (free, no key, 100/call).
-        Universe cached 30 min — all filter combos reuse the same data.
+        Constituents: GitHub CSV (free, cached 24 h).
+        Quotes:       TD /quote multi-symbol (API key required, free plan OK).
+                      503 tickers × 1 credit × ~2 loads/day ≈ 1006 credits/day.
+        Universe cached 12 h — all filter combos reuse the same data.
         """
         ck = "screener_universe_sp500"
         cached = self._get_cache(ck, ttl=self.SCREENER_TTL)
@@ -692,83 +654,53 @@ class FMPProvider:
             print("[Screener] SP500 CSV empty")
             return []
 
-        # Step 2: Bulk quotes via Yahoo Finance (runs in thread pool)
+        # Step 2: Bulk quotes via Twelve Data (runs in thread pool)
         loop      = asyncio.get_event_loop()
         quote_map = await loop.run_in_executor(
-            None, self._sync_yahoo_quotes, tickers
+            None, self._sync_td_quotes, tickers
         )
 
-        # Step 3: Merge CSV + quotes
+        # Step 3: Merge — include CSV-only stocks too (no quote = no price shown)
         result: List[Dict[str, Any]] = []
         for ticker in tickers:
-            q = quote_map.get(ticker)
-            if not q:
-                continue
+            q = quote_map.get(ticker, {})
             result.append({
-                "ticker":         ticker,
-                "name":           name_map.get(ticker) or ticker,
-                "price":          self._sf(q.get("price")),
-                "change_pct":     self._sf(q.get("change_pct")),
-                "market_cap":     self._sf(q.get("market_cap")),
-                "sector":         sector_map.get(ticker, ""),
-                "industry":       sector_map.get(ticker, ""),
-                "beta":           self._sf(q.get("beta")),
-                "pe":             self._sf(q.get("pe")),
-                "volume":         int(q.get("volume") or 0),
-                "exchange":       q.get("exchange") or "",
-                "dividend_yield": q.get("dividend_yield"),
+                "ticker":     ticker,
+                "name":       name_map.get(ticker) or q.get("name") or ticker,
+                "price":      self._sf(q.get("price")) if q else None,
+                "change_pct": self._sf(q.get("change_pct")) if q else None,
+                "volume":     int(q.get("volume") or 0) if q else 0,
+                "exchange":   q.get("exchange") or "",
+                "sector":     sector_map.get(ticker, ""),
+                # fundamentals not available in bulk on free tier
+                "market_cap": None,
+                "pe":         None,
+                "beta":       None,
             })
 
-        print(f"[Screener] universe ready: {len(result)} stocks")
-        if result:                        # don't cache empty (network failure)
+        print(f"[Screener] universe ready: {len(result)} stocks "
+              f"({len(quote_map)} with live quotes)")
+        if result:
             self._set_cache(ck, result)
         return result
 
     async def get_screener(
         self,
-        sector: str = "",
+        sector:   str = "",
         exchange: str = "",
-        market_cap_min: float = 0,
-        market_cap_max: float = 0,
-        beta_min: float = 0,
-        beta_max: float = 0,
-        price_min: float = 0,
-        price_max: float = 0,
-        limit: int = 50,
+        limit:    int = 50,
     ) -> List[Dict[str, Any]]:
         """
-        Stock screener over the S&P 500 universe.
-
-        Fetches universe once (S&P 500 constituents + batch quotes) then
-        applies all filters in-memory — avoids /v3/stock-screener which
-        returns empty on FMP free tier.
+        Screen S&P 500 universe by sector and exchange (in-memory filter).
+        Universe is built once by _get_screener_universe() and cached 12 h.
         """
         universe = await self._get_screener_universe()
 
-        # ── In-memory filtering ───────────────────────────────────────────
         result: List[Dict[str, Any]] = []
-        cap_min_raw = market_cap_min * 1_000_000_000
-        cap_max_raw = market_cap_max * 1_000_000_000
-
         for s in universe:
             if sector and s.get("sector") != sector:
                 continue
             if exchange and s.get("exchange", "").upper() != exchange.upper():
-                continue
-            mc = s.get("market_cap") or 0
-            if cap_min_raw > 0 and mc < cap_min_raw:
-                continue
-            if cap_max_raw > 0 and mc > cap_max_raw:
-                continue
-            bv = s.get("beta") or 0
-            if beta_min > 0 and bv < beta_min:
-                continue
-            if beta_max > 0 and bv > beta_max:
-                continue
-            pv = s.get("price") or 0
-            if price_min > 0 and pv < price_min:
-                continue
-            if price_max > 0 and pv > price_max:
                 continue
             result.append(s)
 
