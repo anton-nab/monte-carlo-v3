@@ -165,6 +165,86 @@ function HeroChart() {
         </linearGradient>
       </defs>
 
+      {/* ── Monaco F1 circuit — fond décoratif ──────────────────────
+           Tracé : Sainte-Dévote → Beau Rivage → Casino → Mirabeau
+                   → Loews hairpin → Portier → Tunnel → Chicane
+                   → Swimming pool → Rascasse → Ligne droite
+           Coordonnées calquées sur la vraie carte du circuit.          ── */}
+
+      {/* Lueur externe (road glow) */}
+      <path
+        d="M 250,385
+           C 228,385 217,370 217,350
+           C 217,328 228,308 252,292
+           L 302,210
+           C 324,175 358,145 400,121
+           C 444,96  496,80  552,72
+           C 610,64  670,61  730,61
+           L 800,61
+           C 836,60  866,74  882,103
+           C 898,132 894,168 874,198
+           C 852,230 818,250 800,272
+           C 780,297 770,326 778,355
+           C 786,384 810,390 836,384
+           L 972,380
+           C 1004,380 1024,362 1025,334
+           C 1026,305 1008,282 984,277
+           C 958,272 934,288 927,316
+           C 920,345 934,372 960,376
+           L 250,385 Z"
+        fill="rgba(0,217,255,0.025)"
+        stroke="rgba(0,217,255,0.055)"
+        strokeWidth="26"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+
+      {/* Route principale (centerline) */}
+      <path
+        d="M 250,385
+           C 228,385 217,370 217,350
+           C 217,328 228,308 252,292
+           L 302,210
+           C 324,175 358,145 400,121
+           C 444,96  496,80  552,72
+           C 610,64  670,61  730,61
+           L 800,61
+           C 836,60  866,74  882,103
+           C 898,132 894,168 874,198
+           C 852,230 818,250 800,272
+           C 780,297 770,326 778,355
+           C 786,384 810,390 836,384
+           L 972,380
+           C 1004,380 1024,362 1025,334
+           C 1026,305 1008,282 984,277
+           C 958,272 934,288 927,316
+           C 920,345 934,372 960,376
+           L 250,385 Z"
+        fill="none"
+        stroke="rgba(0,217,255,0.13)"
+        strokeWidth="7"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+
+      {/* Ligne de départ/arrivée — damier stylisé */}
+      {[0,6,12].map(dx => (
+        <rect key={dx} x={590+dx} y={377} width={4} height={12}
+          fill={dx === 6 ? 'rgba(255,255,255,0.18)' : 'rgba(255,255,255,0.32)'}
+          rx="0.5"
+        />
+      ))}
+
+      {/* Labels discrets des virages */}
+      <text x="202" y="348" fill="rgba(0,217,255,0.28)" fontSize="7.5"
+        fontFamily="monospace" letterSpacing="0.5">ST-DÉVOTE</text>
+      <text x="728" y="52" fill="rgba(0,217,255,0.28)" fontSize="7.5"
+        fontFamily="monospace" letterSpacing="0.5">CASINO</text>
+      <text x="742" y="372" fill="rgba(0,217,255,0.28)" fontSize="7.5"
+        fontFamily="monospace" letterSpacing="0.5">LOEWS</text>
+      <text x="980" y="268" fill="rgba(0,217,255,0.28)" fontSize="7.5"
+        fontFamily="monospace" letterSpacing="0.5">RASCASSE</text>
+
       {/* ── Grid lines ───────────────────────────────────────────── */}
       {[80, 160, 240, 320, 400].map(y => (
         <line key={y} x1="0" y1={y} x2="1200" y2={y}
