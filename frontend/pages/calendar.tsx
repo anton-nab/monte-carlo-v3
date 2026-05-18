@@ -1,10 +1,15 @@
 /**
- * /calendar — Economic & Earnings Calendar (Phase 10)
+ * /calendar — Economic, Earnings & Dividend Calendar
+ *
+ * Events:
+ *   macro    — Central banks (FOMC/ECB/BOE/BOJ/SNB/RBA/BOC), CPI, NFP, GDP…
+ *   earnings — Quarterly results (EPS vs estimates)
+ *   dividend — Ex-dividend dates for major S&P 500 dividend payers
  *
  * Click any event → detail modal with:
  *   - What the indicator measures
  *   - Why markets care + typical reaction
- *   - Assets affected (with instrument links)
+ *   - Assets affected (indices, bonds, forex pairs)
  *   - Current values (prev / estimate / actual)
  */
 
@@ -21,7 +26,7 @@ import { apiFetch } from '../lib/api';
 interface CalEvent {
   date:     string;
   time:     string;
-  type:     'macro' | 'earnings';
+  type:     'macro' | 'earnings' | 'dividend';
   country:  string;
   flag:     string;
   title:    string;
@@ -37,6 +42,7 @@ interface CalendarResponse {
   to_date:         string;
   n_events:        number;
   has_finnhub_key: boolean;
+  has_dividends:   boolean;
   events:          CalEvent[];
 }
 
@@ -54,13 +60,17 @@ interface EventInfo {
 const EVENT_INFO: Record<string, EventInfo> = {
   fomc: {
     what: "Le Federal Open Market Committee (FOMC) se réunit 8 fois par an pour fixer le taux cible des federal funds — le taux auquel les banques américaines se prêtent entre elles au jour le jour. Ce taux est le levier principal de la politique monétaire américaine.",
-    why:  "L'événement le plus scruté des marchés mondiaux. Une hausse renforce le dollar, pèse sur les actions (taux d'actualisation plus élevé) et pousse les rendements obligataires à la hausse. Une baisse produit l'inverse. La conférence de presse du Président de la Fed et les projections 'dot plot' sont tout aussi importantes que la décision elle-même.",
+    why:  "L'événement le plus scruté des marchés mondiaux. Une hausse renforce le dollar, pèse sur les actions (taux d'actualisation plus élevé) et pousse les rendements obligataires à la hausse. La conférence de presse du Président de la Fed et les projections 'dot plot' sont tout aussi importantes que la décision elle-même.",
     assets: [
       { label: "S&P 500",       ticker: "^GSPC"    },
       { label: "Nasdaq",        ticker: "^NDX"     },
       { label: "US 10Y Yield",  ticker: "^TNX"     },
       { label: "Gold",          ticker: "GC=F"     },
       { label: "EUR/USD",       ticker: "EURUSD=X" },
+      { label: "GBP/USD",       ticker: "GBPUSD=X" },
+      { label: "USD/JPY",       ticker: "JPY=X"    },
+      { label: "USD/CHF",       ticker: "CHF=X"    },
+      { label: "USD/CAD",       ticker: "CAD=X"    },
       { label: "VIX",           ticker: "^VIX"     },
     ],
     source: "Federal Reserve (Fed)",
@@ -69,78 +79,132 @@ const EVENT_INFO: Record<string, EventInfo> = {
     what: "La Banque Centrale Européenne (BCE) fixe les taux directeurs pour la zone euro (20 pays). Les trois taux clés sont : le taux de dépôt, le taux de refinancement et le taux de prêt marginal. La réunion comprend une conférence de presse de la Présidente.",
     why:  "Détermine les conditions de crédit pour ~350 millions d'Européens. Un changement de taux affecte l'euro, les obligations souveraines (OAT, Bund, BTP) et les actions européennes. La guidance prospective ('forward guidance') sur les prochaines réunions est souvent plus importante que la décision du jour.",
     assets: [
-      { label: "EUR/USD",   ticker: "EURUSD=X" },
-      { label: "CAC 40 (via ETF)", ticker: "EWQ" },
-      { label: "DAX (via ETF)",    ticker: "EWG" },
-      { label: "Bund (via ETF)",   ticker: "BUND.L" },
+      { label: "EUR/USD",       ticker: "EURUSD=X" },
+      { label: "EUR/GBP",       ticker: "EURGBP=X" },
+      { label: "EUR/JPY",       ticker: "EURJPY=X" },
+      { label: "EUR/CHF",       ticker: "EURCHF=X" },
+      { label: "CAC 40 (ETF)",  ticker: "EWQ"      },
+      { label: "DAX (ETF)",     ticker: "EWG"      },
     ],
     source: "Banque Centrale Européenne (BCE)",
   },
   boe: {
-    what: "La Banque d'Angleterre (BoE) fixe le taux 'Bank Rate' — son principal outil de politique monétaire. Le Comité de Politique Monétaire (MPC) vote à 9 membres, et le résultat du vote est publié en même temps que la décision.",
-    why:  "Impacte directement la livre sterling (GBP), les gilts (obligations d'État britanniques) et le marché immobilier britannique (très sensible aux taux hypothécaires variables). Le vote du MPC (ex: 7-2 pour maintien) donne des signaux sur les décisions futures.",
+    what: "La Banque d'Angleterre (BoE) fixe le taux 'Bank Rate'. Le Comité de Politique Monétaire (MPC) vote à 9 membres, et le résultat du vote est publié simultanément avec la décision.",
+    why:  "Impacte directement la livre sterling (GBP), les gilts (obligations d'État britanniques) et le marché immobilier britannique. Le vote du MPC (ex: 7-2 pour maintien) donne des signaux sur les décisions futures.",
     assets: [
-      { label: "GBP/USD",   ticker: "GBPUSD=X" },
-      { label: "FTSE 100",  ticker: "^FTSE"    },
+      { label: "GBP/USD",       ticker: "GBPUSD=X" },
+      { label: "EUR/GBP",       ticker: "EURGBP=X" },
+      { label: "GBP/JPY",       ticker: "GBPJPY=X" },
+      { label: "FTSE 100",      ticker: "^FTSE"    },
     ],
     source: "Bank of England (BoE)",
   },
   boj: {
-    what: "La Banque du Japon (BOJ) contrôle sa politique monétaire ultra-accommodante historique. Elle surveille les taux d'intérêt, mais aussi la courbe des taux ('Yield Curve Control', YCC) et les achats d'actifs (ETF, obligations d'État).",
+    what: "La Banque du Japon (BOJ) contrôle sa politique monétaire historiquement ultra-accommodante. Elle surveille les taux d'intérêt, le contrôle de la courbe des taux ('Yield Curve Control', YCC) et les achats d'actifs.",
     why:  "Le yen (JPY) est une devise 'refuge' et une devise de carry trade majeure. Les décisions de la BOJ provoquent des mouvements violents sur le JPY et, par ricochet, sur tous les actifs risqués mondiaux via le dénouement des positions carry.",
     assets: [
-      { label: "USD/JPY",   ticker: "JPY=X"    },
-      { label: "Nikkei 225", ticker: "^N225"   },
+      { label: "USD/JPY",       ticker: "JPY=X"    },
+      { label: "EUR/JPY",       ticker: "EURJPY=X" },
+      { label: "GBP/JPY",       ticker: "GBPJPY=X" },
+      { label: "AUD/JPY",       ticker: "AUDJPY=X" },
+      { label: "Nikkei 225",    ticker: "^N225"    },
     ],
     source: "Bank of Japan (BOJ)",
   },
+  snb: {
+    what: "La Banque Nationale Suisse (BNS/SNB) se réunit 4 fois par an pour fixer son taux directeur. La SNB surveille aussi activement le taux de change du franc suisse (CHF) pour éviter une sur-appréciation qui nuirait aux exportations suisses.",
+    why:  "Le franc suisse est une valeur refuge mondiale. La SNB est connue pour intervenir directement sur les marchés de changes (vente de CHF) pour limiter l'appréciation du franc. Un discours hawkish renforce le CHF contre EUR et USD.",
+    assets: [
+      { label: "USD/CHF",       ticker: "CHF=X"    },
+      { label: "EUR/CHF",       ticker: "EURCHF=X" },
+      { label: "GBP/CHF",       ticker: "GBPCHF=X" },
+      { label: "SMI (Swiss MI)", ticker: "^SSMI"   },
+    ],
+    source: "Swiss National Bank (SNB / BNS)",
+  },
+  rba: {
+    what: "La Banque de Réserve d'Australie (RBA) fixe le taux directeur 'cash rate'. L'Australie est un grand exportateur de matières premières (minerai de fer, charbon), ce qui rend la politique monétaire de la RBA sensible aux prix des commodités et à la croissance chinoise.",
+    why:  "L'AUD est une devise 'commodity currency' très corrélée aux prix du minerai de fer et à l'appétit pour le risque mondial. Une surprise hawkish de la RBA renforce l'AUD, particulièrement contre JPY (position carry trade populaire).",
+    assets: [
+      { label: "AUD/USD",       ticker: "AUDUSD=X" },
+      { label: "AUD/JPY",       ticker: "AUDJPY=X" },
+      { label: "AUD/NZD",       ticker: "AUDNZD=X" },
+      { label: "ASX 200 (ETF)", ticker: "EWA"      },
+    ],
+    source: "Reserve Bank of Australia (RBA)",
+  },
+  boc: {
+    what: "La Banque du Canada (BoC) fixe son taux directeur 'overnight rate'. Le Canada est un grand producteur de pétrole (WTI, WCS), ce qui lie étroitement la politique monétaire canadienne aux prix de l'énergie.",
+    why:  "Le dollar canadien (CAD) est fortement corrélé aux prix du pétrole. Une hausse des taux BoC renforce le CAD (USD/CAD baisse). Surveille de près les données économiques américaines vu la forte interdépendance commerciale USA-Canada.",
+    assets: [
+      { label: "USD/CAD",       ticker: "CAD=X"    },
+      { label: "EUR/CAD",       ticker: "EURCAD=X" },
+      { label: "Crude Oil WTI", ticker: "CL=F"     },
+      { label: "S&P/TSX (ETF)", ticker: "EWC"      },
+    ],
+    source: "Bank of Canada (BoC)",
+  },
   cpi: {
     what: "L'Indice des Prix à la Consommation (CPI) mesure la variation du coût d'un panier de biens et services pour les ménages. Publié mensuellement par le BLS (US), Eurostat (EU) ou l'ONS (UK). Le 'core CPI' exclut l'alimentation et l'énergie pour mesurer l'inflation structurelle.",
-    why:  "C'est le baromètre principal de l'inflation que les banques centrales cherchent à maintenir autour de 2%. Un CPI supérieur aux attentes pousse les marchés à anticiper des hausses de taux → baisse des actions, hausse du dollar et des rendements obligataires. L'inverse si inférieur.",
+    why:  "C'est le baromètre principal de l'inflation que les banques centrales cherchent à maintenir autour de 2%. Un CPI supérieur aux attentes pousse les marchés à anticiper des hausses de taux → baisse des actions, hausse du dollar et des rendements obligataires.",
     assets: [
       { label: "S&P 500",       ticker: "^GSPC"    },
       { label: "US 10Y Yield",  ticker: "^TNX"     },
       { label: "EUR/USD",       ticker: "EURUSD=X" },
+      { label: "GBP/USD",       ticker: "GBPUSD=X" },
+      { label: "USD/JPY",       ticker: "JPY=X"    },
+      { label: "USD/CHF",       ticker: "CHF=X"    },
       { label: "Gold",          ticker: "GC=F"     },
     ],
     source: "Bureau of Labor Statistics (BLS) / Eurostat / ONS",
   },
   nonfarm: {
     what: "Les Non-Farm Payrolls (NFP) mesurent le nombre d'emplois créés en dehors de l'agriculture aux États-Unis, publiés le premier vendredi de chaque mois par le BLS. Comprend également le taux de chômage et la croissance des salaires horaires moyens.",
-    why:  "L'un des indicateurs macro les plus volatils. Un chiffre fort signale une économie en surchauffe → la Fed pourrait monter ses taux → baisse des actions, hausse du dollar. Un chiffre faible pousse vers les baisses de taux → hausse des actions. Les révisions des mois précédents sont aussi importantes.",
+    why:  "L'un des indicateurs macro les plus volatils. Un chiffre fort signale une économie en surchauffe → la Fed pourrait monter ses taux → baisse des actions, hausse du dollar. Les révisions des mois précédents sont aussi importantes.",
     assets: [
-      { label: "S&P 500",      ticker: "^GSPC"    },
-      { label: "USD Index",    ticker: "DX-Y.NYB" },
-      { label: "US 10Y Yield", ticker: "^TNX"     },
-      { label: "Gold",         ticker: "GC=F"     },
+      { label: "S&P 500",       ticker: "^GSPC"    },
+      { label: "USD Index",     ticker: "DX-Y.NYB" },
+      { label: "EUR/USD",       ticker: "EURUSD=X" },
+      { label: "GBP/USD",       ticker: "GBPUSD=X" },
+      { label: "USD/JPY",       ticker: "JPY=X"    },
+      { label: "USD/CAD",       ticker: "CAD=X"    },
+      { label: "US 10Y Yield",  ticker: "^TNX"     },
+      { label: "Gold",          ticker: "GC=F"     },
     ],
     source: "Bureau of Labor Statistics (BLS)",
   },
   gdp: {
-    what: "Le Produit Intérieur Brut (PIB) mesure la valeur totale des biens et services produits dans un pays sur une période donnée. Publié en 3 versions : estimation préliminaire (flash), révision, et finale. La croissance réelle corrige l'effet de l'inflation.",
+    what: "Le Produit Intérieur Brut (PIB) mesure la valeur totale des biens et services produits dans un pays. Publié en 3 versions : estimation préliminaire (flash), révision, et finale. La croissance réelle corrige l'effet de l'inflation.",
     why:  "Indicateur retardé de la santé économique. Deux trimestres consécutifs de PIB négatif = récession technique. Un PIB au-dessus des attentes soutient les actions et la devise nationale. Très surveillé pour le positionnement des banques centrales.",
     assets: [
-      { label: "S&P 500",   ticker: "^GSPC"    },
-      { label: "EUR/USD",   ticker: "EURUSD=X" },
-      { label: "GBP/USD",   ticker: "GBPUSD=X" },
+      { label: "S&P 500",       ticker: "^GSPC"    },
+      { label: "EUR/USD",       ticker: "EURUSD=X" },
+      { label: "GBP/USD",       ticker: "GBPUSD=X" },
+      { label: "USD/JPY",       ticker: "JPY=X"    },
+      { label: "USD/CAD",       ticker: "CAD=X"    },
+      { label: "AUD/USD",       ticker: "AUDUSD=X" },
     ],
     source: "Bureau of Economic Analysis (BEA) / Eurostat",
   },
   unemployment: {
-    what: "Le taux de chômage mesure la part de la population active sans emploi qui en cherche un activement. Aux US, publié avec les NFP. En zone euro, publié séparément par Eurostat avec un décalage d'un mois.",
+    what: "Le taux de chômage mesure la part de la population active sans emploi qui en cherche activement un. Aux US, publié avec les NFP. En zone euro, publié séparément par Eurostat avec un décalage d'un mois.",
     why:  "Composante du double mandat de la Fed (plein emploi + stabilité des prix). Un chômage bas est généralement positif pour les actions mais peut pousser la Fed à être plus hawkish si les salaires accélèrent.",
     assets: [
-      { label: "S&P 500",  ticker: "^GSPC" },
-      { label: "EUR/USD",  ticker: "EURUSD=X" },
+      { label: "S&P 500",       ticker: "^GSPC"    },
+      { label: "EUR/USD",       ticker: "EURUSD=X" },
+      { label: "GBP/USD",       ticker: "GBPUSD=X" },
     ],
     source: "BLS (US) / Eurostat (EU) / ONS (UK)",
   },
   pmi: {
-    what: "L'Indice des Directeurs d'Achat (PMI) est une enquête mensuelle auprès de directeurs d'achat d'entreprises (manufacturières ou services). Un PMI > 50 = expansion, < 50 = contraction. Publié par S&P Global / ISM. Le PMI composite combine industrie et services.",
+    what: "L'Indice des Directeurs d'Achat (PMI) est une enquête mensuelle auprès de directeurs d'achat d'entreprises. Un PMI > 50 = expansion, < 50 = contraction. Publié par S&P Global / ISM. Le PMI composite combine industrie et services.",
     why:  "Indicateur avancé (leading indicator) de l'activité économique — connu avant les données officielles de PIB. Les marchés y réagissent fortement car il préfigure les tendances. Un PMI manufacturier US < 48 peut signaler une récession industrielle.",
     assets: [
-      { label: "S&P 500",  ticker: "^GSPC"    },
-      { label: "EUR/USD",  ticker: "EURUSD=X" },
+      { label: "S&P 500",       ticker: "^GSPC"    },
+      { label: "EUR/USD",       ticker: "EURUSD=X" },
+      { label: "GBP/USD",       ticker: "GBPUSD=X" },
+      { label: "USD/JPY",       ticker: "JPY=X"    },
+      { label: "AUD/USD",       ticker: "AUDUSD=X" },
     ],
     source: "S&P Global / ISM",
   },
@@ -148,9 +212,11 @@ const EVENT_INFO: Record<string, EventInfo> = {
     what: "Les ventes au détail mesurent les recettes totales des commerces de détail aux États-Unis (données mensuelles du Census Bureau). Le chiffre 'core' exclut les automobiles. Représente ~70% du PIB américain via la consommation.",
     why:  "Baromètre direct de la consommation, moteur principal de la croissance américaine. Un chiffre fort = économie résiliente = Fed moins encline à baisser les taux. Impact modéré sur les actions, plus fort sur le dollar et les rendements.",
     assets: [
-      { label: "S&P 500 Consumer", ticker: "XLY"    },
-      { label: "S&P 500",          ticker: "^GSPC"  },
-      { label: "USD",              ticker: "DX-Y.NYB" },
+      { label: "S&P 500 Cons.", ticker: "XLY"      },
+      { label: "S&P 500",       ticker: "^GSPC"    },
+      { label: "USD Index",     ticker: "DX-Y.NYB" },
+      { label: "EUR/USD",       ticker: "EURUSD=X" },
+      { label: "USD/JPY",       ticker: "JPY=X"    },
     ],
     source: "US Census Bureau",
   },
@@ -158,13 +224,21 @@ const EVENT_INFO: Record<string, EventInfo> = {
     what: "L'Indice des Prix à la Production (PPI) mesure l'évolution des prix reçus par les producteurs pour leurs biens et services. Considéré comme un indicateur avancé du CPI, car les hausses de coûts de production se répercutent souvent sur les prix à la consommation.",
     why:  "Surveillé comme signal d'alerte précoce de l'inflation. Un PPI élevé suggère que le CPI pourrait monter dans les mois suivants. Impact plus faible que le CPI sur les marchés, mais significatif en période d'inquiétude inflationniste.",
     assets: [
-      { label: "S&P 500",       ticker: "^GSPC" },
-      { label: "US 10Y Yield",  ticker: "^TNX"  },
+      { label: "S&P 500",       ticker: "^GSPC"    },
+      { label: "US 10Y Yield",  ticker: "^TNX"     },
+      { label: "EUR/USD",       ticker: "EURUSD=X" },
+      { label: "USD Index",     ticker: "DX-Y.NYB" },
     ],
     source: "Bureau of Labor Statistics (BLS)",
   },
+  dividend_generic: {
+    what: "La date d'ex-dividende (ex-date) est la date à partir de laquelle un acheteur de l'action N'a PAS droit au prochain dividende. Pour recevoir le dividende, vous devez détenir l'action AVANT cette date. La date de paiement intervient généralement 2 à 4 semaines après.",
+    why:  "Le cours de l'action tend à baisser d'un montant proche du dividende à l'ouverture du jour d'ex-dividende (ajustement mécanique de prix). Les stratégies 'dividend capture' (achat avant / vente après) créent parfois de la volatilité. Attirent les investisseurs revenus et modifient la structure des détenteurs.",
+    assets: [],
+    source: "SEC Filing / Communiqué dividende de la société",
+  },
   earnings_generic: {
-    what: "Publication des résultats trimestriels de l'entreprise : chiffre d'affaires, résultat net, BPA (bénéfice par action) comparés aux estimations des analystes. Inclut souvent des guidance sur les prochains trimestres.",
+    what: "Publication des résultats trimestriels : chiffre d'affaires, résultat net, BPA (bénéfice par action) comparés aux estimations des analystes. Inclut souvent des guidance sur les prochains trimestres.",
     why:  "L'action peut bouger de ±5 à ±20% dans les minutes suivant la publication, surtout en after-hours. Ce qui compte le plus : la 'surprise' (actual vs estimate) et la guidance. Un BPA en hausse mais avec une guidance décevante peut faire baisser le titre.",
     assets: [],
     source: "SEC Filing / Communiqué de presse de la société",
@@ -181,6 +255,12 @@ function getEventInfo(title: string, type: string): EventInfo | null {
     return EVENT_INFO.boe;
   if (t.includes('boj') || t.includes('bank of japan') || t.includes('boj rate'))
     return EVENT_INFO.boj;
+  if (t.includes('snb') || t.includes('swiss national'))
+    return EVENT_INFO.snb;
+  if (t.includes('rba') || t.includes('reserve bank of australia'))
+    return EVENT_INFO.rba;
+  if (t.includes('boc') || t.includes('bank of canada'))
+    return EVENT_INFO.boc;
   if (t.includes('cpi') || t.includes('inflation') || t.includes('consumer price'))
     return EVENT_INFO.cpi;
   if (t.includes('nonfarm') || t.includes('non-farm') || t.includes('nfp') || t.includes('payroll'))
@@ -195,6 +275,8 @@ function getEventInfo(title: string, type: string): EventInfo | null {
     return EVENT_INFO.retail;
   if (t.includes('ppi') || t.includes('producer price'))
     return EVENT_INFO.ppi;
+  if (type === 'dividend')
+    return EVENT_INFO.dividend_generic;
   if (type === 'earnings')
     return EVENT_INFO.earnings_generic;
   return null;
@@ -221,11 +303,12 @@ function isToday(iso: string)    { return iso === toISO(new Date()); }
 function isTomorrow(iso: string) { return iso === toISO(addDays(new Date(), 1)); }
 
 const RANGES  = [{ label:'1W', days:7 }, { label:'2W', days:14 }, { label:'1M', days:30 }, { label:'3M', days:90 }];
-type FilterType = 'all' | 'macro' | 'earnings' | 'high';
+type FilterType = 'all' | 'macro' | 'earnings' | 'dividend' | 'high';
 const FILTERS: { id: FilterType; label: string }[] = [
-  { id:'all',      label:'All'            },
+  { id:'all',      label:'Tous'           },
   { id:'macro',    label:'Macro'          },
   { id:'earnings', label:'Earnings'       },
+  { id:'dividend', label:'💰 Dividendes'  },
   { id:'high',     label:'🔴 High impact' },
 ];
 
@@ -244,6 +327,15 @@ function ImpactBadge({ impact }: { impact: CalEvent['impact'] }) {
   return <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded bg-green-500/10 text-green-600 uppercase tracking-wide shrink-0">LOW</span>;
 }
 
+/** Small type chip shown in the event row */
+function TypeChip({ type }: { type: CalEvent['type'] }) {
+  if (type === 'dividend')
+    return <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded bg-terminal-cyan/10 text-terminal-cyan uppercase tracking-wide shrink-0">DIV</span>;
+  if (type === 'earnings')
+    return <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded bg-purple-500/10 text-purple-400 uppercase tracking-wide shrink-0">EPS</span>;
+  return null;
+}
+
 function EventRow({
   ev,
   onClick,
@@ -252,22 +344,28 @@ function EventRow({
   onClick: (ev: CalEvent) => void;
 }) {
   const info = getEventInfo(ev.title, ev.type);
+  const isDividend = ev.type === 'dividend';
+
   return (
     <button
       onClick={() => onClick(ev)}
       className={`w-full flex items-center gap-3 px-4 py-2.5 border-b border-terminal-border last:border-0
                   hover:bg-terminal-surfaceHi transition-colors text-left cursor-pointer
-                  ${ev.impact === 'high' ? 'border-l-2 border-l-red-500/40' : ''}`}
+                  ${ev.impact === 'high' ? 'border-l-2 border-l-red-500/40' : ''}
+                  ${isDividend ? 'border-l-2 border-l-terminal-cyan/30' : ''}`}
     >
       <ImpactDot impact={ev.impact} />
-      <span className="num text-xs text-terminal-textDim w-16 shrink-0 tabular-nums">{ev.time !== '—' ? ev.time : '—'}</span>
+      <span className="num text-xs text-terminal-textDim w-16 shrink-0 tabular-nums">
+        {ev.time !== '—' ? ev.time : '—'}
+      </span>
       <span className="text-base w-6 text-center shrink-0">{ev.flag}</span>
       <div className="flex-1 min-w-0">
-        <span className="text-sm font-medium text-terminal-text truncate block group-hover:text-terminal-cyan">
+        <span className="text-sm font-medium text-terminal-text truncate block">
           {ev.title}
         </span>
         <span className="text-xs text-terminal-textDim">{ev.country}</span>
       </div>
+      <TypeChip type={ev.type} />
       <ImpactBadge impact={ev.impact} />
       <div className="hidden sm:flex items-center gap-4 shrink-0 text-xs tabular-nums">
         {ev.actual != null ? (
@@ -277,7 +375,9 @@ function EventRow({
           </div>
         ) : ev.estimate != null ? (
           <div className="flex flex-col items-end">
-            <span className="text-[10px] text-terminal-textDim uppercase">Est.</span>
+            <span className="text-[10px] text-terminal-textDim uppercase">
+              {isDividend ? 'Dividende' : 'Est.'}
+            </span>
             <span className="num font-medium text-terminal-textMuted">{ev.estimate}</span>
           </div>
         ) : <div className="w-16" />}
@@ -288,7 +388,6 @@ function EventRow({
           </div>
         )}
       </div>
-      {/* "More info" hint */}
       {info && (
         <span className="text-[10px] text-terminal-textDim shrink-0 hidden md:inline">
           détails →
@@ -307,10 +406,11 @@ function DayGroup({
   events: CalEvent[];
   onEventClick: (ev: CalEvent) => void;
 }) {
-  const today    = isToday(iso);
-  const tomorrow = isTomorrow(iso);
-  const tag      = today ? 'Today' : tomorrow ? 'Tomorrow' : null;
+  const today     = isToday(iso);
+  const tomorrow  = isTomorrow(iso);
+  const tag       = today ? 'Today' : tomorrow ? 'Tomorrow' : null;
   const highCount = events.filter((e) => e.impact === 'high').length;
+  const divCount  = events.filter((e) => e.type === 'dividend').length;
 
   return (
     <div className="bg-terminal-surface border border-terminal-border rounded-lg overflow-hidden">
@@ -330,6 +430,11 @@ function DayGroup({
             <span className="flex items-center gap-1">
               <span className="w-1.5 h-1.5 rounded-full bg-red-500 inline-block" />
               {highCount} high
+            </span>
+          )}
+          {divCount > 0 && (
+            <span className="flex items-center gap-1 text-terminal-cyan">
+              💰 {divCount} div
             </span>
           )}
           <span>{events.length} event{events.length !== 1 ? 's' : ''}</span>
@@ -355,7 +460,8 @@ function EventModal({
   ev: CalEvent;
   onClose: () => void;
 }) {
-  const info = getEventInfo(ev.title, ev.type);
+  const info       = getEventInfo(ev.title, ev.type);
+  const isDividend = ev.type === 'dividend';
 
   return (
     <div
@@ -371,11 +477,15 @@ function EventModal({
 
         {/* Header */}
         <div className={`sticky top-0 bg-terminal-bg border-b border-terminal-border px-5 py-4 flex items-start justify-between gap-3
-                         ${ev.impact === 'high' ? 'border-l-4 border-l-red-500' : ev.impact === 'medium' ? 'border-l-4 border-l-yellow-400' : ''}`}>
+                         ${ev.impact === 'high'   ? 'border-l-4 border-l-red-500'
+                         : ev.impact === 'medium' ? 'border-l-4 border-l-yellow-400'
+                         : isDividend             ? 'border-l-4 border-l-terminal-cyan'
+                         : ''}`}>
           <div className="flex-1 min-w-0">
             <div className="flex items-center gap-2 flex-wrap">
               <span className="text-xl">{ev.flag}</span>
               <h2 className="text-base font-semibold text-terminal-text">{ev.title}</h2>
+              <TypeChip type={ev.type} />
               <ImpactBadge impact={ev.impact} />
             </div>
             <p className="text-xs text-terminal-textDim mt-1 num">
@@ -404,8 +514,12 @@ function EventModal({
               )}
               {ev.estimate && (
                 <div className="bg-terminal-surface border border-terminal-border rounded-lg p-3 text-center">
-                  <div className="text-[10px] text-terminal-textDim uppercase tracking-wide mb-1">Estimé</div>
-                  <div className="num text-lg font-semibold text-terminal-textMuted">{ev.estimate}</div>
+                  <div className="text-[10px] text-terminal-textDim uppercase tracking-wide mb-1">
+                    {isDividend ? 'Montant / action' : 'Estimé'}
+                  </div>
+                  <div className={`num text-lg font-semibold ${isDividend ? 'text-terminal-cyan' : 'text-terminal-textMuted'}`}>
+                    {ev.estimate}
+                  </div>
                 </div>
               )}
               {ev.previous && (
@@ -422,7 +536,7 @@ function EventModal({
               {/* What */}
               <div>
                 <h3 className="text-xs font-semibold text-terminal-textDim uppercase tracking-widest mb-2">
-                  📖 Qu'est-ce que c'est ?
+                  📖 Qu&apos;est-ce que c&apos;est ?
                 </h3>
                 <p className="text-sm text-terminal-textMuted leading-relaxed">{info.what}</p>
               </div>
@@ -441,11 +555,11 @@ function EventModal({
                 <span className="text-terminal-textMuted font-medium">{info.source}</span>
               </div>
 
-              {/* Affected assets */}
+              {/* Affected assets — always show the action link for dividends */}
               {(info.assets.length > 0 || ev.ticker) && (
                 <div>
                   <h3 className="text-xs font-semibold text-terminal-textDim uppercase tracking-widest mb-2">
-                    🔗 Actifs typiquement affectés
+                    🔗 {isDividend ? 'Action concernée' : 'Actifs typiquement affectés'}
                   </h3>
                   <div className="flex flex-wrap gap-2">
                     {ev.ticker && (
@@ -525,8 +639,8 @@ export default function CalendarPage() {
     try {
       const d = await apiFetch<CalendarResponse>(`/api/calendar?from_date=${from}&to_date=${to}`);
       setData(d);
-    } catch (e: any) {
-      setError(e?.message ?? 'Load error');
+    } catch (e: unknown) {
+      setError(e instanceof Error ? e.message : 'Load error');
     } finally {
       setLoading(false);
     }
@@ -544,6 +658,7 @@ export default function CalendarPage() {
   const filtered = (data?.events ?? []).filter((ev) => {
     if (filter === 'macro')    return ev.type === 'macro';
     if (filter === 'earnings') return ev.type === 'earnings';
+    if (filter === 'dividend') return ev.type === 'dividend';
     if (filter === 'high')     return ev.impact === 'high';
     return true;
   });
@@ -553,8 +668,9 @@ export default function CalendarPage() {
     if (!groups[ev.date]) groups[ev.date] = [];
     groups[ev.date].push(ev);
   }
-  const sortedDates  = Object.keys(groups).sort();
-  const totalHigh    = filtered.filter((e) => e.impact === 'high').length;
+  const sortedDates   = Object.keys(groups).sort();
+  const totalHigh     = filtered.filter((e) => e.impact === 'high').length;
+  const totalDividend = (data?.events ?? []).filter((e) => e.type === 'dividend').length;
 
   return (
     <>
@@ -568,7 +684,7 @@ export default function CalendarPage() {
           <div>
             <h1 className="text-xl font-semibold text-terminal-text">Economic Calendar</h1>
             <p className="text-sm text-terminal-textMuted mt-0.5">
-              Banques centrales · Publications macro · Earnings — cliquez sur un événement pour les détails
+              Banques centrales · Publications macro · Earnings · Dividendes — cliquez sur un événement pour les détails
             </p>
           </div>
 
@@ -587,7 +703,7 @@ export default function CalendarPage() {
               ))}
             </div>
             <span className="text-terminal-border">|</span>
-            <div className="flex gap-1">
+            <div className="flex gap-1 flex-wrap">
               {FILTERS.map(({ id, label }) => (
                 <button key={id} onClick={() => setFilter(id)}
                   className={`px-3 py-1.5 rounded text-xs transition-colors ${
@@ -602,7 +718,8 @@ export default function CalendarPage() {
             {data && !loading && (
               <span className="ml-auto text-xs text-terminal-textDim num">
                 {filtered.length} events
-                {totalHigh > 0 && <span className="ml-2 text-red-400">· {totalHigh} high impact</span>}
+                {totalHigh > 0    && <span className="ml-2 text-red-400">· {totalHigh} high</span>}
+                {totalDividend > 0 && <span className="ml-2 text-terminal-cyan">· {totalDividend} div</span>}
               </span>
             )}
           </div>
@@ -619,7 +736,7 @@ export default function CalendarPage() {
           )}
 
           {error && (
-            <div className="bg-bear-bg border border-bear-border rounded-lg px-4 py-3 text-sm text-bear">{error}</div>
+            <div className="bg-bear/10 border border-bear/40 rounded-lg px-4 py-3 text-sm text-bear">{error}</div>
           )}
 
           {/* Legend */}
@@ -627,7 +744,8 @@ export default function CalendarPage() {
             <span className="flex items-center gap-1.5"><span className="w-2 h-2 rounded-full bg-red-500 inline-block" /> High impact</span>
             <span className="flex items-center gap-1.5"><span className="w-2 h-2 rounded-full bg-yellow-400 inline-block" /> Medium</span>
             <span className="flex items-center gap-1.5"><span className="w-2 h-2 rounded-full bg-green-500 inline-block" /> Low</span>
-            <span className="text-terminal-textDim ml-2">Cliquez sur un événement pour les détails et les actifs associés</span>
+            <span className="flex items-center gap-1.5 text-terminal-cyan">💰 Ex-dividende</span>
+            <span className="flex items-center gap-1.5 text-purple-400">EPS Earnings</span>
           </div>
 
           {/* Content */}
