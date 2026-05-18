@@ -12,6 +12,7 @@ import Link from 'next/link';
 import { useRouter } from 'next/router';
 import { Header } from '@/components/Header';
 import { apiFetch } from '@/lib/api';
+import { useWatchlist } from '@/hooks/useWatchlist';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Types
@@ -111,6 +112,7 @@ function SkeletonRow() {
 
 export default function ScreenerPage() {
   const router = useRouter();
+  const { toggle, isWatched } = useWatchlist();
 
   // ── Filters ───────────────────────────────────────────────────────────────
   const [sector,   setSector]   = useState('');
@@ -258,14 +260,15 @@ export default function ScreenerPage() {
               <thead>
                 <tr className="border-b border-terminal-border bg-terminal-bg/60">
                   {[
-                    { field: 'ticker',     label: 'Ticker'   },
-                    { field: 'name',       label: 'Nom'      },
-                    { field: 'price',      label: 'Prix'     },
-                    { field: 'change_pct', label: 'Var. %'   },
-                    { field: 'sector',     label: 'Secteur'  },
-                    { field: 'exchange',   label: 'Bourse'   },
-                    { field: 'volume',     label: 'Volume'   },
-                    { field: '',           label: 'Actions'  },
+                    { field: 'ticker',     label: 'Ticker'    },
+                    { field: 'name',       label: 'Nom'       },
+                    { field: 'price',      label: 'Prix'      },
+                    { field: 'change_pct', label: 'Var. %'    },
+                    { field: 'sector',     label: 'Secteur'   },
+                    { field: 'exchange',   label: 'Bourse'    },
+                    { field: 'volume',     label: 'Volume'    },
+                    { field: '',           label: '☆'         },
+                    { field: '',           label: 'Actions'   },
                   ].map(col => (
                     <th
                       key={col.field}
@@ -336,6 +339,21 @@ export default function ScreenerPage() {
                       {/* Volume */}
                       <td className="px-3 py-2.5 font-mono text-xs text-terminal-textMuted text-right whitespace-nowrap">
                         {fmtVol(s.volume)}
+                      </td>
+
+                      {/* Watchlist toggle */}
+                      <td className="px-3 py-2.5">
+                        <button
+                          onClick={() => toggle(s.ticker, s.name)}
+                          title={isWatched(s.ticker) ? 'Retirer de la watchlist' : 'Ajouter à la watchlist'}
+                          className={`text-sm transition ${
+                            isWatched(s.ticker)
+                              ? 'text-terminal-cyan'
+                              : 'text-terminal-border hover:text-terminal-cyan'
+                          }`}
+                        >
+                          {isWatched(s.ticker) ? '★' : '☆'}
+                        </button>
                       </td>
 
                       {/* Actions */}
