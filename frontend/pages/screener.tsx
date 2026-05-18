@@ -349,7 +349,7 @@ export default function ScreenerPage() {
                           className={`text-sm transition ${
                             isWatched(s.ticker)
                               ? 'text-terminal-cyan'
-                              : 'text-terminal-border hover:text-terminal-cyan'
+                              : 'text-terminal-textMuted hover:text-terminal-cyan'
                           }`}
                         >
                           {isWatched(s.ticker) ? '★' : '☆'}

@@ -13,6 +13,7 @@ import { useRouter } from 'next/router';
 import { useState, useMemo, useEffect } from 'react';
 import useSWR from 'swr';
 import { useWebSocket, lookupPrice, isWsUnsupported } from '../../hooks/useWebSocket';
+import { useWatchlist } from '../../hooks/useWatchlist';
 import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
   PieChart, Pie, Cell, ReferenceLine,
@@ -296,6 +297,9 @@ export default function InstrumentPage() {
   const { prices: livePrices, connected: wsConnected } = useWebSocket(wsSymbols);
   const livePrice  = tickerStr ? lookupPrice(livePrices, tickerStr) : undefined;
 
+  // ── Watchlist ──────────────────────────────────────────────────────────────
+  const { toggle: wlToggle, isWatched } = useWatchlist();
+
   // ── SWR fetches ────────────────────────────────────────────────────────────
   const { data: quoteRaw } = useSWR<QuoteData>(
     tickerStr ? `${API_URL}/api/instruments/quote/${tickerStr}` : null,
@@ -470,7 +474,22 @@ export default function InstrumentPage() {
         <div className="max-w-7xl mx-auto px-4 py-4">
           <div className="flex items-end justify-between mb-3">
             <div>
-              <h1 className="text-3xl font-bold num text-terminal-cyan">{tickerStr}</h1>
+              <div className="flex items-center gap-2">
+                <h1 className="text-3xl font-bold num text-terminal-cyan">{tickerStr}</h1>
+                {tickerStr && (
+                  <button
+                    onClick={() => wlToggle(tickerStr, fundamentals?.name || tickerStr)}
+                    title={isWatched(tickerStr) ? 'Retirer de la watchlist' : 'Ajouter à la watchlist'}
+                    className={`text-xl leading-none transition-colors ${
+                      isWatched(tickerStr)
+                        ? 'text-terminal-cyan'
+                        : 'text-terminal-textMuted hover:text-terminal-cyan'
+                    }`}
+                  >
+                    {isWatched(tickerStr) ? '★' : '☆'}
+                  </button>
+                )}
+              </div>
               {fundamentals?.name
                 ? <p className="text-terminal-textMuted text-sm mt-1">{fundamentals.name}{fundamentals.sector && ` · ${fundamentals.sector}`}</p>
                 : <SkeletonBlock className="h-4 w-48 mt-2" />}
