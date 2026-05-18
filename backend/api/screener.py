@@ -2,19 +2,21 @@
 api/screener.py
 ---------------
 GET /api/screener
+GET /api/screener/debug   ← diagnose data sources
 
 Stock screener over the S&P 500 universe.
 
 Universe : S&P 500 constituents from GitHub CSV (~503 stocks, cached 24 h)
-Quotes   : Twelve Data /quote multi-symbol (price, change%, volume, exchange)
-           cached 12 h — ~503 credits/load, within TD free tier (800/day)
+Quotes   : yfinance.download() — primary, no API key, same as /simulate
+           Twelve Data /quote  — optional enrichment (exchange name)
 
-Filters  : sector, exchange (in-memory, from CSV — instant)
+Filters  : sector (from CSV, instant), exchange (from TD when key is set)
 Sort     : change_pct, volume, price, ticker (server-side)
 """
 
 from __future__ import annotations
 
+import os
 from typing import Any
 
 from fastapi import APIRouter, HTTPException, Query
@@ -30,6 +32,64 @@ VALID_SECTORS = {
 }
 
 VALID_SORT = {"change_pct", "volume", "price", "ticker"}
+
+
+@router.get("/debug", summary="Diagnose screener data sources")
+async def debug_screener() -> dict[str, Any]:
+    """
+    Quick health-check for the screener data pipeline.
+    Fetches one stock (AAPL) from each quote source and reports what comes back.
+    Useful to verify environment variables and connectivity on Railway.
+    """
+    import yfinance as yf
+    import httpx
+
+    result: dict[str, Any] = {
+        "env": {
+            "TWELVE_DATA_API_KEY": "set" if os.getenv("TWELVE_DATA_API_KEY") else "NOT SET",
+        },
+        "yfinance": {},
+        "twelve_data": {},
+    }
+
+    # Test yfinance
+    try:
+        raw = yf.download("AAPL", period="5d", auto_adjust=True, progress=False)
+        if raw is not None and not raw.empty:
+            closes = raw["Close"].dropna()
+            result["yfinance"] = {
+                "ok": True,
+                "last_close": float(closes.iloc[-1]) if not closes.empty else None,
+                "rows": len(raw),
+            }
+        else:
+            result["yfinance"] = {"ok": False, "error": "empty DataFrame"}
+    except Exception as exc:
+        result["yfinance"] = {"ok": False, "error": str(exc)}
+
+    # Test Twelve Data (only if key is set)
+    td_key = os.getenv("TWELVE_DATA_API_KEY", "")
+    if td_key:
+        try:
+            with httpx.Client(timeout=10) as c:
+                resp = c.get(
+                    "https://api.twelvedata.com/quote",
+                    params={"symbol": "AAPL", "apikey": td_key},
+                )
+                data = resp.json()
+            result["twelve_data"] = {
+                "ok": not data.get("code"),
+                "status": resp.status_code,
+                "close": data.get("close"),
+                "exchange": data.get("exchange"),
+                "error": data.get("message") if data.get("code") else None,
+            }
+        except Exception as exc:
+            result["twelve_data"] = {"ok": False, "error": str(exc)}
+    else:
+        result["twelve_data"] = {"ok": False, "skipped": "TWELVE_DATA_API_KEY not set"}
+
+    return result
 
 
 @router.get("", summary="S&P 500 stock screener")

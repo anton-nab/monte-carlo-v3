@@ -573,14 +573,13 @@ class FMPProvider:
     # Public: Stock Screener (Phase 11)
     # ─────────────────────────────────────────────────────────────────
 
-    # Map GICS sector names (used in GitHub CSV) → friendly UI names
+    # Map GICS sector names (GitHub CSV) → friendly UI names used by the frontend
     _GICS_SECTOR_MAP: Dict[str, str] = {
         "Information Technology": "Technology",
         "Health Care":            "Healthcare",
         "Consumer Discretionary": "Consumer Cyclical",
         "Consumer Staples":       "Consumer Defensive",
         "Materials":              "Basic Materials",
-        # These map to themselves (no rename needed)
         "Financials":             "Financials",
         "Energy":                 "Energy",
         "Industrials":            "Industrials",
@@ -590,27 +589,107 @@ class FMPProvider:
     }
 
     @staticmethod
+    def _yf_bulk_quotes(tickers: List[str]) -> Dict[str, Dict]:
+        """
+        Bulk quotes via yfinance.download() — no API key, same source as /simulate.
+
+        yfinance uses Yahoo Finance /v8/finance/chart per ticker (parallel threads).
+        Returns price, change %, volume.  Exchange is NOT available via this route.
+        """
+        import yfinance as yf
+        import pandas as pd
+
+        if not tickers:
+            return {}
+
+        result: Dict[str, Dict] = {}
+        chunk_size = 200   # yfinance handles large lists well via threads
+
+        for i in range(0, len(tickers), chunk_size):
+            chunk = tickers[i : i + chunk_size]
+            chunk_num = i // chunk_size + 1
+            try:
+                raw = yf.download(
+                    tickers=" ".join(chunk),
+                    period="5d",
+                    auto_adjust=True,
+                    progress=False,
+                    threads=True,
+                )
+                if raw is None or raw.empty:
+                    print(f"[yf screener] chunk {chunk_num}: empty DataFrame")
+                    continue
+
+                if len(chunk) == 1:
+                    # Single ticker — flat column names
+                    closes = raw["Close"].dropna() if "Close" in raw.columns else pd.Series()
+                    vols   = raw["Volume"].dropna() if "Volume" in raw.columns else pd.Series()
+                    if len(closes) >= 1:
+                        chg = float(((closes.iloc[-1] / closes.iloc[-2]) - 1) * 100) if len(closes) > 1 else 0.0
+                        result[chunk[0]] = {
+                            "price":      float(closes.iloc[-1]),
+                            "change_pct": chg,
+                            "volume":     int(vols.iloc[-1]) if not vols.empty else 0,
+                            "exchange":   "",
+                            "name":       "",
+                        }
+                else:
+                    # Multi-ticker — columns: (Price, Ticker) or (Ticker, Price)
+                    # yfinance 0.2.x uses level-0 = price type, level-1 = ticker
+                    try:
+                        close_df  = raw["Close"]    # DataFrame: date × ticker
+                        volume_df = raw.get("Volume") if isinstance(raw.get("Volume"), pd.DataFrame) else None
+                    except KeyError:
+                        print(f"[yf screener] chunk {chunk_num}: no Close column")
+                        continue
+
+                    for ticker in chunk:
+                        try:
+                            closes = close_df[ticker].dropna() if ticker in close_df.columns else pd.Series()
+                            if closes.empty:
+                                continue
+                            vols = (
+                                volume_df[ticker].dropna()
+                                if (volume_df is not None and ticker in volume_df.columns)
+                                else pd.Series()
+                            )
+                            chg = float(((closes.iloc[-1] / closes.iloc[-2]) - 1) * 100) if len(closes) > 1 else 0.0
+                            result[ticker] = {
+                                "price":      float(closes.iloc[-1]),
+                                "change_pct": chg,
+                                "volume":     int(vols.iloc[-1]) if not vols.empty else 0,
+                                "exchange":   "",
+                                "name":       "",
+                            }
+                        except (KeyError, IndexError, TypeError, ValueError):
+                            pass
+
+            except Exception as exc:
+                print(f"[yf screener] chunk {chunk_num} error: {exc}")
+
+        print(f"[yf screener] {len(result)}/{len(tickers)} quotes fetched")
+        return result
+
+    @staticmethod
     def _sync_td_quotes(tickers: List[str]) -> Dict[str, Dict]:
         """
-        Bulk quotes via Twelve Data /quote (commercial-OK, free tier).
+        Bulk quotes via Twelve Data /quote — optional, for exchange name enrichment.
 
-        Multi-symbol: ?symbol=AAPL,MSFT,... → {AAPL: {...}, MSFT: {...}}
-        Each symbol = 1 API credit.  Free plan: 800 credits/day.
-        With 503 S&P 500 tickers → ~503 credits per load (fits in daily budget).
-        Throttled at 0.5 s between chunks to stay under 8 req/min rate limit.
+        Each symbol = 1 credit.  Free plan: 800 credits/day.
+        Throttled at 0.5 s/chunk to respect the 8 req/min free-tier rate limit.
+        Falls back gracefully if key is not set or credits are exhausted.
         """
         import time
 
         api_key = os.getenv("TWELVE_DATA_API_KEY", "")
         if not api_key:
-            print("[TD screener] WARNING: TWELVE_DATA_API_KEY not set — screener will show names only, no prices")
-            return {}
+            return {}   # Not set — silent, yfinance is the primary source
 
         result: Dict[str, Dict] = {}
-        chunk_size = 55   # stay well under 60 symbol/request TD limit
+        chunk_size = 55
 
         for i in range(0, len(tickers), chunk_size):
-            chunk = tickers[i : i + chunk_size]
+            chunk     = tickers[i : i + chunk_size]
             chunk_num = i // chunk_size + 1
             try:
                 with httpx.Client(timeout=30) as c:
@@ -621,28 +700,25 @@ class FMPProvider:
                     resp.raise_for_status()
                     data = resp.json()
 
-                # Top-level error (e.g. {"code": 429, "message": "..."})
+                # Top-level API error (e.g. 429 rate-limit, 401 auth)
                 if isinstance(data, dict) and data.get("code"):
-                    print(f"[TD screener] chunk {chunk_num} top-level error: "
+                    print(f"[TD screener] chunk {chunk_num} error: "
                           f"code={data.get('code')} msg={data.get('message', '')}")
                     break
 
-                # Multi-symbol → dict of {sym: quote}; single → bare quote
                 if isinstance(data, dict):
                     items = (
-                        data.items()
-                        if len(chunk) > 1
-                        else [(chunk[0], data)]
+                        data.items() if len(chunk) > 1 else [(chunk[0], data)]
                     )
                     for sym, q in items:
                         if not isinstance(q, dict):
                             continue
                         if q.get("code") or q.get("status") == "error":
-                            continue  # per-symbol error entry
+                            continue
                         try:
                             price = float(q.get("close") or 0)
                             if price <= 0:
-                                continue  # skip if no valid price
+                                continue
                             result[sym] = {
                                 "price":      price,
                                 "change_pct": float(q.get("percent_change") or 0),
@@ -654,7 +730,7 @@ class FMPProvider:
                             pass
 
                 if i + chunk_size < len(tickers):
-                    time.sleep(0.5)   # stay under 8 req/min free-tier limit
+                    time.sleep(0.5)
 
             except Exception as exc:
                 print(f"[TD screener] chunk {chunk_num} error: {exc}")
@@ -664,20 +740,22 @@ class FMPProvider:
 
     async def _get_screener_universe(self) -> List[Dict[str, Any]]:
         """
-        Build screener universe: S&P 500 constituents + Twelve Data bulk quotes.
+        Build screener universe: S&P 500 constituents + live quotes.
 
-        Constituents: GitHub CSV (free, cached 24 h).
-        Quotes:       TD /quote multi-symbol (API key required, free plan OK).
-                      503 tickers × 1 credit per load — within 800/day free plan.
-        Universe cached 12 h — all filter combos reuse the same data.
-        Sectors normalised from GICS (CSV) → friendly UI names via _GICS_SECTOR_MAP.
+        Source hierarchy:
+          Constituents : GitHub CSV   (free, cached 24 h)
+          Quotes (primary): yfinance.download() — no API key, parallel, reliable
+          Quotes (secondary): Twelve Data /quote — enriches with exchange name if key set
+
+        Sectors normalised from GICS → friendly UI names via _GICS_SECTOR_MAP.
+        Universe cached 12 h ONLY when price data is available (no stale empty cache).
         """
         ck = "screener_universe_sp500"
         cached = self._get_cache(ck, ttl=self.SCREENER_TTL)
         if cached is not None:
             return cached
 
-        # Step 1: S&P 500 tickers + sectors from GitHub CSV
+        # Step 1: S&P 500 tickers + sectors from GitHub CSV (cached 24 h)
         from services.indices.csv_provider import CsvProvider
         constituents = await CsvProvider().get_constituents("SP500")
 
@@ -689,36 +767,46 @@ class FMPProvider:
             print("[Screener] SP500 CSV empty — cannot build universe")
             return []
 
-        # Step 2: Bulk quotes via Twelve Data (runs in thread pool)
-        loop      = asyncio.get_event_loop()
-        quote_map = await loop.run_in_executor(
-            None, self._sync_td_quotes, tickers
+        loop = asyncio.get_event_loop()
+
+        # Step 2a: yfinance bulk download — primary (price, change%, volume)
+        yf_map: Dict[str, Dict] = await loop.run_in_executor(
+            None, self._yf_bulk_quotes, tickers
         )
 
-        # Step 3: Merge — include CSV-only stocks (no quote = null price, still shown)
+        # Step 2b: Twelve Data — optional (exchange name enrichment)
+        td_map: Dict[str, Dict] = {}
+        if os.getenv("TWELVE_DATA_API_KEY"):
+            td_map = await loop.run_in_executor(
+                None, self._sync_td_quotes, tickers
+            )
+
+        # Step 3: Merge — yf provides prices, TD provides exchange when available
         result: List[Dict[str, Any]] = []
         for ticker in tickers:
-            q = quote_map.get(ticker)   # None when not in quote_map
-            # Normalise GICS → friendly sector name
-            gics_sector = sector_map.get(ticker, "")
+            yf_q = yf_map.get(ticker)   # price/chg/vol or None
+            td_q = td_map.get(ticker)   # exchange/name or None
+
+            gics_sector     = sector_map.get(ticker, "")
             friendly_sector = self._GICS_SECTOR_MAP.get(gics_sector, gics_sector)
+
             result.append({
                 "ticker":     ticker,
-                "name":       name_map.get(ticker) or (q.get("name") if q else None) or ticker,
-                "price":      self._sf(q["price"])      if q else None,
-                "change_pct": self._sf(q["change_pct"]) if q else None,
-                "volume":     int(q["volume"])           if q else 0,
-                "exchange":   q["exchange"]              if q else "",
+                "name":       name_map.get(ticker) or (td_q.get("name") if td_q else "") or ticker,
+                "price":      self._sf(yf_q["price"])      if yf_q else (self._sf(td_q["price"])      if td_q else None),
+                "change_pct": self._sf(yf_q["change_pct"]) if yf_q else (self._sf(td_q["change_pct"]) if td_q else None),
+                "volume":     int(yf_q["volume"])           if yf_q else (int(td_q["volume"])           if td_q else 0),
+                "exchange":   (td_q.get("exchange") or "")  if td_q else "",
                 "sector":     friendly_sector,
-                # fundamentals not available in bulk on free tier
-                "market_cap": None,
-                "pe":         None,
-                "beta":       None,
             })
 
-        print(f"[Screener] universe ready: {len(result)} stocks "
-              f"({len(quote_map)} with live TD quotes)")
-        if result:
+        prices_found = sum(1 for r in result if r["price"] is not None)
+        print(f"[Screener] universe ready: {len(result)} stocks, "
+              f"{prices_found} with prices, "
+              f"{sum(1 for r in result if r['exchange'])} with exchange")
+
+        # Only cache if we have real price data — prevents stale empty cache
+        if result and prices_found > 0:
             self._set_cache(ck, result)
         return result
 
@@ -729,8 +817,9 @@ class FMPProvider:
         limit:    int = 50,
     ) -> List[Dict[str, Any]]:
         """
-        Screen S&P 500 universe by sector and exchange (in-memory filter).
+        Screen S&P 500 universe by sector and/or exchange (in-memory filter).
         Universe is built once by _get_screener_universe() and cached 12 h.
+        Exchange filter: only applied when a stock has non-empty exchange data.
         """
         universe = await self._get_screener_universe()
 
@@ -738,7 +827,8 @@ class FMPProvider:
         for s in universe:
             if sector and s.get("sector") != sector:
                 continue
-            if exchange and s.get("exchange", "").upper() != exchange.upper():
+            # Exchange filter: skip only when we HAVE exchange data AND it doesn't match
+            if exchange and s.get("exchange") and s["exchange"].upper() != exchange.upper():
                 continue
             result.append(s)
 
