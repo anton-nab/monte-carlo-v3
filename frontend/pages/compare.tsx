@@ -603,7 +603,7 @@ export default function ComparePage() {
 
   return (
     <>
-      <Head><title>Compare — Monte Carlo v3</title></Head>
+      <Head><title>Compare — Monte Carlo</title></Head>
       <Header />
 
       <main className="max-w-7xl mx-auto px-4 py-6 space-y-6">

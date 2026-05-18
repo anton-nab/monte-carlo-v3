@@ -686,7 +686,7 @@ export default function PortfolioPage() {
 
   return (
     <>
-      <Head><title>Portfolio — Monte Carlo v3</title></Head>
+      <Head><title>Portfolio — Monte Carlo</title></Head>
       <Header />
 
       <main className="max-w-7xl mx-auto px-4 py-6 space-y-6">

@@ -282,7 +282,7 @@ export default function MarketsPage() {
   return (
     <>
       <Head>
-        <title>Markets — Monte Carlo v3</title>
+        <title>Markets — Monte Carlo</title>
       </Head>
 
       <Header />
@@ -438,7 +438,7 @@ export default function MarketsPage() {
       </main>
 
       <footer className="border-t border-terminal-border mt-8 px-4 py-3 text-center text-2xs text-terminal-textDim num">
-        Monte Carlo v3 · FastAPI + Next.js · Twelve Data · FMP · FRED API
+        Monte Carlo · FastAPI + Next.js · Twelve Data · FMP · FRED API
       </footer>
     </>
   );

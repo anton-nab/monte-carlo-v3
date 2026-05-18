@@ -172,9 +172,9 @@ export default function LandingPage() {
   return (
     <>
       <Head>
-        <title>Monte Carlo v3 — Equity Analysis Platform</title>
+        <title>Monte Carlo — Equity Analysis Platform</title>
         <meta name="description" content="Professional-grade equity analysis platform. Monte Carlo simulations, portfolio optimization, live market data, technical indicators and macro dashboard." />
-        <meta property="og:title"       content="Monte Carlo v3 — Equity Analysis Platform" />
+        <meta property="og:title"       content="Monte Carlo — Equity Analysis Platform" />
         <meta property="og:description" content="4 stochastic models · Markowitz optimizer · Live WebSocket prices · S&P 500 screener · Economic calendar" />
         <meta property="og:type"        content="website" />
       </Head>
@@ -189,7 +189,6 @@ export default function LandingPage() {
               MC
             </span>
             <span className="font-serif text-[15px] text-white">Monte Carlo</span>
-            <span className="text-xs text-white/35 font-mono">v3</span>
           </div>
 
           {/* Actions */}
@@ -258,8 +257,7 @@ export default function LandingPage() {
           {/* Main title */}
           <h1 className="font-serif text-6xl sm:text-7xl md:text-8xl mb-4 tracking-tight"
             style={{ color: 'white' }}>
-            Monte Carlo{' '}
-            <span style={{ color: '#00d9ff' }}>v3</span>
+            Monte Carlo
           </h1>
 
           {/* Tagline */}
@@ -406,7 +404,7 @@ export default function LandingPage() {
             style={{ background: '#b92e25' }}>
             MC
           </span>
-          <span className="font-serif text-sm" style={{ color: 'rgba(255,255,255,0.6)' }}>Monte Carlo v3</span>
+          <span className="font-serif text-sm" style={{ color: 'rgba(255,255,255,0.6)' }}>Monte Carlo</span>
         </div>
         <p className="text-xs font-mono mb-2" style={{ color: 'rgba(255,255,255,0.3)' }}>
           FastAPI + Next.js 14 · Deployed on Railway + Vercel

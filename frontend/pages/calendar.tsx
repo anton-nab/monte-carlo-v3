@@ -674,7 +674,7 @@ export default function CalendarPage() {
 
   return (
     <>
-      <Head><title>Calendar — Monte Carlo v3</title></Head>
+      <Head><title>Calendar — Monte Carlo</title></Head>
       <div className="min-h-screen bg-terminal-bg text-terminal-text">
         <Header />
 

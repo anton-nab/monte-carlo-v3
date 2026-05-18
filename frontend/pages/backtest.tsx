@@ -330,7 +330,7 @@ export default function BacktestPage() {
   return (
     <>
       <Head>
-        <title>Backtest — Monte Carlo v3</title>
+        <title>Backtest — Monte Carlo</title>
       </Head>
       <div className="min-h-screen bg-terminal-bg text-terminal-text">
         <Header />

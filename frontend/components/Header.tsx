@@ -119,7 +119,6 @@ export function Header() {
           <span className="hidden sm:inline font-serif text-base font-normal text-terminal-text group-hover:text-terminal-cyan transition-colors">
             Monte Carlo
           </span>
-          <span className="hidden sm:inline text-xs text-terminal-textDim font-mono">v3</span>
           <span className="sm:hidden font-serif text-sm text-terminal-text">MC3</span>
         </Link>
 

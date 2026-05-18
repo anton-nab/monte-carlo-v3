@@ -78,7 +78,7 @@ export default function Dashboard() {
   return (
     <>
       <Head>
-        <title>Global Macro Dashboard — Monte Carlo v3</title>
+        <title>Global Macro Dashboard — Monte Carlo</title>
       </Head>
 
       <Header />
@@ -161,7 +161,7 @@ export default function Dashboard() {
       </main>
 
       <footer className="border-t border-terminal-border mt-12 px-4 py-4 text-center text-2xs text-terminal-textDim num">
-        Monte Carlo v3 · Data: FRED · Phase 1.5 of 11 · Bloomberg-lite global terminal
+        Monte Carlo · Data: FRED · Phase 1.5 of 11 · Bloomberg-lite global terminal
       </footer>
     </>
   );

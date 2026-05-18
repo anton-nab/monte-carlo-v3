@@ -189,7 +189,7 @@ export default function WatchlistPage() {
   return (
     <>
       <Head>
-        <title>Watchlist — Monte Carlo v3</title>
+        <title>Watchlist — Monte Carlo</title>
       </Head>
       <Header />
 

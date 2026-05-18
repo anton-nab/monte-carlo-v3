@@ -170,7 +170,7 @@ export default function ScreenerPage() {
   return (
     <>
       <Head>
-        <title>Screener — Monte Carlo v3</title>
+        <title>Screener — Monte Carlo</title>
       </Head>
       <Header />
 
