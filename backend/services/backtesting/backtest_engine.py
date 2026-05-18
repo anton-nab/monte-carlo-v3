@@ -25,6 +25,9 @@ from __future__ import annotations
 import time
 from typing import Any
 
+import os
+
+import httpx
 import numpy as np
 import pandas as pd
 import yfinance as yf
@@ -43,13 +46,63 @@ TRADING_DAYS = 252
 # Data fetch
 # ─────────────────────────────────────────────────────────────────────────────
 
+_PERIOD_TO_OUTPUTSIZE: dict[str, int] = {
+    "3y": 1095, "5y": 1825, "10y": 3650, "max": 5000,
+}
+
+
 def _fetch_prices(ticker: str, period: str) -> pd.Series:
-    """Adjusted close prices via yfinance — DatetimeIndex, ascending."""
-    t  = yf.Ticker(ticker)
-    df = t.history(period=period, auto_adjust=True)
-    if df.empty:
-        raise ValueError(f"yfinance returned no data for '{ticker}'")
-    return df["Close"].dropna().sort_index()
+    """
+    Adjusted close prices → pd.Series with DatetimeIndex (ASC).
+
+    Hierarchy:
+      1. yfinance (primary — free, no key, works for all symbols)
+      2. Twelve Data /time_series (if TWELVE_DATA_API_KEY is set and yfinance fails)
+    """
+    # ── Primary: yfinance ────────────────────────────────────────────────
+    try:
+        df = yf.Ticker(ticker).history(period=period, auto_adjust=True)
+        if not df.empty:
+            return df["Close"].dropna().sort_index()
+        print(f"[backtest] yfinance returned empty DataFrame for '{ticker}'")
+    except Exception as exc:
+        print(f"[backtest] yfinance failed for '{ticker}': {exc}")
+
+    # ── Secondary: Twelve Data ───────────────────────────────────────────
+    api_key = os.getenv("TWELVE_DATA_API_KEY", "")
+    if api_key:
+        try:
+            outputsize = _PERIOD_TO_OUTPUTSIZE.get(period, 1825)
+            resp = httpx.get(
+                "https://api.twelvedata.com/time_series",
+                params={
+                    "symbol":     ticker,
+                    "interval":   "1day",
+                    "outputsize": outputsize,
+                    "order":      "ASC",
+                    "dp":         4,
+                    "apikey":     api_key,
+                },
+                timeout=30.0,
+            )
+            resp.raise_for_status()
+            data = resp.json()
+            if data.get("status") == "error":
+                raise ValueError(data.get("message", "TD error"))
+            values = data.get("values", [])
+            if values:
+                dates  = pd.to_datetime([v["datetime"] for v in values])
+                closes = [float(v["close"]) for v in values]
+                s = pd.Series(closes, index=dates, name="Close").sort_index()
+                print(f"[backtest] TD returned {len(s)} bars for '{ticker}'")
+                return s
+        except Exception as exc:
+            print(f"[backtest] TD failed for '{ticker}': {exc}")
+
+    raise ValueError(
+        f"Impossible de récupérer les données de prix pour '{ticker}'. "
+        "Vérifiez que le ticker est valide (ex: AAPL, ^GSPC, BTC-USD)."
+    )
 
 
 # ─────────────────────────────────────────────────────────────────────────────
