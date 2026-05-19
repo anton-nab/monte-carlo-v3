@@ -4,12 +4,14 @@
  * Squarified treemap : tuiles proportionnelles à la market cap, colorées par change_pct.
  * Vue globale : top 15 par secteur.
  * Clic secteur → vue détaillée : toutes les actions du secteur.
+ * Panneaux analytiques : Top Holdings + Sector Breakdown.
  */
 
 import { useState, useEffect, useRef, useMemo } from 'react';
 import Head from 'next/head';
 import Link from 'next/link';
 import { API_BASE } from '../lib/api';
+import { Header } from '@/components/Header';
 
 // ── Types API ─────────────────────────────────────────────────────────────────
 
@@ -299,12 +301,43 @@ export default function HeatmapPage() {
 
   const totalDisplayed = displaySectors.reduce((s, sec) => s + sec.stocks.length, 0);
 
+  // ── Analytics: top holdings & sector breakdown ────────────────────────────
+  const topHoldings = useMemo(() => {
+    if (!data) return [];
+    const all = data.sectors.flatMap(sec =>
+      sec.stocks.map(s => ({ ...s, sector: sec.name }))
+    );
+    return all
+      .filter(s => s.market_cap != null && (s.market_cap as number) > 0)
+      .sort((a, b) => (b.market_cap ?? 0) - (a.market_cap ?? 0))
+      .slice(0, 15);
+  }, [data]);
+
+  const sectorBreakdown = useMemo(() => {
+    if (!data) return [];
+    const total = data.sectors.reduce((s, sec) => s + (sec.total_mktcap ?? 0), 0);
+    if (!total) return [];
+    return data.sectors
+      .filter(s => (s.total_mktcap ?? 0) > 0)
+      .map(s => ({
+        name:       s.name,
+        weight:     ((s.total_mktcap ?? 0) / total) * 100,
+        avg_change: s.avg_change,
+        count:      s.count,
+      }))
+      .sort((a, b) => b.weight - a.weight);
+  }, [data]);
+
+  const maxSectorWeight = sectorBreakdown.length ? sectorBreakdown[0].weight : 1;
+
   return (
     <>
       <Head>
         <title>Market Heatmap — Monte Carlo</title>
         <meta name="description" content="Heatmap marché : tuiles proportionnelles à la capitalisation, colorées par variation" />
       </Head>
+
+      <Header />
 
       <div className="max-w-[1600px] mx-auto px-4 py-5 space-y-4">
 
@@ -501,6 +534,150 @@ export default function HeatmapPage() {
             </div>
           )}
         </div>
+
+        {/* ── Analytics panels ─────────────────────────────────────── */}
+        {!loading && !error && data && (topHoldings.length > 0 || sectorBreakdown.length > 0) && (
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 pb-6">
+
+            {/* ── Top Holdings ───────────────────────────────────────── */}
+            <div className="bg-terminal-surface border border-terminal-border rounded-xl overflow-hidden">
+              <div className="flex items-center justify-between px-4 py-3 border-b border-terminal-border">
+                <div>
+                  <h2 className="text-sm font-semibold text-terminal-text">Top Holdings</h2>
+                  <p className="text-[11px] text-terminal-textDim mt-0.5">
+                    Positions les plus importantes — {data.label}
+                  </p>
+                </div>
+                <span className="text-[10px] font-mono text-terminal-textDim bg-terminal-surfaceHi px-2 py-0.5 rounded">
+                  TOP {topHoldings.length}
+                </span>
+              </div>
+
+              <div className="overflow-x-auto">
+                <table className="w-full text-xs">
+                  <thead>
+                    <tr className="border-b border-terminal-border">
+                      <th className="text-left px-4 py-2 text-terminal-textDim font-medium w-8">#</th>
+                      <th className="text-left px-3 py-2 text-terminal-textDim font-medium">Ticker</th>
+                      <th className="text-left px-3 py-2 text-terminal-textDim font-medium hidden sm:table-cell">Nom</th>
+                      <th className="text-left px-3 py-2 text-terminal-textDim font-medium hidden md:table-cell">Secteur</th>
+                      <th className="text-right px-3 py-2 text-terminal-textDim font-medium">Poids</th>
+                      <th className="text-right px-4 py-2 text-terminal-textDim font-medium">Variation</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {topHoldings.map((stock, i) => (
+                      <tr
+                        key={stock.ticker}
+                        className="border-b border-terminal-border/50 hover:bg-terminal-surfaceHi/50 transition-colors"
+                      >
+                        <td className="px-4 py-2.5 text-terminal-textDim font-mono">{i + 1}</td>
+                        <td className="px-3 py-2.5">
+                          <Link
+                            href={`/instrument/${stock.ticker}`}
+                            className="font-bold text-terminal-cyan hover:underline font-mono"
+                          >
+                            {stock.ticker}
+                          </Link>
+                        </td>
+                        <td className="px-3 py-2.5 text-terminal-textMuted hidden sm:table-cell truncate max-w-[140px]">
+                          {stock.name}
+                        </td>
+                        <td className="px-3 py-2.5 hidden md:table-cell">
+                          <span className="text-[10px] text-terminal-textDim bg-terminal-surfaceHi px-1.5 py-0.5 rounded truncate max-w-[100px] block">
+                            {(stock as any).sector}
+                          </span>
+                        </td>
+                        <td className="px-3 py-2.5 text-right">
+                          <div className="flex items-center justify-end gap-2">
+                            <div className="hidden sm:block w-16 h-1.5 rounded-full bg-terminal-surfaceHi overflow-hidden">
+                              <div
+                                className="h-full rounded-full bg-terminal-cyan/70"
+                                style={{ width: `${Math.min(100, ((stock.market_cap ?? 0) / (topHoldings[0].market_cap ?? 1)) * 100)}%` }}
+                              />
+                            </div>
+                            <span className="font-mono text-terminal-text">
+                              {(stock.market_cap ?? 0).toFixed(2)}%
+                            </span>
+                          </div>
+                        </td>
+                        <td className="px-4 py-2.5 text-right font-mono font-semibold"
+                          style={{ color: changeColor(stock.change_pct) }}>
+                          {fmt(stock.change_pct)}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+
+            {/* ── Sector Breakdown ──────────────────────────────────── */}
+            <div className="bg-terminal-surface border border-terminal-border rounded-xl overflow-hidden">
+              <div className="flex items-center justify-between px-4 py-3 border-b border-terminal-border">
+                <div>
+                  <h2 className="text-sm font-semibold text-terminal-text">Sector Breakdown</h2>
+                  <p className="text-[11px] text-terminal-textDim mt-0.5">
+                    Poids par secteur dans {data.label}
+                  </p>
+                </div>
+                <span className="text-[10px] font-mono text-terminal-textDim bg-terminal-surfaceHi px-2 py-0.5 rounded">
+                  {sectorBreakdown.length} secteurs
+                </span>
+              </div>
+
+              <div className="px-4 py-3 space-y-2.5">
+                {sectorBreakdown.map(sec => {
+                  const barW = (sec.weight / maxSectorWeight) * 100;
+                  const isPos = (sec.avg_change ?? 0) > 0.05;
+                  const isNeg = (sec.avg_change ?? 0) < -0.05;
+                  const barColor = isPos
+                    ? 'rgba(74,222,128,0.55)'
+                    : isNeg
+                    ? 'rgba(248,113,113,0.55)'
+                    : 'rgba(156,163,175,0.35)';
+                  return (
+                    <div key={sec.name} className="flex items-center gap-3">
+                      {/* Nom secteur */}
+                      <div className="w-28 shrink-0 text-[11px] text-terminal-textMuted truncate text-right">
+                        {sec.name}
+                      </div>
+                      {/* Barre */}
+                      <div className="flex-1 relative h-5 bg-terminal-surfaceHi rounded overflow-hidden">
+                        <div
+                          className="h-full rounded transition-all duration-500"
+                          style={{ width: `${barW}%`, background: barColor }}
+                        />
+                        <span className="absolute right-2 top-0 h-full flex items-center text-[10px] font-mono text-terminal-textMuted">
+                          {sec.weight.toFixed(1)}%
+                        </span>
+                      </div>
+                      {/* Variation */}
+                      <div className="w-14 shrink-0 text-right font-mono text-[11px] font-semibold"
+                        style={{ color: changeColor(sec.avg_change) }}>
+                        {fmt(sec.avg_change)}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+
+              {/* Légende couleurs barres */}
+              <div className="px-4 pb-3 pt-1 flex items-center gap-3 border-t border-terminal-border/40">
+                <span className="text-[10px] text-terminal-textDim">Barres colorées par variation du jour :</span>
+                <span className="flex items-center gap-1 text-[10px]">
+                  <span className="w-3 h-2 rounded-sm inline-block" style={{ background: 'rgba(74,222,128,0.55)' }} />
+                  <span className="text-green-400/70">hausse</span>
+                </span>
+                <span className="flex items-center gap-1 text-[10px]">
+                  <span className="w-3 h-2 rounded-sm inline-block" style={{ background: 'rgba(248,113,113,0.55)' }} />
+                  <span className="text-red-400/70">baisse</span>
+                </span>
+              </div>
+            </div>
+
+          </div>
+        )}
 
       </div>
     </>
