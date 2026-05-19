@@ -428,31 +428,37 @@ export default function LandingPage() {
           style={{ animation: 'fade-up 0.8s ease-out 0.1s both' }}
         >
           {/* Badge */}
-          <div className="inline-flex items-center gap-2 px-3.5 py-1 rounded-full border mb-8 text-xs font-mono"
+          <div className="inline-flex items-center gap-2 px-3.5 py-1 rounded-full border mb-6 sm:mb-8 text-xs font-mono"
             style={{ borderColor: 'rgba(0,217,255,0.3)', background: 'rgba(0,217,255,0.08)', color: '#00d9ff' }}>
-            <span className="w-1.5 h-1.5 rounded-full animate-pulse" style={{ background: '#00d9ff' }} />
-            Full-Stack Financial Analytics Platform
+            <span className="w-1.5 h-1.5 rounded-full animate-pulse shrink-0" style={{ background: '#00d9ff' }} />
+            <span className="hidden sm:inline">Full-Stack Financial Analytics Platform</span>
+            <span className="sm:hidden">Financial Analytics Platform</span>
           </div>
 
           {/* Main title */}
-          <h1 className="font-serif text-6xl sm:text-7xl md:text-8xl mb-4 tracking-tight"
+          <h1 className="font-serif text-5xl sm:text-7xl md:text-8xl mb-3 sm:mb-4 tracking-tight"
             style={{ color: 'white' }}>
             Monte Carlo
           </h1>
 
           {/* Tagline */}
-          <p className="text-lg sm:text-xl md:text-2xl mb-5 font-light"
+          <p className="text-base sm:text-xl md:text-2xl mb-4 sm:mb-5 font-light px-2"
             style={{ color: 'rgba(255,255,255,0.55)' }}>
             Equity analysis, simulation &amp; portfolio optimization
           </p>
 
-          {/* Description */}
-          <p className="text-sm leading-relaxed max-w-2xl mx-auto mb-10"
+          {/* Description — masqué sur xs, visible sm+ */}
+          <p className="hidden sm:block text-sm leading-relaxed max-w-2xl mx-auto mb-10"
             style={{ color: 'rgba(255,255,255,0.35)' }}>
             Professional-grade financial platform built with FastAPI + Next.js 14.
             Monte Carlo simulations across 4 stochastic models, Markowitz efficient frontier,
             WebSocket live prices, TradingView charts with RSI/MACD, and a macro dashboard
             for US, EU, UK &amp; JP markets.
+          </p>
+          {/* Description courte sur mobile */}
+          <p className="sm:hidden text-xs leading-relaxed max-w-xs mx-auto mb-8"
+            style={{ color: 'rgba(255,255,255,0.35)' }}>
+            4 Monte Carlo models · Live WebSocket prices · Markowitz optimizer · S&P 500 screener
           </p>
 
           {/* CTAs */}
@@ -480,11 +486,11 @@ export default function LandingPage() {
           </div>
 
           {/* Stats */}
-          <div className="grid grid-cols-2 sm:grid-cols-4 gap-6 max-w-lg mx-auto">
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 sm:gap-6 max-w-sm sm:max-w-lg mx-auto">
             {STATS.map((s) => (
               <div key={s.label} className="text-center">
-                <div className="text-2xl font-bold font-mono" style={{ color: 'white' }}>{s.value}</div>
-                <div className="text-xs mt-1" style={{ color: 'rgba(255,255,255,0.35)' }}>{s.label}</div>
+                <div className="text-xl sm:text-2xl font-bold font-mono" style={{ color: 'white' }}>{s.value}</div>
+                <div className="text-[11px] sm:text-xs mt-1" style={{ color: 'rgba(255,255,255,0.35)' }}>{s.label}</div>
               </div>
             ))}
           </div>

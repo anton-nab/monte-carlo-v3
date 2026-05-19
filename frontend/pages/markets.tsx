@@ -324,11 +324,11 @@ export default function MarketsPage() {
         <section>
           <h2 className="text-2xs uppercase tracking-widest text-terminal-textDim mb-2">Marchés mondiaux</h2>
           {loading ? (
-            <div className="grid grid-cols-3 sm:grid-cols-5 lg:grid-cols-9 gap-2">
+            <div className="grid grid-cols-3 sm:grid-cols-5 lg:grid-cols-9 gap-1.5 sm:gap-2">
               {Array.from({ length: 9 }).map((_, i) => <Skeleton key={i} className="h-20" />)}
             </div>
           ) : (
-            <div className="grid grid-cols-3 sm:grid-cols-5 lg:grid-cols-9 gap-2">
+            <div className="grid grid-cols-3 sm:grid-cols-5 lg:grid-cols-9 gap-1.5 sm:gap-2">
               {(liveIndices.length > 0 ? liveIndices : data?.indices ?? []).map((item) => (
                 <IndexCard key={item.ticker} item={item} />
               ))}

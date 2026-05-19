@@ -1,10 +1,11 @@
 /**
- * Header — global navigation bar.
+ * Header — global navigation bar + mobile drawer.
  *
- * Nav icons: small inline SVGs (no emoji, no external library).
- * ThemeToggle: light/dark switcher, persisted in localStorage.
+ * Desktop : nav links visibles (lg+).
+ * Mobile  : hamburger → drawer slide-in depuis la droite.
  */
 
+import { useState, useEffect } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/router';
 import { GlobalSearch } from './GlobalSearch';
@@ -87,60 +88,97 @@ const IconWatchlist = () => (
   </svg>
 );
 
+const IconMenu = () => (
+  <svg width="20" height="20" viewBox="0 0 24 24" fill="none"
+    stroke="currentColor" strokeWidth="2" strokeLinecap="round">
+    <line x1="3" y1="6"  x2="21" y2="6"  />
+    <line x1="3" y1="12" x2="21" y2="12" />
+    <line x1="3" y1="18" x2="21" y2="18" />
+  </svg>
+);
+
+const IconClose = () => (
+  <svg width="18" height="18" viewBox="0 0 24 24" fill="none"
+    stroke="currentColor" strokeWidth="2" strokeLinecap="round">
+    <line x1="18" y1="6"  x2="6"  y2="18" />
+    <line x1="6"  y1="6"  x2="18" y2="18" />
+  </svg>
+);
+
+// ─────────────────────────────────────────────────────────────────────────────
+
 const NAV_ITEMS: NavItem[] = [
-  { href: '/markets',    label: 'Markets',   icon: <IconHome />      },
-  { href: '/simulate',   label: 'Simulate',  icon: <IconSimulate />  },
-  { href: '/compare',    label: 'Compare',   icon: <IconCompare />   },
-  { href: '/portfolio',  label: 'Portfolio', icon: <IconPortfolio /> },
-  { href: '/backtest',   label: 'Backtest',  icon: <IconBacktest />  },
-  { href: '/screener',   label: 'Screener',  icon: <IconScreener />  },
-  { href: '/watchlist',  label: 'Watchlist', icon: <IconWatchlist /> },
-  { href: '/calendar',   label: 'Calendar',  icon: <IconCalendar />  },
+  { href: '/markets',   label: 'Markets',   icon: <IconHome />      },
+  { href: '/simulate',  label: 'Simulate',  icon: <IconSimulate />  },
+  { href: '/compare',   label: 'Compare',   icon: <IconCompare />   },
+  { href: '/portfolio', label: 'Portfolio', icon: <IconPortfolio /> },
+  { href: '/backtest',  label: 'Backtest',  icon: <IconBacktest />  },
+  { href: '/screener',  label: 'Screener',  icon: <IconScreener />  },
+  { href: '/watchlist', label: 'Watchlist', icon: <IconWatchlist /> },
+  { href: '/calendar',  label: 'Calendar',  icon: <IconCalendar />  },
 ];
+
+// ─────────────────────────────────────────────────────────────────────────────
 
 export function Header() {
   const router = useRouter();
+  const [drawerOpen, setDrawerOpen] = useState(false);
+
+  // Fermer le drawer lors d'un changement de route
+  useEffect(() => {
+    const close = () => setDrawerOpen(false);
+    router.events.on('routeChangeStart', close);
+    return () => router.events.off('routeChangeStart', close);
+  }, [router.events]);
+
+  // Bloquer le scroll du body quand le drawer est ouvert
+  useEffect(() => {
+    if (typeof document !== 'undefined') {
+      document.body.style.overflow = drawerOpen ? 'hidden' : '';
+    }
+    return () => {
+      if (typeof document !== 'undefined') {
+        document.body.style.overflow = '';
+      }
+    };
+  }, [drawerOpen]);
+
+  const isActive = (href: string) =>
+    href === '/' ? router.pathname === '/' : router.pathname.startsWith(href);
 
   return (
-    <header className="border-b border-terminal-border bg-terminal-surface/95 sticky top-0 z-20 backdrop-blur-sm shadow-sm">
-      <div className="max-w-7xl mx-auto px-4 h-14 flex items-center gap-4">
+    <>
+      {/* ── Header bar ─────────────────────────────────────────────── */}
+      <header className="border-b border-terminal-border bg-terminal-surface/95 sticky top-0 z-20 backdrop-blur-sm shadow-sm">
+        <div className="max-w-7xl mx-auto px-4 h-14 flex items-center gap-4">
 
-        {/* Logo */}
-        <Link
-          href="/"
-          className="flex items-center gap-2 whitespace-nowrap shrink-0 group"
-        >
-          <span
-            className="w-7 h-7 rounded flex items-center justify-center text-white text-xs font-bold shrink-0"
-            style={{ background: 'var(--color-primary)' }}
-          >
-            MC
-          </span>
-          <span className="hidden sm:inline font-serif text-base font-normal text-terminal-text group-hover:text-terminal-cyan transition-colors">
-            Monte Carlo
-          </span>
-          <span className="sm:hidden font-serif text-sm text-terminal-text">MC3</span>
-        </Link>
+          {/* Logo */}
+          <Link href="/" className="flex items-center gap-2 whitespace-nowrap shrink-0 group">
+            <span
+              className="w-7 h-7 rounded flex items-center justify-center text-white text-xs font-bold shrink-0"
+              style={{ background: 'var(--color-primary)' }}
+            >
+              MC
+            </span>
+            <span className="hidden sm:inline font-serif text-base font-normal text-terminal-text group-hover:text-terminal-cyan transition-colors">
+              Monte Carlo
+            </span>
+            <span className="sm:hidden font-serif text-sm text-terminal-text">MC</span>
+          </Link>
 
-        {/* Search bar — flex-1 avec min-width garanti */}
-        <div className="flex-1 min-w-0">
-          <GlobalSearch />
-        </div>
+          {/* Search — flex-1 */}
+          <div className="flex-1 min-w-0">
+            <GlobalSearch />
+          </div>
 
-        {/* Nav links — shrink-0 pour qu'ils ne compressent pas la search */}
-        <nav className="hidden lg:flex items-center gap-0.5 text-sm shrink-0">
-          {NAV_ITEMS.map((item) => {
-            const isActive =
-              item.href === '/'
-                ? router.pathname === '/'
-                : router.pathname.startsWith(item.href);
-
-            return (
+          {/* Desktop nav */}
+          <nav className="hidden lg:flex items-center gap-0.5 text-sm shrink-0">
+            {NAV_ITEMS.map((item) => (
               <Link
                 key={item.href}
                 href={item.href}
                 className={`px-2.5 py-1.5 rounded transition flex items-center gap-1.5 whitespace-nowrap ${
-                  isActive
+                  isActive(item.href)
                     ? 'text-terminal-cyan bg-terminal-surfaceHi'
                     : 'text-terminal-textMuted hover:text-terminal-text hover:bg-terminal-surfaceHi'
                 }`}
@@ -148,18 +186,99 @@ export function Header() {
                 {item.icon}
                 <span>{item.label}</span>
               </Link>
+            ))}
+          </nav>
+
+          {/* Theme toggle */}
+          <ThemeToggle />
+
+          {/* Mobile hamburger */}
+          <button
+            className="lg:hidden shrink-0 p-1.5 rounded text-terminal-textMuted hover:text-terminal-text hover:bg-terminal-surfaceHi transition"
+            onClick={() => setDrawerOpen(true)}
+            aria-label="Ouvrir le menu"
+          >
+            <IconMenu />
+          </button>
+        </div>
+      </header>
+
+      {/* ── Mobile drawer ─────────────────────────────────────────────
+           Toujours rendu dans le DOM pour la transition CSS.
+           Caché (translate-x-full + pointer-events-none) quand fermé.   */}
+
+      {/* Backdrop */}
+      <div
+        className={`fixed inset-0 z-40 bg-black/50 backdrop-blur-sm lg:hidden transition-opacity duration-300 ${
+          drawerOpen ? 'opacity-100 pointer-events-auto' : 'opacity-0 pointer-events-none'
+        }`}
+        onClick={() => setDrawerOpen(false)}
+        aria-hidden="true"
+      />
+
+      {/* Drawer panel */}
+      <div
+        className={`fixed right-0 top-0 h-full w-72 z-50 lg:hidden flex flex-col
+          bg-terminal-surface border-l border-terminal-border shadow-2xl
+          transition-transform duration-300 ease-in-out
+          ${drawerOpen ? 'translate-x-0' : 'translate-x-full'}`}
+      >
+        {/* Drawer header */}
+        <div className="h-14 flex items-center justify-between px-4 border-b border-terminal-border shrink-0">
+          <Link href="/" className="flex items-center gap-2" onClick={() => setDrawerOpen(false)}>
+            <span
+              className="w-6 h-6 rounded flex items-center justify-center text-white text-xs font-bold"
+              style={{ background: 'var(--color-primary)' }}
+            >
+              MC
+            </span>
+            <span className="font-serif text-sm text-terminal-text">Monte Carlo</span>
+          </Link>
+          <button
+            onClick={() => setDrawerOpen(false)}
+            className="p-1.5 rounded text-terminal-textMuted hover:text-terminal-text hover:bg-terminal-surfaceHi transition"
+            aria-label="Fermer le menu"
+          >
+            <IconClose />
+          </button>
+        </div>
+
+        {/* Nav items */}
+        <nav className="flex-1 overflow-y-auto py-2 px-2">
+          {NAV_ITEMS.map((item) => {
+            const active = isActive(item.href);
+            return (
+              <Link
+                key={item.href}
+                href={item.href}
+                className={`flex items-center gap-3 px-3 py-3 rounded-lg mb-0.5 transition-colors ${
+                  active
+                    ? 'text-terminal-cyan bg-terminal-surfaceHi'
+                    : 'text-terminal-textMuted hover:text-terminal-text hover:bg-terminal-surfaceHi'
+                }`}
+              >
+                <span className={active ? 'text-terminal-cyan' : 'text-terminal-textMuted'}>
+                  {item.icon}
+                </span>
+                <span className="text-sm font-medium">{item.label}</span>
+                {active && (
+                  <span className="ml-auto w-1.5 h-1.5 rounded-full bg-terminal-cyan" />
+                )}
+              </Link>
             );
           })}
         </nav>
 
-        {/* Theme toggle */}
-        <ThemeToggle />
-
-        {/* Mobile hamburger placeholder */}
-        <div className="lg:hidden shrink-0">
-          <button className="text-terminal-textDim text-xl px-1">&#9776;</button>
+        {/* Drawer footer */}
+        <div className="shrink-0 px-4 py-3 border-t border-terminal-border">
+          <div className="flex items-center justify-between">
+            <span className="text-xs text-terminal-textDim font-mono">
+              Monte Carlo · FastAPI + Next.js
+            </span>
+            <ThemeToggle />
+          </div>
         </div>
       </div>
-    </header>
+    </>
   );
 }
