@@ -74,6 +74,144 @@ _CAC40_STOCKS: list = [
     ("VIV.PA",  "Vivendi",                "Communication Services"),
 ]
 
+# ── Nasdaq 100 constituents (hardcoded fallback — FMP constituent may fail) ────
+_NASDAQ100_STOCKS: list = [
+    # (ticker, name, sector)
+    ("MSFT",  "Microsoft",               "Technology"),
+    ("AAPL",  "Apple",                   "Technology"),
+    ("NVDA",  "NVIDIA",                  "Technology"),
+    ("AMZN",  "Amazon",                  "Consumer Cyclical"),
+    ("META",  "Meta Platforms",          "Communication Services"),
+    ("GOOGL", "Alphabet Class A",        "Communication Services"),
+    ("GOOG",  "Alphabet Class C",        "Communication Services"),
+    ("TSLA",  "Tesla",                   "Consumer Cyclical"),
+    ("AVGO",  "Broadcom",                "Technology"),
+    ("COST",  "Costco",                  "Consumer Defensive"),
+    ("NFLX",  "Netflix",                 "Communication Services"),
+    ("ASML",  "ASML Holding",            "Technology"),
+    ("AMD",   "Advanced Micro Devices",  "Technology"),
+    ("CSCO",  "Cisco Systems",           "Technology"),
+    ("ADBE",  "Adobe",                   "Technology"),
+    ("QCOM",  "Qualcomm",                "Technology"),
+    ("INTU",  "Intuit",                  "Technology"),
+    ("AMAT",  "Applied Materials",       "Technology"),
+    ("TXN",   "Texas Instruments",       "Technology"),
+    ("HON",   "Honeywell",               "Industrials"),
+    ("AMGN",  "Amgen",                   "Healthcare"),
+    ("ISRG",  "Intuitive Surgical",      "Healthcare"),
+    ("BKNG",  "Booking Holdings",        "Consumer Cyclical"),
+    ("VRTX",  "Vertex Pharmaceuticals",  "Healthcare"),
+    ("SBUX",  "Starbucks",               "Consumer Cyclical"),
+    ("GILD",  "Gilead Sciences",         "Healthcare"),
+    ("LRCX",  "Lam Research",            "Technology"),
+    ("REGN",  "Regeneron",               "Healthcare"),
+    ("MU",    "Micron Technology",       "Technology"),
+    ("PANW",  "Palo Alto Networks",      "Technology"),
+    ("ADI",   "Analog Devices",          "Technology"),
+    ("KLAC",  "KLA Corp",                "Technology"),
+    ("MRVL",  "Marvell Technology",      "Technology"),
+    ("SNPS",  "Synopsys",                "Technology"),
+    ("CDNS",  "Cadence Design",          "Technology"),
+    ("FTNT",  "Fortinet",                "Technology"),
+    ("CTAS",  "Cintas",                  "Industrials"),
+    ("MELI",  "MercadoLibre",            "Consumer Cyclical"),
+    ("PEP",   "PepsiCo",                 "Consumer Defensive"),
+    ("WDAY",  "Workday",                 "Technology"),
+    ("CRWD",  "CrowdStrike",             "Technology"),
+    ("ABNB",  "Airbnb",                  "Consumer Cyclical"),
+    ("ORLY",  "O'Reilly Automotive",     "Consumer Cyclical"),
+    ("MNST",  "Monster Beverage",        "Consumer Defensive"),
+    ("PYPL",  "PayPal",                  "Financials"),
+    ("DXCM",  "DexCom",                  "Healthcare"),
+    ("ON",    "ON Semiconductor",        "Technology"),
+    ("CEG",   "Constellation Energy",    "Utilities"),
+    ("XEL",   "Xcel Energy",             "Utilities"),
+    ("AEP",   "American Electric Power", "Utilities"),
+    ("PAYX",  "Paychex",                 "Technology"),
+    ("KDP",   "Keurig Dr Pepper",        "Consumer Defensive"),
+    ("FAST",  "Fastenal",                "Industrials"),
+    ("PCAR",  "PACCAR",                  "Industrials"),
+    ("ODFL",  "Old Dominion Freight",    "Industrials"),
+    ("ROST",  "Ross Stores",             "Consumer Cyclical"),
+    ("DLTR",  "Dollar Tree",             "Consumer Defensive"),
+    ("EA",    "Electronic Arts",         "Communication Services"),
+    ("NXPI",  "NXP Semiconductors",      "Technology"),
+    ("IDXX",  "IDEXX Laboratories",      "Healthcare"),
+    ("GEHC",  "GE HealthCare",           "Healthcare"),
+    ("VRSK",  "Verisk Analytics",        "Technology"),
+    ("FANG",  "Diamondback Energy",      "Energy"),
+    ("CHTR",  "Charter Communications",  "Communication Services"),
+    ("BIIB",  "Biogen",                  "Healthcare"),
+    ("TEAM",  "Atlassian",               "Technology"),
+    ("BKR",   "Baker Hughes",            "Energy"),
+    ("MCHP",  "Microchip Technology",    "Technology"),
+    ("ADSK",  "Autodesk",                "Technology"),
+    ("WBD",   "Warner Bros Discovery",   "Communication Services"),
+    ("CTSH",  "Cognizant",               "Technology"),
+    ("GFS",   "GlobalFoundries",         "Technology"),
+    ("ANSS",  "ANSYS",                   "Technology"),
+    ("ILMN",  "Illumina",                "Healthcare"),
+    ("DDOG",  "Datadog",                 "Technology"),
+    ("ZS",    "Zscaler",                 "Technology"),
+    ("CDW",   "CDW Corp",                "Technology"),
+    ("CSX",   "CSX Corp",                "Industrials"),
+    ("LULU",  "Lululemon",               "Consumer Cyclical"),
+    ("MAR",   "Marriott",                "Consumer Cyclical"),
+    ("ALGN",  "Align Technology",        "Healthcare"),
+    ("SWKS",  "Skyworks Solutions",      "Technology"),
+    ("CPRT",  "Copart",                  "Industrials"),
+    ("TTWO",  "Take-Two Interactive",    "Communication Services"),
+    ("AZN",   "AstraZeneca",             "Healthcare"),
+    ("MDLZ",  "Mondelez",                "Consumer Defensive"),
+    ("EXPE",  "Expedia",                 "Consumer Cyclical"),
+    ("FOXA",  "Fox Corp A",              "Communication Services"),
+    ("FOX",   "Fox Corp B",              "Communication Services"),
+    ("BMRN",  "BioMarin",                "Healthcare"),
+    ("HSIC",  "Henry Schein",            "Healthcare"),
+    ("MDB",   "MongoDB",                 "Technology"),
+    ("TTD",   "The Trade Desk",          "Technology"),
+    ("OKTA",  "Okta",                    "Technology"),
+    ("SIRI",  "Sirius XM",               "Communication Services"),
+    ("MTCH",  "Match Group",             "Communication Services"),
+    ("NTES",  "NetEase",                 "Communication Services"),
+    ("CSGP",  "CoStar Group",            "Real Estate"),
+    ("RIVN",  "Rivian Automotive",       "Consumer Cyclical"),
+]
+
+# ── Dow Jones 30 constituents (hardcoded — small list, rarely changes) ─────────
+_DOW30_STOCKS: list = [
+    ("AAPL",  "Apple",               "Technology"),
+    ("MSFT",  "Microsoft",           "Technology"),
+    ("AMZN",  "Amazon",              "Consumer Cyclical"),
+    ("CRM",   "Salesforce",          "Technology"),
+    ("IBM",   "IBM",                 "Technology"),
+    ("CSCO",  "Cisco",               "Technology"),
+    ("INTC",  "Intel",               "Technology"),
+    ("V",     "Visa",                "Financials"),
+    ("GS",    "Goldman Sachs",       "Financials"),
+    ("JPM",   "JPMorgan Chase",      "Financials"),
+    ("AXP",   "American Express",    "Financials"),
+    ("TRV",   "Travelers",           "Financials"),
+    ("UNH",   "UnitedHealth Group",  "Healthcare"),
+    ("JNJ",   "Johnson & Johnson",   "Healthcare"),
+    ("MRK",   "Merck",               "Healthcare"),
+    ("AMGN",  "Amgen",               "Healthcare"),
+    ("HD",    "Home Depot",          "Consumer Cyclical"),
+    ("MCD",   "McDonald's",          "Consumer Cyclical"),
+    ("NKE",   "Nike",                "Consumer Cyclical"),
+    ("DIS",   "Disney",              "Communication Services"),
+    ("VZ",    "Verizon",             "Communication Services"),
+    ("WMT",   "Walmart",             "Consumer Defensive"),
+    ("KO",    "Coca-Cola",           "Consumer Defensive"),
+    ("PG",    "Procter & Gamble",    "Consumer Defensive"),
+    ("CVX",   "Chevron",             "Energy"),
+    ("HON",   "Honeywell",           "Industrials"),
+    ("CAT",   "Caterpillar",         "Industrials"),
+    ("BA",    "Boeing",              "Industrials"),
+    ("MMM",   "3M",                  "Industrials"),
+    ("SHW",   "Sherwin-Williams",    "Basic Materials"),
+]
+
 # ── Commodity ETF proxies (hardcoded weights in USD bn for treemap sizing) ──
 _COMMODITY_STOCKS: list = [
     # (ticker, name, sector, approx_weight_usd_bn)
@@ -915,13 +1053,16 @@ class FMPProvider:
         Return [{ticker, name, sector, price, change_pct, market_cap}] for a given index.
 
         Supported:
-          sp500      — S&P 500 (503 stocks via GitHub CSV + FMP batch quotes)
-          nasdaq100  — Nasdaq 100 (FMP /nasdaq_constituent + batch quotes)
-          dowjones   — Dow Jones 30 (FMP /dowjones_constituent + batch quotes)
-          cac40      — CAC 40 (hardcoded ticker list + FMP batch quotes)
-          commodities — Commodity ETF proxies (hardcoded weights, live prices)
+          sp500       — S&P 500  (GitHub CSV constituents)
+          nasdaq100   — Nasdaq 100 (hardcoded list; FMP endpoint as optional primary)
+          dowjones    — Dow Jones 30 (hardcoded list)
+          cac40       — CAC 40 (hardcoded Paris tickers)
+          commodities — Commodity ETF proxies (hardcoded weights)
 
-        Cache: 1 h (HEATMAP_TTL). Falls back gracefully when FMP has no market cap.
+        Prices / change_pct → yfinance (free, no API key, works for all markets incl .PA ETFs).
+        Market cap          → FMP batch quotes (optional enrichment, used only for tile sizing).
+
+        Cache: 1 h (HEATMAP_TTL).
         """
         idx = index.lower().strip()
         cache_key = f"heatmap_data:{idx}"
@@ -929,11 +1070,11 @@ class FMPProvider:
         if cached is not None:
             return cached
 
-        # ── Build ticker / sector / name maps ─────────────────────────────────
-        tickers:      List[str]       = []
-        name_map:     Dict[str, str]  = {}
-        sector_map:   Dict[str, str]  = {}
-        weight_map:   Dict[str, float] = {}  # commodity fallback weights
+        # ── 1. Build ticker / sector / name maps ──────────────────────────────
+        tickers:    List[str]        = []
+        name_map:   Dict[str, str]   = {}
+        sector_map: Dict[str, str]   = {}
+        weight_map: Dict[str, float] = {}   # commodity fallback market-cap weights
 
         if idx == "sp500":
             from services.indices.csv_provider import CsvProvider
@@ -948,16 +1089,31 @@ class FMPProvider:
                 sector_map[t] = self._GICS_SECTOR_MAP.get(gics, gics) or "Other"
 
         elif idx in ("nasdaq100", "dowjones"):
-            fmp_key  = {"nasdaq100": "NDX", "dowjones": "DJI"}[idx]
-            consts   = await self.get_index_constituents(fmp_key)
-            for c in consts:
-                t = c.get("ticker", "").strip()
-                if not t:
-                    continue
-                tickers.append(t)
-                name_map[t]   = c.get("name", "")
-                raw_sec       = c.get("sector", "")
-                sector_map[t] = self._GICS_SECTOR_MAP.get(raw_sec, raw_sec) or "Other"
+            # Try FMP constituent endpoint first; fall back to hardcoded list
+            fmp_key   = {"nasdaq100": "NDX", "dowjones": "DJI"}[idx]
+            hardcoded = _NASDAQ100_STOCKS if idx == "nasdaq100" else _DOW30_STOCKS
+            fmp_consts: List[Dict] = []
+            try:
+                fmp_consts = await self.get_index_constituents(fmp_key)
+            except Exception as exc:
+                print(f"[Heatmap:{idx}] FMP constituent error: {exc}")
+
+            if len(fmp_consts) >= 20:
+                for c in fmp_consts:
+                    t = c.get("ticker", "").strip()
+                    if not t:
+                        continue
+                    tickers.append(t)
+                    name_map[t]   = c.get("name", "")
+                    raw_sec       = c.get("sector", "")
+                    sector_map[t] = self._GICS_SECTOR_MAP.get(raw_sec, raw_sec) or raw_sec or "Other"
+                print(f"[Heatmap:{idx}] using FMP constituents ({len(tickers)} tickers)")
+            else:
+                for t, name, sector in hardcoded:
+                    tickers.append(t)
+                    name_map[t]   = name
+                    sector_map[t] = sector
+                print(f"[Heatmap:{idx}] using hardcoded list ({len(tickers)} tickers)")
 
         elif idx == "cac40":
             for t, name, sector in _CAC40_STOCKS:
@@ -970,7 +1126,7 @@ class FMPProvider:
                 tickers.append(t)
                 name_map[t]    = name
                 sector_map[t]  = sector
-                weight_map[t]  = float(weight) * 1e9   # convert bn → units
+                weight_map[t]  = float(weight) * 1e9
 
         else:
             print(f"[Heatmap] Unknown index: {idx!r}")
@@ -979,31 +1135,35 @@ class FMPProvider:
         if not tickers:
             return []
 
-        # ── Fetch live quotes (price + change_pct + market_cap) ───────────────
-        quotes = await self.get_batch_quotes(
-            tickers, cache_key=f"heatmap_{idx}"
-        )
+        # ── 2. Prices + change_pct via yfinance (primary — no API key needed) ─
+        loop      = asyncio.get_event_loop()
+        yf_quotes = await loop.run_in_executor(None, self._yf_bulk_quotes, tickers)
 
-        # ── Merge ─────────────────────────────────────────────────────────────
+        # ── 3. Market cap via FMP batch quotes (optional, used only for sizing) ─
+        fmp_quotes = await self.get_batch_quotes(tickers, cache_key=f"hm_mc_{idx}")
+
+        # ── 4. Merge ──────────────────────────────────────────────────────────
         result: List[Dict[str, Any]] = []
         for ticker in tickers:
-            q  = quotes.get(ticker, {})
-            mc = q.get("market_cap")
-            # Commodity fallback: use hardcoded weight if FMP marketCap unavailable
+            yf  = yf_quotes.get(ticker, {})
+            fmp = fmp_quotes.get(ticker, {})
+
+            mc = fmp.get("market_cap")
             if mc is None and idx == "commodities":
                 mc = weight_map.get(ticker, 1e9)
 
             result.append({
                 "ticker":     ticker,
-                "name":       name_map.get(ticker) or q.get("name", ticker),
-                "sector":     sector_map.get(ticker) or q.get("sector") or "Other",
-                "price":      q.get("price"),
-                "change_pct": q.get("change_pct"),
+                "name":       name_map.get(ticker) or fmp.get("name", "") or ticker,
+                "sector":     sector_map.get(ticker) or "Other",
+                "price":      yf.get("price")      or fmp.get("price"),
+                "change_pct": yf.get("change_pct"),   # yfinance is primary source
                 "market_cap": mc,
             })
 
-        prices_found = sum(1 for r in result if r["price"] is not None)
-        print(f"[Heatmap:{idx}] {len(result)} stocks, {prices_found} with prices")
+        prices_found = sum(1 for r in result if r["price"]      is not None)
+        chg_found    = sum(1 for r in result if r["change_pct"] is not None)
+        print(f"[Heatmap:{idx}] {len(result)} stocks | {prices_found} prices | {chg_found} changes")
 
         if result and prices_found > 0:
             self._set_cache(cache_key, result)

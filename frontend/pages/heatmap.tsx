@@ -1,8 +1,9 @@
 /**
  * pages/heatmap.tsx — Phase 18 (TradingView-style)
  * ──────────────────────────────────────────────────
- * Squarified treemap: tiles proportional to market cap, colored by change_pct.
- * Two-level layout: sector regions → stock tiles within each sector.
+ * Squarified treemap : tuiles proportionnelles à la market cap, colorées par change_pct.
+ * Vue globale : top 15 par secteur.
+ * Clic secteur → vue détaillée : toutes les actions du secteur.
  */
 
 import { useState, useEffect, useRef, useMemo } from 'react';
@@ -10,7 +11,7 @@ import Head from 'next/head';
 import Link from 'next/link';
 import { API_BASE } from '../lib/api';
 
-// ── API types ─────────────────────────────────────────────────────────────────
+// ── Types API ─────────────────────────────────────────────────────────────────
 
 interface StockData {
   ticker:     string;
@@ -37,222 +38,188 @@ interface HeatmapResponse {
   sectors: SectorData[];
 }
 
-// ── Squarified treemap ────────────────────────────────────────────────────────
+// ── Squarified Treemap ────────────────────────────────────────────────────────
 
-interface TileNode {
-  value: number;
-  [key: string]: any;
-}
+interface TileNode { value: number; [k: string]: any; }
+interface TileRect  extends TileNode { x: number; y: number; w: number; h: number; }
 
-interface TileRect extends TileNode {
-  x: number;
-  y: number;
-  w: number;
-  h: number;
-}
-
+/** Worst aspect-ratio for a row (Bruls 2000). rowAreas must be sorted desc. */
 function worstAR(rowAreas: number[], s: number): number {
   if (!rowAreas.length || s === 0) return Infinity;
-  const sum   = rowAreas.reduce((a, b) => a + b, 0);
-  const maxA  = rowAreas[0]; // already sorted desc
-  const minA  = rowAreas[rowAreas.length - 1];
+  const sum  = rowAreas.reduce((a, b) => a + b, 0);
+  const maxA = rowAreas[0];
+  const minA = rowAreas[rowAreas.length - 1];
   if (sum === 0 || minA === 0) return Infinity;
   return Math.max((s * s * maxA) / (sum * sum), (sum * sum) / (s * s * minA));
 }
 
-function layoutRow(
-  row: TileNode[], areas: number[],
+function layoutStrip(
+  row:   TileNode[], areas: number[],
   x: number, y: number, w: number, h: number,
-  out: TileRect[],
+  out:   TileRect[],
 ): [number, number, number, number] {
   const rowSum = areas.reduce((a, b) => a + b, 0);
   if (w >= h) {
-    const stripW = rowSum / h;
+    const sw = rowSum / h;
     let cy = y;
     for (let i = 0; i < row.length; i++) {
-      const tileH = stripW > 0 ? areas[i] / stripW : 0;
-      out.push({ ...row[i], x, y: cy, w: stripW, h: tileH });
-      cy += tileH;
+      const th = sw > 0 ? areas[i] / sw : 0;
+      out.push({ ...row[i], x, y: cy, w: sw, h: th });
+      cy += th;
     }
-    return [x + stripW, y, w - stripW, h];
+    return [x + sw, y, w - sw, h];
   } else {
-    const stripH = rowSum / w;
+    const sh = rowSum / w;
     let cx = x;
     for (let i = 0; i < row.length; i++) {
-      const tileW = stripH > 0 ? areas[i] / stripH : 0;
-      out.push({ ...row[i], x: cx, y, w: tileW, h: stripH });
-      cx += tileW;
+      const tw = sh > 0 ? areas[i] / sh : 0;
+      out.push({ ...row[i], x: cx, y, w: tw, h: sh });
+      cx += tw;
     }
-    return [x, y + stripH, w, h - stripH];
+    return [x, y + sh, w, h - sh];
   }
 }
 
 function _squarify(
-  items: TileNode[],
-  scaledAreas: number[],
+  items: TileNode[], scaled: number[],
   x: number, y: number, w: number, h: number,
   out: TileRect[],
 ): void {
   if (!items.length) return;
-  if (items.length === 1) {
-    out.push({ ...items[0], x, y, w, h });
-    return;
-  }
+  if (items.length === 1) { out.push({ ...items[0], x, y, w, h }); return; }
 
   const s = Math.min(w, h);
-  let rowItems:  TileNode[] = [];
-  let rowAreas:  number[]   = [];
+  let row: TileNode[] = [], rowA: number[] = [];
 
   for (let i = 0; i <= items.length; i++) {
-    if (i === items.length) {
-      layoutRow(rowItems, rowAreas, x, y, w, h, out);
-      return;
-    }
-    const newAreas = [...rowAreas, scaledAreas[i]];
-    if (
-      rowItems.length === 0 ||
-      worstAR(newAreas, s) <= worstAR(rowAreas, s)
-    ) {
-      rowItems.push(items[i]);
-      rowAreas = newAreas;
+    if (i === items.length) { layoutStrip(row, rowA, x, y, w, h, out); return; }
+    const nA = [...rowA, scaled[i]];
+    if (row.length === 0 || worstAR(nA, s) <= worstAR(rowA, s)) {
+      row.push(items[i]); rowA = nA;
     } else {
-      const [nx, ny, nw, nh] = layoutRow(rowItems, rowAreas, x, y, w, h, out);
-      _squarify(items.slice(i), scaledAreas.slice(i), nx, ny, nw, nh, out);
+      const [nx, ny, nw, nh] = layoutStrip(row, rowA, x, y, w, h, out);
+      _squarify(items.slice(i), scaled.slice(i), nx, ny, nw, nh, out);
       return;
     }
   }
 }
 
 function squarify(nodes: TileNode[], x: number, y: number, w: number, h: number): TileRect[] {
-  const filtered = nodes.filter(n => n.value > 0);
-  const total    = filtered.reduce((s, n) => s + n.value, 0);
-  if (!total || !filtered.length || w <= 0 || h <= 0) return [];
-
-  const scale        = (w * h) / total;
-  const scaledAreas  = filtered.map(n => n.value * scale);
+  const f = nodes.filter(n => n.value > 0);
+  const total = f.reduce((s, n) => s + n.value, 0);
+  if (!total || !f.length || w <= 0 || h <= 0) return [];
+  const sc = (w * h) / total;
   const out: TileRect[] = [];
-  _squarify(filtered, scaledAreas, x, y, w, h, out);
+  _squarify(f, f.map(n => n.value * sc), x, y, w, h, out);
   return out;
 }
 
-// ── Two-level layout ──────────────────────────────────────────────────────────
+// ── Layout 2 niveaux ──────────────────────────────────────────────────────────
 
-const SECTOR_GAP = 3;   // px between sector blocks
-const TILE_GAP   = 1;   // px between stock tiles
-const LABEL_H    = 20;  // px reserved for sector header label
+const SGAP = 3;   // gap inter-secteurs
+const TGAP = 1;   // gap inter-tuiles
+const LBL_H = 22; // hauteur label secteur
 
-interface SectorRect extends TileRect {
-  sectorData: SectorData;
-}
-
-interface StockTileRect extends TileRect {
-  ticker:     string;
-  name:       string;
-  change_pct: number | null;
-  price:      number | null;
+interface StockTileRect {
+  ticker: string; name: string;
+  change_pct: number | null; price: number | null;
+  x: number; y: number; w: number; h: number;
   sectorName: string;
 }
-
 interface SectorLabelRect {
-  type:       'sector-label';
+  name: string; avg_change: number | null; hiddenCount: number;
   x: number; y: number; w: number; h: number;
-  name:       string;
-  avg_change: number | null;
 }
 
+interface SectorDisplay extends SectorData { _hidden: number; }
+
 function computeTreemap(
-  sectors: SectorData[],
-  W: number,
-  H: number,
+  sectors: SectorDisplay[], W: number, H: number, isExpanded: boolean,
 ): { stockTiles: StockTileRect[]; sectorLabels: SectorLabelRect[] } {
   const stockTiles:   StockTileRect[]   = [];
   const sectorLabels: SectorLabelRect[] = [];
-
   if (W <= 0 || H <= 0) return { stockTiles, sectorLabels };
 
-  // Level-1: sectors sized by total_mktcap (fallback: stock count)
-  const sectorNodes: TileNode[] = sectors.map(sec => ({
-    value:      sec.total_mktcap ?? sec.count,
-    sectorData: sec,
-  }));
-  const sectorRects = squarify(sectorNodes, 0, 0, W, H) as SectorRect[];
-
-  for (const sr of sectorRects) {
-    const sec = sr.sectorData as SectorData;
-
-    // Inner area after gap
-    const ix = sr.x + SECTOR_GAP;
-    const iy = sr.y + SECTOR_GAP;
-    const iw = sr.w - SECTOR_GAP * 2;
-    const ih = sr.h - SECTOR_GAP * 2;
-
-    if (iw <= 4 || ih <= 4) continue;
-
-    // Reserve space for sector label (only if large enough)
-    const showLabel = iw >= 60 && ih >= 30;
-    const labelH    = showLabel ? LABEL_H : 0;
-
-    // Level-2: stocks sized by market_cap (fallback: 1)
-    const stockNodes: TileNode[] = sec.stocks.map(st => ({
-      value:      Math.max(st.market_cap ?? 1, 1),
-      ticker:     st.ticker,
-      name:       st.name,
-      change_pct: st.change_pct,
-      price:      st.price,
+  // ── Vue "expanded" : une seule section remplit tout le container ──────────
+  if (isExpanded && sectors.length === 1) {
+    const sec = sectors[0];
+    const headerH = 30;
+    sectorLabels.push({
+      name: sec.name, avg_change: sec.avg_change, hiddenCount: 0,
+      x: 0, y: 0, w: W, h: headerH,
+    });
+    const nodes: TileNode[] = sec.stocks.map(st => ({
+      value: Math.max(st.market_cap ?? 1, 1),
+      ...st,
     }));
-
-    const stockRects = squarify(
-      stockNodes,
-      ix,
-      iy + labelH,
-      iw,
-      ih - labelH,
-    ) as (TileRect & StockData)[];
-
-    for (const tr of stockRects) {
-      // Apply tile gap
+    const rects = squarify(nodes, SGAP, headerH + SGAP, W - 2 * SGAP, H - headerH - 2 * SGAP);
+    for (const r of rects) {
       stockTiles.push({
-        ...tr,
-        x:          tr.x + TILE_GAP / 2,
-        y:          tr.y + TILE_GAP / 2,
-        w:          tr.w - TILE_GAP,
-        h:          tr.h - TILE_GAP,
+        ...r, ticker: r.ticker, name: r.name,
+        change_pct: r.change_pct, price: r.price,
+        x: r.x + TGAP / 2, y: r.y + TGAP / 2,
+        w: r.w - TGAP, h: r.h - TGAP,
         sectorName: sec.name,
       });
     }
+    return { stockTiles, sectorLabels };
+  }
 
-    if (showLabel) {
-      sectorLabels.push({
-        type:       'sector-label',
-        x:          ix,
-        y:          iy,
-        w:          iw,
-        h:          LABEL_H,
-        name:       sec.name,
-        avg_change: sec.avg_change,
+  // ── Vue globale : squarify des secteurs, puis stocks dans chaque secteur ──
+  const sNodes: TileNode[] = sectors.map(s => ({
+    value: s.total_mktcap ?? s.count, sectorData: s,
+  }));
+  const sRects = squarify(sNodes, 0, 0, W, H) as (TileRect & { sectorData: SectorDisplay })[];
+
+  for (const sr of sRects) {
+    const sec = sr.sectorData;
+    const ix = sr.x + SGAP, iy = sr.y + SGAP;
+    const iw = sr.w - SGAP * 2, ih = sr.h - SGAP * 2;
+    if (iw <= 4 || ih <= 4) continue;
+
+    const showLabel = iw >= 55 && ih >= 28;
+    const lblH      = showLabel ? LBL_H : 0;
+
+    sectorLabels.push({
+      name: sec.name, avg_change: sec.avg_change, hiddenCount: sec._hidden,
+      x: ix, y: iy, w: iw, h: showLabel ? lblH : 0,
+    });
+
+    const nodes: TileNode[] = sec.stocks.map(st => ({
+      value: Math.max(st.market_cap ?? 1, 1), ...st,
+    }));
+    const rects = squarify(nodes, ix, iy + lblH, iw, ih - lblH);
+    for (const r of rects) {
+      stockTiles.push({
+        ...r, ticker: r.ticker, name: r.name,
+        change_pct: r.change_pct, price: r.price,
+        x: r.x + TGAP / 2, y: r.y + TGAP / 2,
+        w: r.w - TGAP, h: r.h - TGAP,
+        sectorName: sec.name,
       });
     }
   }
-
   return { stockTiles, sectorLabels };
 }
 
-// ── Color helpers ─────────────────────────────────────────────────────────────
+// ── Couleurs ──────────────────────────────────────────────────────────────────
 
 function heatBg(pct: number | null): string {
-  if (pct == null) return 'rgba(28,30,42,0.9)';
-  const v = Math.max(-7, Math.min(7, pct));
-  if (v >= 0) {
-    const t = v / 7;
-    return `rgba(${Math.round(10 + 10 * (1-t))},${Math.round(55 + 115 * t)},${Math.round(18 * (1-t))},0.9)`;
+  if (pct == null)         return 'rgba(42,46,62,0.95)';   // no data
+  if (Math.abs(pct) < 0.1) return 'rgba(50,55,72,0.95)';  // flat
+  const v = Math.max(-8, Math.min(8, pct));
+  const t = Math.max(0.12, Math.abs(v) / 8);
+  if (v > 0) {
+    const g = Math.round(72 + 110 * t);
+    return `rgba(8,${g},22,0.92)`;
   } else {
-    const t = (-v) / 7;
-    return `rgba(${Math.round(55 + 130 * t)},${Math.round(12 * (1-t))},${Math.round(12 * (1-t))},0.9)`;
+    const r = Math.round(72 + 120 * t);
+    return `rgba(${r},8,8,0.92)`;
   }
 }
 
 function changeColor(pct: number | null): string {
-  if (pct == null) return '#6b7280';
+  if (pct == null)          return '#6b7280';
   if (pct >  0.05) return '#4ade80';
   if (pct < -0.05) return '#f87171';
   return '#9ca3af';
@@ -263,33 +230,36 @@ function fmt(pct: number | null): string {
   return (pct >= 0 ? '+' : '') + pct.toFixed(2) + '%';
 }
 
-// ── Index selector config ─────────────────────────────────────────────────────
+// ── Config indices ────────────────────────────────────────────────────────────
 
 const INDICES = [
-  { key: 'sp500',       label: 'S&P 500',    sub: 'US 500'  },
-  { key: 'nasdaq100',   label: 'Nasdaq 100', sub: 'US Tech' },
-  { key: 'dowjones',    label: 'Dow Jones',  sub: 'US 30'   },
-  { key: 'cac40',       label: 'CAC 40',     sub: 'France'  },
-  { key: 'commodities', label: 'Commodities',sub: 'Matières'},
+  { key: 'sp500',       label: 'S&P 500',    sub: 'US · 500 titres'  },
+  { key: 'nasdaq100',   label: 'Nasdaq 100', sub: 'US · Tech'        },
+  { key: 'dowjones',    label: 'Dow Jones',  sub: 'US · 30 blue chips'},
+  { key: 'cac40',       label: 'CAC 40',     sub: 'France · 40 titres'},
+  { key: 'commodities', label: 'Matières 1ères', sub: 'Or · Pétrole · Agri' },
 ];
+
+const TOP_N = 15; // titres affichés par secteur en vue globale
 
 // ── Page ──────────────────────────────────────────────────────────────────────
 
 export default function HeatmapPage() {
-  const [selectedIndex, setSelectedIndex] = useState('sp500');
-  const [data,    setData]    = useState<HeatmapResponse | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [error,   setError]   = useState<string | null>(null);
+  const [selIdx,          setSelIdx]          = useState('sp500');
+  const [data,            setData]            = useState<HeatmapResponse | null>(null);
+  const [loading,         setLoading]         = useState(true);
+  const [error,           setError]           = useState<string | null>(null);
+  const [expandedSector,  setExpandedSector]  = useState<string | null>(null);
 
   const containerRef = useRef<HTMLDivElement>(null);
-  const [dims, setDims] = useState({ w: 1000, h: 640 });
+  const [dims, setDims] = useState({ w: 1000, h: 620 });
 
-  // Measure container on mount + resize
+  // ResizeObserver
   useEffect(() => {
     const update = () => {
       if (containerRef.current) {
-        const rect = containerRef.current.getBoundingClientRect();
-        if (rect.width > 0) setDims({ w: rect.width, h: rect.height });
+        const { width, height } = containerRef.current.getBoundingClientRect();
+        if (width > 0 && height > 0) setDims({ w: width, h: height });
       }
     };
     update();
@@ -298,34 +268,48 @@ export default function HeatmapPage() {
     return () => ro.disconnect();
   }, []);
 
-  // Fetch on index change
+  // Fetch
   useEffect(() => {
-    setLoading(true);
-    setError(null);
-    setData(null);
-    fetch(`${API_BASE}/api/heatmap?index=${selectedIndex}`)
+    setLoading(true); setError(null); setData(null); setExpandedSector(null);
+    fetch(`${API_BASE}/api/heatmap?index=${selIdx}`)
       .then(r => { if (!r.ok) throw new Error(`HTTP ${r.status}`); return r.json(); })
       .then((d: HeatmapResponse) => { setData(d); setLoading(false); })
       .catch(e => { setError(e.message); setLoading(false); });
-  }, [selectedIndex]);
+  }, [selIdx]);
 
-  // Compute treemap layout (memoized — only recomputes when data or dims change)
+  // Sectors à afficher (limités ou expanded)
+  const displaySectors = useMemo<SectorDisplay[]>(() => {
+    if (!data?.sectors) return [];
+    if (expandedSector) {
+      const sec = data.sectors.find(s => s.name === expandedSector);
+      return sec ? [{ ...sec, _hidden: 0 }] : [];
+    }
+    return data.sectors.map(sec => ({
+      ...sec,
+      stocks:  sec.stocks.slice(0, TOP_N),
+      _hidden: Math.max(0, sec.stocks.length - TOP_N),
+    }));
+  }, [data, expandedSector]);
+
+  // Layout treemap (memoized)
   const { stockTiles, sectorLabels } = useMemo(() => {
-    if (!data?.sectors) return { stockTiles: [], sectorLabels: [] };
-    return computeTreemap(data.sectors, dims.w, dims.h);
-  }, [data, dims]);
+    if (!displaySectors.length) return { stockTiles: [], sectorLabels: [] };
+    return computeTreemap(displaySectors, dims.w, dims.h, !!expandedSector);
+  }, [displaySectors, dims, expandedSector]);
+
+  const totalDisplayed = displaySectors.reduce((s, sec) => s + sec.stocks.length, 0);
 
   return (
     <>
       <Head>
         <title>Market Heatmap — Monte Carlo</title>
-        <meta name="description" content="Market heatmap: tiles proportional to market cap, colored by daily change" />
+        <meta name="description" content="Heatmap marché : tuiles proportionnelles à la capitalisation, colorées par variation" />
       </Head>
 
       <div className="max-w-[1600px] mx-auto px-4 py-5 space-y-4">
 
-        {/* ── Header ─────────────────────────────────────────────── */}
-        <div className="flex flex-col sm:flex-row sm:items-end gap-3 justify-between">
+        {/* ── En-tête ──────────────────────────────────────────────── */}
+        <div className="flex flex-col sm:flex-row sm:items-end gap-2 justify-between">
           <div>
             <h1 className="text-2xl font-bold text-terminal-text">Market Heatmap</h1>
             <p className="text-sm text-terminal-textMuted mt-0.5">
@@ -339,61 +323,70 @@ export default function HeatmapPage() {
           )}
         </div>
 
-        {/* ── Index selector ──────────────────────────────────────── */}
+        {/* ── Sélecteur d'indice ───────────────────────────────────── */}
         <div className="flex flex-wrap gap-2">
           {INDICES.map(idx => (
             <button
               key={idx.key}
-              onClick={() => setSelectedIndex(idx.key)}
+              onClick={() => setSelIdx(idx.key)}
               className={`flex flex-col items-start px-3.5 py-2 rounded-lg border text-left transition-all ${
-                selectedIndex === idx.key
+                selIdx === idx.key
                   ? 'bg-terminal-cyan/10 border-terminal-cyan text-terminal-cyan'
                   : 'bg-terminal-surface border-terminal-border text-terminal-textMuted hover:border-terminal-textDim hover:text-terminal-text'
               }`}
             >
               <span className="text-xs font-semibold leading-tight">{idx.label}</span>
-              <span className="text-[10px] font-mono opacity-70 leading-tight">{idx.sub}</span>
+              <span className="text-[10px] font-mono opacity-60 leading-tight">{idx.sub}</span>
             </button>
           ))}
         </div>
 
-        {/* ── Legend ──────────────────────────────────────────────── */}
-        <div className="flex items-center gap-1.5 flex-wrap">
-          <span className="text-[11px] text-terminal-textDim mr-1">Variation :</span>
-          {([-5, -3, -1, 0, 1, 3, 5] as const).map(v => (
-            <span
-              key={v}
-              className="inline-flex items-center justify-center text-[10px] font-mono px-2 py-0.5 rounded"
-              style={{
-                background: heatBg(v),
-                color: v > 0 ? '#86efac' : v < 0 ? '#fca5a5' : '#9ca3af',
-              }}
+        {/* ── Légende + barre d'actions ────────────────────────────── */}
+        <div className="flex items-center gap-3 flex-wrap justify-between">
+          <div className="flex items-center gap-1.5 flex-wrap">
+            <span className="text-[11px] text-terminal-textDim">Variation :</span>
+            {([-5, -3, -1, 0, 1, 3, 5] as const).map(v => (
+              <span key={v}
+                className="inline-flex items-center justify-center text-[10px] font-mono px-2 py-0.5 rounded"
+                style={{ background: heatBg(v), color: v > 0 ? '#86efac' : v < 0 ? '#fca5a5' : '#9ca3af' }}
+              >
+                {v >= 0 ? '+' : ''}{v}%
+              </span>
+            ))}
+          </div>
+          {/* Bouton retour quand un secteur est expanded */}
+          {expandedSector ? (
+            <button
+              onClick={() => setExpandedSector(null)}
+              className="flex items-center gap-1.5 text-xs text-terminal-cyan border border-terminal-cyan/40
+                         rounded-lg px-3 py-1.5 hover:bg-terminal-cyan/10 transition"
             >
-              {v >= 0 ? '+' : ''}{v}%
-            </span>
-          ))}
-          <span className="text-[10px] text-terminal-textDim ml-2">
-            Cliquer sur un titre → fiche instrument
-          </span>
+              ← Retour au heatmap global
+            </button>
+          ) : (
+            !loading && data && (
+              <span className="text-[11px] text-terminal-textDim">
+                {totalDisplayed} / {data.total} titres · cliquer un secteur pour tout afficher
+              </span>
+            )
+          )}
         </div>
 
-        {/* ── Treemap container ───────────────────────────────────── */}
+        {/* ── Conteneur treemap ────────────────────────────────────── */}
         <div
           ref={containerRef}
-          className="w-full rounded-xl overflow-hidden border border-terminal-border bg-terminal-bg"
-          style={{ height: 'calc(100vh - 300px)', minHeight: 480, maxHeight: 720 }}
+          className="w-full rounded-xl overflow-hidden border border-terminal-border bg-[#0f1117]"
+          style={{ height: 'calc(100vh - 310px)', minHeight: 480, maxHeight: 720 }}
         >
-          {/* Loading */}
           {loading && (
             <div className="flex items-center justify-center h-full text-terminal-textMuted">
               <div className="text-center space-y-3">
                 <div className="w-9 h-9 border-2 border-terminal-cyan border-t-transparent rounded-full animate-spin mx-auto" />
-                <p className="text-sm">Chargement du heatmap…</p>
+                <p className="text-sm">Chargement…</p>
               </div>
             </div>
           )}
 
-          {/* Error */}
           {error && (
             <div className="flex items-center justify-center h-full">
               <div className="bg-red-900/20 border border-red-500/30 rounded-lg px-5 py-4 text-red-400 text-sm max-w-sm text-center">
@@ -402,19 +395,18 @@ export default function HeatmapPage() {
             </div>
           )}
 
-          {/* Treemap */}
           {!loading && !error && data && (
             <div className="relative w-full h-full">
 
-              {/* Stock tiles */}
+              {/* Tuiles stocks */}
               {stockTiles.map(tile => (
                 <Link
-                  key={tile.ticker}
+                  key={`${tile.sectorName}-${tile.ticker}`}
                   href={`/instrument/${tile.ticker}`}
                   title={`${tile.name}${tile.price != null ? ` · $${tile.price.toFixed(2)}` : ''} · ${fmt(tile.change_pct)}`}
-                  className="absolute overflow-hidden transition-all duration-100
+                  className="absolute overflow-hidden cursor-pointer select-none
                              hover:ring-2 hover:ring-white/40 hover:z-10 hover:brightness-125
-                             active:scale-95 cursor-pointer select-none"
+                             active:scale-95 transition-[filter,box-shadow] duration-100"
                   style={{
                     left:       tile.x,
                     top:        tile.y,
@@ -423,25 +415,22 @@ export default function HeatmapPage() {
                     background: heatBg(tile.change_pct),
                   }}
                 >
-                  {tile.w >= 44 && tile.h >= 30 && (
-                    <span
-                      className="absolute inset-0 flex flex-col items-center justify-center gap-0"
-                      style={{ padding: '2px 3px' }}
-                    >
-                      {/* Ticker */}
+                  {tile.w >= 40 && tile.h >= 26 && (
+                    <span className="absolute inset-0 flex flex-col items-center justify-center"
+                      style={{ padding: '2px 3px', gap: 0 }}>
                       <span
                         className="text-white font-bold leading-none text-center w-full truncate"
-                        style={{ fontSize: Math.min(13, Math.max(8, tile.w / 5)) }}
+                        style={{ fontSize: Math.min(13, Math.max(8, Math.min(tile.w / 5, tile.h / 3))) }}
                       >
                         {tile.ticker}
                       </span>
-                      {/* Change% — only if tall enough */}
-                      {tile.h >= 44 && tile.w >= 50 && (
+                      {tile.h >= 42 && tile.w >= 46 && (
                         <span
-                          className="font-mono leading-none text-center"
+                          className="font-mono leading-none"
                           style={{
-                            fontSize: Math.min(11, Math.max(7, tile.w / 6)),
-                            color:    changeColor(tile.change_pct),
+                            fontSize: Math.min(11, Math.max(7, Math.min(tile.w / 6.5, tile.h / 4))),
+                            color: changeColor(tile.change_pct),
+                            marginTop: 1,
                           }}
                         >
                           {fmt(tile.change_pct)}
@@ -452,40 +441,50 @@ export default function HeatmapPage() {
                 </Link>
               ))}
 
-              {/* Sector label overlays */}
+              {/* Labels secteurs */}
               {sectorLabels.map(lbl => (
-                <div
-                  key={lbl.name}
-                  className="absolute flex items-center gap-2 px-2 pointer-events-none"
-                  style={{
-                    left:       lbl.x,
-                    top:        lbl.y,
-                    width:      lbl.w,
-                    height:     lbl.h,
-                    background: 'rgba(0,0,0,0.55)',
-                    backdropFilter: 'blur(2px)',
-                    zIndex: 5,
-                    borderRadius: '2px 2px 0 0',
-                  }}
-                >
-                  <span
-                    className="font-semibold text-white truncate"
-                    style={{ fontSize: Math.min(11, Math.max(9, lbl.w / 12)) }}
+                lbl.h > 0 && (
+                  <div
+                    key={lbl.name}
+                    onClick={() => !expandedSector && setExpandedSector(lbl.name)}
+                    className={`absolute flex items-center gap-2 px-2 z-10 ${
+                      !expandedSector ? 'cursor-pointer hover:bg-black/70' : 'cursor-default'
+                    }`}
+                    style={{
+                      left:           lbl.x,
+                      top:            lbl.y,
+                      width:          lbl.w,
+                      height:         lbl.h,
+                      background:     'rgba(0,0,0,0.65)',
+                      backdropFilter: 'blur(3px)',
+                      borderRadius:   '3px 3px 0 0',
+                      transition:     'background 0.15s',
+                    }}
                   >
-                    {lbl.name}
-                  </span>
-                  {lbl.w >= 120 && (
                     <span
-                      className="font-mono shrink-0"
-                      style={{
-                        fontSize: 10,
-                        color: changeColor(lbl.avg_change),
-                      }}
+                      className="font-semibold text-white truncate flex-1"
+                      style={{ fontSize: Math.min(12, Math.max(9, lbl.w / 11)) }}
                     >
-                      {fmt(lbl.avg_change)}
+                      {expandedSector ? `▾ ${lbl.name}` : lbl.name}
                     </span>
-                  )}
-                </div>
+                    {lbl.w >= 100 && (
+                      <span
+                        className="font-mono shrink-0"
+                        style={{ fontSize: 10, color: changeColor(lbl.avg_change) }}
+                      >
+                        {fmt(lbl.avg_change)}
+                      </span>
+                    )}
+                    {!expandedSector && lbl.hiddenCount > 0 && lbl.w >= 110 && (
+                      <span
+                        className="shrink-0 font-mono text-terminal-textDim rounded px-1"
+                        style={{ fontSize: 9, background: 'rgba(255,255,255,0.07)' }}
+                      >
+                        +{lbl.hiddenCount}
+                      </span>
+                    )}
+                  </div>
+                )
               ))}
 
             </div>
