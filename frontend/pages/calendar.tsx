@@ -358,10 +358,22 @@ function EventRow({
       <span className="num text-xs text-terminal-textDim w-16 shrink-0 tabular-nums">
         {ev.time !== '—' ? ev.time : '—'}
       </span>
-      {/* Drapeau emoji + code pays texte — toujours visibles (pas de responsive hiding) */}
-      <div className="flex items-center gap-1 shrink-0 w-14">
-        <span className="text-base leading-none w-6 text-center">{ev.flag}</span>
-        <span className="text-[10px] font-mono font-semibold text-terminal-textMuted uppercase tracking-wide w-6">
+      {/* Drapeau image (flagcdn.com) + code pays */}
+      <div className="flex items-center gap-1.5 shrink-0 w-14">
+        {ev.country ? (
+          <img
+            src={`https://flagcdn.com/20x15/${ev.country.toLowerCase()}.png`}
+            srcSet={`https://flagcdn.com/40x30/${ev.country.toLowerCase()}.png 2x`}
+            width={20}
+            height={15}
+            alt={ev.country}
+            className="rounded-sm shrink-0 object-cover"
+            onError={(e) => { (e.currentTarget as HTMLImageElement).style.display = 'none'; }}
+          />
+        ) : (
+          <span className="text-base leading-none w-5 text-center">{ev.flag}</span>
+        )}
+        <span className="text-[10px] font-mono font-semibold text-terminal-textMuted uppercase w-6">
           {ev.country}
         </span>
       </div>
@@ -488,7 +500,19 @@ function EventModal({
                          : ''}`}>
           <div className="flex-1 min-w-0">
             <div className="flex items-center gap-2 flex-wrap">
-              <span className="text-xl">{ev.flag}</span>
+              {ev.country ? (
+                <img
+                  src={`https://flagcdn.com/24x18/${ev.country.toLowerCase()}.png`}
+                  srcSet={`https://flagcdn.com/48x36/${ev.country.toLowerCase()}.png 2x`}
+                  width={24}
+                  height={18}
+                  alt={ev.country}
+                  className="rounded-sm shrink-0 object-cover"
+                  onError={(e) => { (e.currentTarget as HTMLImageElement).style.display = 'none'; }}
+                />
+              ) : (
+                <span className="text-xl">{ev.flag}</span>
+              )}
               <h2 className="text-base font-semibold text-terminal-text">{ev.title}</h2>
               <TypeChip type={ev.type} />
               <ImpactBadge impact={ev.impact} />
