@@ -10,7 +10,10 @@
 import { useState, useEffect, useRef, useMemo } from 'react';
 import Head from 'next/head';
 import Link from 'next/link';
-import { PieChart, Pie, Cell, Tooltip } from 'recharts';
+import {
+  PieChart, Pie, Cell, Tooltip,
+  BarChart, Bar, XAxis, YAxis, CartesianGrid, ResponsiveContainer,
+} from 'recharts';
 import { API_BASE } from '../lib/api';
 import { Header } from '@/components/Header';
 
@@ -264,6 +267,388 @@ function fmt(pct: number | null): string {
   return (pct >= 0 ? '+' : '') + pct.toFixed(2) + '%';
 }
 
+// ── Historical data type ──────────────────────────────────────────────────────
+interface HistoricalPoint {
+  date: string; open: number; high: number; low: number; close: number; volume: number;
+}
+
+// ── ETF proxy pour les données historiques de chaque indice ──────────────────
+const INDEX_ETF: Record<string, string> = {
+  sp500:       'SPY',   // SPDR S&P 500
+  nasdaq100:   'QQQ',   // Invesco Nasdaq 100
+  dowjones:    'DIA',   // SPDR Dow Jones
+  cac40:       'EWQ',   // iShares MSCI France
+  commodities: 'DJP',   // iPath Bloomberg Commodity
+};
+
+const INDEX_ETF_LABEL: Record<string, string> = {
+  sp500:       'SPY', nasdaq100: 'QQQ', dowjones: 'DIA', cac40: 'EWQ', commodities: 'DJP',
+};
+
+const MONTH_LABELS = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+
+// ── Couleur cellule pour heatmap mensuelle ────────────────────────────────────
+function returnCellStyle(pct: number): { background: string; color: string } {
+  if (Math.abs(pct) < 0.05) return { background: '#1a2035', color: '#6b7280' };
+  const intensity = Math.min(Math.abs(pct) / 8, 1);
+  if (pct > 0) return { background: `rgba(38,166,154,${0.15 + intensity * 0.55})`, color: '#a7f3d0' };
+  return { background: `rgba(239,83,80,${0.15 + intensity * 0.55})`, color: '#fca5a5' };
+}
+
+// ── Calcul des retours mensuels ───────────────────────────────────────────────
+interface MonthlyData {
+  years:         number[];
+  yearData:      Record<number, Record<number, number | null>>;
+  annualReturns: Record<number, number | null>;
+  avgByMonth:    Record<number, number | null>;
+}
+
+function computeMonthlyReturns(pts: HistoricalPoint[]): MonthlyData {
+  const empty: MonthlyData = { years: [], yearData: {}, annualReturns: {}, avgByMonth: {} };
+  if (pts.length < 5) return empty;
+
+  // groupe les clôtures par année-mois
+  const grouped: Record<string, number[]> = {};
+  for (const p of pts) {
+    const d = new Date(p.date);
+    const key = `${d.getFullYear()}-${d.getMonth() + 1}`;
+    if (!grouped[key]) grouped[key] = [];
+    grouped[key].push(p.close);
+  }
+
+  const yearData: Record<number, Record<number, number | null>> = {};
+  const byYear:   Record<number, number[]> = {};
+
+  for (const [key, closes] of Object.entries(grouped)) {
+    const [y, m] = key.split('-').map(Number);
+    if (!yearData[y]) yearData[y] = {};
+    const first = closes[0], last = closes[closes.length - 1];
+    if (first > 0) {
+      const ret = ((last - first) / first) * 100;
+      yearData[y][m] = parseFloat(ret.toFixed(2));
+      if (!byYear[y]) byYear[y] = [];
+      byYear[y].push(ret);
+    } else {
+      yearData[y][m] = null;
+    }
+  }
+
+  const annualReturns: Record<number, number | null> = {};
+  for (const [y, rets] of Object.entries(byYear)) {
+    const comp = rets.reduce((acc, r) => acc * (1 + r / 100), 1);
+    annualReturns[Number(y)] = parseFloat(((comp - 1) * 100).toFixed(2));
+  }
+
+  const avgByMonth: Record<number, number | null> = {};
+  for (let m = 1; m <= 12; m++) {
+    const vals = Object.values(yearData)
+      .map(yd => yd[m])
+      .filter((v): v is number => v != null);
+    avgByMonth[m] = vals.length > 0
+      ? parseFloat((vals.reduce((a, b) => a + b, 0) / vals.length).toFixed(2))
+      : null;
+  }
+
+  const years = Object.keys(yearData).map(Number).sort((a, b) => a - b);
+  return { years, yearData, annualReturns, avgByMonth };
+}
+
+// ── FOMO adapté à un indice ───────────────────────────────────────────────────
+interface IndexFomo {
+  score: number;
+  breakdown: { momentum: number; trend: number; ytd: number; breadth: number };
+}
+
+function computeIndexFomo(pts: HistoricalPoint[], sectors: SectorData[]): IndexFomo | null {
+  if (pts.length < 30) return null;
+  const last = pts[pts.length - 1].close;
+
+  // Momentum 30 jours
+  const cutoff30 = Date.now() - 30 * 86_400_000;
+  let ref30 = pts[0].close;
+  for (let i = pts.length - 1; i >= 0; i--) {
+    if (new Date(pts[i].date).getTime() <= cutoff30) { ref30 = pts[i].close; break; }
+  }
+  const chg30 = ((last - ref30) / ref30) * 100;
+  const momentumPts = Math.max(0, Math.min(30, ((chg30 + 15) / 30) * 30));
+
+  // Tendance vs MM200
+  const ma200 = pts.slice(-200).reduce((s, p) => s + p.close, 0) / Math.min(200, pts.length);
+  const distMa = ((last - ma200) / ma200) * 100;
+  const trendPts = Math.max(0, Math.min(20, ((distMa + 10) / 20) * 20));
+
+  // YTD
+  const thisYear = new Date().getFullYear();
+  const jan1 = pts.find(p => new Date(p.date).getFullYear() === thisYear);
+  const ytdPct = jan1 ? ((last - jan1.close) / jan1.close) * 100 : 0;
+  const ytdPts = Math.max(0, Math.min(25, ((ytdPct + 15) / 30) * 25));
+
+  // Ampleur secteurs
+  const posSec = sectors.filter(s => (s.avg_change ?? 0) > 0).length;
+  const breadthPct = sectors.length > 0 ? (posSec / sectors.length) * 100 : 50;
+  const breadthPts = Math.max(0, Math.min(25, (breadthPct / 100) * 25));
+
+  return {
+    score: Math.round(Math.min(100, momentumPts + trendPts + ytdPts + breadthPts)),
+    breakdown: {
+      momentum: Math.round(momentumPts),
+      trend:    Math.round(trendPts),
+      ytd:      Math.round(ytdPts),
+      breadth:  Math.round(breadthPts),
+    },
+  };
+}
+
+function getFomoMeta(score: number) {
+  if (score >= 80) return { label: 'FOMO',     ringColor: '#ef4444', bgColor: 'bg-red-500/10'    };
+  if (score >= 60) return { label: 'Chaud',    ringColor: '#f97316', bgColor: 'bg-orange-500/10' };
+  if (score >= 40) return { label: 'Momentum', ringColor: '#eab308', bgColor: 'bg-yellow-500/10' };
+  if (score >= 20) return { label: 'Neutre',   ringColor: '#6b7280', bgColor: 'bg-gray-500/10'   };
+  return              { label: 'Froid',    ringColor: '#3b82f6', bgColor: 'bg-blue-500/10'   };
+}
+
+// ── FOMO Gauge (SVG demi-cercle) ──────────────────────────────────────────────
+function FomoGauge({ score }: { score: number }) {
+  const W = 220, H = 128, cx = W / 2, cy = H - 13, R = 90, SW = 18;
+  const toAngle = (s: number) => Math.PI * (1 - s / 100);
+  const ptOnArc = (s: number, r: number) => ({
+    x: +(cx + r * Math.cos(toAngle(s))).toFixed(2),
+    y: +(cy - r * Math.sin(toAngle(s))).toFixed(2),
+  });
+  const start = ptOnArc(0, R); const end = ptOnArc(100, R);
+  const sPt = ptOnArc(Math.min(score, 99.9), R);
+  const bgArc     = `M ${start.x} ${start.y} A ${R} ${R} 0 0 1 ${end.x} ${end.y}`;
+  const activeArc = score <= 0 ? null : score >= 100 ? bgArc
+    : `M ${start.x} ${start.y} A ${R} ${R} 0 0 1 ${sPt.x} ${sPt.y}`;
+  const nPt = ptOnArc(score, R - SW / 2 - 3);
+  const { label, ringColor } = getFomoMeta(score);
+  return (
+    <svg viewBox={`0 0 ${W} ${H}`} width={W} height={H} style={{ display: 'block' }}>
+      <defs>
+        <linearGradient id="hm-fg-active" x1="0%" y1="0%" x2="100%" y2="0%">
+          <stop offset="0%"   stopColor="#3b82f6"/>
+          <stop offset="25%"  stopColor="#6b7280"/>
+          <stop offset="50%"  stopColor="#eab308"/>
+          <stop offset="75%"  stopColor="#f97316"/>
+          <stop offset="100%" stopColor="#ef4444"/>
+        </linearGradient>
+        <linearGradient id="hm-fg-dim" x1="0%" y1="0%" x2="100%" y2="0%">
+          <stop offset="0%"   stopColor="#3b82f6" stopOpacity="0.18"/>
+          <stop offset="25%"  stopColor="#6b7280" stopOpacity="0.18"/>
+          <stop offset="50%"  stopColor="#eab308" stopOpacity="0.18"/>
+          <stop offset="75%"  stopColor="#f97316" stopOpacity="0.18"/>
+          <stop offset="100%" stopColor="#ef4444" stopOpacity="0.18"/>
+        </linearGradient>
+      </defs>
+      <path d={bgArc} fill="none" stroke="#080c14" strokeWidth={SW + 6} strokeLinecap="round" />
+      <path d={bgArc} fill="none" stroke="url(#hm-fg-dim)" strokeWidth={SW} strokeLinecap="round" />
+      {activeArc && <path d={activeArc} fill="none" stroke="url(#hm-fg-active)" strokeWidth={SW} strokeLinecap="round" />}
+      <line x1={cx} y1={cy} x2={nPt.x} y2={nPt.y} stroke="white" strokeWidth={2.5} strokeLinecap="round" opacity={0.9} />
+      <circle cx={cx} cy={cy} r={5} fill="white" opacity={0.9} />
+      <circle cx={cx} cy={cy} r={2.5} fill="#080c14" />
+      <text x={cx} y={cy - 24} textAnchor="middle" fill="white" fontSize={30} fontWeight="bold"
+        fontFamily="'Courier New', monospace">{score}</text>
+      <text x={cx} y={cy - 8} textAnchor="middle" fill={ringColor} fontSize={11} fontWeight="700">{label}</text>
+      <text x={start.x + 2} y={start.y} dominantBaseline="hanging" textAnchor="start" fill="#374151" fontSize={9}>0</text>
+      <text x={end.x - 2} y={end.y} dominantBaseline="hanging" textAnchor="end"   fill="#374151" fontSize={9}>100</text>
+    </svg>
+  );
+}
+
+// ── FOMO Card ─────────────────────────────────────────────────────────────────
+function IndexFomoCard({ result, loading }: { result: IndexFomo | null; loading: boolean }) {
+  if (loading) return (
+    <div className="bg-terminal-surface border border-terminal-border rounded-xl p-5">
+      <div className="flex items-center gap-2 text-terminal-textMuted text-sm">
+        <span className="animate-pulse">●</span> Calcul du FOMO indicator…
+      </div>
+    </div>
+  );
+  if (!result) return null;
+  const { score, breakdown } = result;
+  const { ringColor, bgColor } = getFomoMeta(score);
+  const items = [
+    { key: 'momentum' as const, label: 'Momentum 30 jours',  max: 30, info: 'Variation sur les 30 derniers jours calendaires' },
+    { key: 'trend'    as const, label: 'Tendance vs MM200',   max: 20, info: 'Distance à la moyenne mobile 200 jours' },
+    { key: 'ytd'      as const, label: 'Performance YTD',     max: 25, info: 'Retour depuis le 1er janvier' },
+    { key: 'breadth'  as const, label: 'Ampleur de marché',   max: 25, info: '% de secteurs en hausse aujourd\'hui' },
+  ];
+  return (
+    <div className={`bg-terminal-surface border border-terminal-border rounded-xl p-5 ${bgColor}`}>
+      <h2 className="text-sm font-semibold text-terminal-textMuted uppercase tracking-wider mb-4">
+        FOMO Indicator — Indice
+      </h2>
+      <div className="flex flex-col sm:flex-row items-center gap-6">
+        <div className="shrink-0">
+          <FomoGauge score={score} />
+          <div className="flex justify-between mt-1 px-1 text-[9px]">
+            <span className="text-blue-400/60">Froid</span>
+            <span className="text-gray-400/60">Neutre</span>
+            <span className="text-yellow-400/60">Momentum</span>
+            <span className="text-orange-400/60">Chaud</span>
+            <span className="text-red-400/60">FOMO</span>
+          </div>
+        </div>
+        <div className="flex-1 w-full space-y-3">
+          {items.map(({ key, label, max }) => {
+            const pts = breakdown[key];
+            const pct = (pts / max) * 100;
+            return (
+              <div key={key}>
+                <div className="flex items-center justify-between mb-1">
+                  <span className="text-xs text-terminal-textMuted">{label}</span>
+                  <span className="text-xs font-mono font-semibold text-terminal-text">
+                    {pts}<span className="text-terminal-textDim">/{max}</span>
+                  </span>
+                </div>
+                <div className="h-1.5 bg-terminal-bg rounded-full overflow-hidden">
+                  <div className="h-full rounded-full" style={{ width: `${pct}%`, background: ringColor + 'cc' }} />
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ── Heatmap Retours Mensuels ──────────────────────────────────────────────────
+function MonthlyHeatmap({ monthly, etfLabel }: { monthly: MonthlyData; etfLabel: string }) {
+  const { years, yearData, annualReturns, avgByMonth } = monthly;
+  if (!years.length) return (
+    <div className="bg-terminal-surface border border-terminal-border rounded-xl p-5">
+      <p className="text-sm text-terminal-textDim">Données historiques insuffisantes pour le heatmap mensuel.</p>
+    </div>
+  );
+  const recentYears = years.slice(-12);
+  return (
+    <div className="bg-terminal-surface border border-terminal-border rounded-xl p-5">
+      <div className="flex items-center justify-between mb-4">
+        <h2 className="text-sm font-semibold text-terminal-textMuted uppercase tracking-wider">
+          Monthly Returns Heatmap
+        </h2>
+        <span className="text-[10px] font-mono text-terminal-textDim bg-terminal-surfaceHi px-2 py-0.5 rounded">
+          {etfLabel}
+        </span>
+      </div>
+      <div className="overflow-x-auto">
+        <table className="text-xs min-w-[700px] w-full border-separate border-spacing-0.5">
+          <thead>
+            <tr>
+              <th className="px-2 py-1 text-left text-terminal-textMuted w-12">Year</th>
+              {MONTH_LABELS.map(m => (
+                <th key={m} className="px-1 py-1 text-center text-terminal-textMuted w-14">{m}</th>
+              ))}
+              <th className="px-2 py-1 text-center text-terminal-textMuted">Year</th>
+            </tr>
+          </thead>
+          <tbody>
+            {recentYears.map(year => (
+              <tr key={year}>
+                <td className="px-2 py-0.5 text-terminal-textMuted font-mono font-semibold text-[11px]">{year}</td>
+                {Array.from({ length: 12 }, (_, i) => i + 1).map(month => {
+                  const ret = yearData[year]?.[month] ?? null;
+                  return (
+                    <td key={month} className="px-0 py-0">
+                      <div className="rounded text-center py-1.5 px-0.5 leading-none"
+                        style={ret !== null ? returnCellStyle(ret) : { background: '#0f1522', color: '#374151' }}>
+                        {ret !== null
+                          ? <span className="font-mono font-semibold text-[10px]">{ret >= 0 ? '+' : ''}{ret.toFixed(1)}</span>
+                          : <span className="text-[10px]">—</span>}
+                      </div>
+                    </td>
+                  );
+                })}
+                <td className="px-0.5 py-0">
+                  {annualReturns[year] != null ? (
+                    <div className="rounded text-center py-1.5 px-1 leading-none font-bold"
+                      style={returnCellStyle(annualReturns[year]!)}>
+                      <span className="font-mono text-[11px]">
+                        {(annualReturns[year]! >= 0 ? '+' : '')}{annualReturns[year]!.toFixed(1)}%
+                      </span>
+                    </div>
+                  ) : <span className="text-terminal-textDim text-[10px]">—</span>}
+                </td>
+              </tr>
+            ))}
+            {/* Ligne moyenne */}
+            <tr>
+              <td className="px-2 py-1 text-terminal-textMuted text-[10px] font-semibold">Avg</td>
+              {Array.from({ length: 12 }, (_, i) => i + 1).map(month => {
+                const avg = avgByMonth[month];
+                return (
+                  <td key={month} className="px-0 py-0.5">
+                    <div className="rounded text-center py-1 px-0.5 leading-none"
+                      style={avg != null ? returnCellStyle(avg) : { background: '#0f1522', color: '#374151' }}>
+                      {avg != null
+                        ? <span className="font-mono font-semibold text-[10px]">{avg >= 0 ? '+' : ''}{avg.toFixed(1)}</span>
+                        : <span className="text-[10px] text-terminal-textDim">—</span>}
+                    </div>
+                  </td>
+                );
+              })}
+              <td />
+            </tr>
+          </tbody>
+        </table>
+      </div>
+      {/* Échelle */}
+      <div className="flex items-center gap-2 mt-3 flex-wrap">
+        <span className="text-[10px] text-terminal-textDim">Échelle :</span>
+        {[-8, -4, -1, 0, 1, 4, 8].map(v => (
+          <span key={v} className="px-2 py-0.5 rounded font-mono text-[10px]"
+            style={v !== 0 ? returnCellStyle(v) : { background: '#1a2035', color: '#6b7280' }}>
+            {v > 0 ? '+' : ''}{v}%
+          </span>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+// ── Performances Annuelles (bar chart) ────────────────────────────────────────
+function AnnualPerfChart({ monthly, etfLabel }: { monthly: MonthlyData; etfLabel: string }) {
+  const { years, annualReturns } = monthly;
+  if (!years.length) return null;
+  const barData = years.map(y => ({ year: String(y), ret: annualReturns[y] ?? 0 }));
+  return (
+    <div className="bg-terminal-surface border border-terminal-border rounded-xl p-5">
+      <div className="flex items-center justify-between mb-4">
+        <h2 className="text-sm font-semibold text-terminal-textMuted uppercase tracking-wider">
+          Performances Annuelles
+        </h2>
+        <span className="text-[10px] font-mono text-terminal-textDim bg-terminal-surfaceHi px-2 py-0.5 rounded">
+          {etfLabel}
+        </span>
+      </div>
+      <ResponsiveContainer width="100%" height={220}>
+        <BarChart data={barData} barCategoryGap="25%" margin={{ top: 4, right: 8, left: 0, bottom: 4 }}>
+          <CartesianGrid strokeDasharray="2 6" stroke="rgba(42,48,64,0.4)" />
+          <XAxis dataKey="year" tick={{ fill: '#7a8294', fontSize: 10 }} tickLine={false} axisLine={false} />
+          <YAxis
+            tick={{ fill: '#7a8294', fontSize: 10 }} tickLine={false} axisLine={false} width={44}
+            tickFormatter={(v: number) => `${v > 0 ? '+' : ''}${v.toFixed(0)}%`}
+          />
+          <Tooltip
+            contentStyle={{ background: '#1a2035', border: '1px solid #2a3040', borderRadius: 4, fontSize: 11 }}
+            labelStyle={{ color: '#7a8294' }}
+            formatter={(v: unknown) => [
+              `${typeof v === 'number' ? (v >= 0 ? '+' : '') + v.toFixed(1) : v}%`,
+              'Retour annuel',
+            ]}
+          />
+          <Bar dataKey="ret" radius={[3, 3, 0, 0]} maxBarSize={40}>
+            {barData.map((d, i) => (
+              <Cell key={i} fill={d.ret >= 0 ? '#26a69a' : '#ef5350'} />
+            ))}
+          </Bar>
+        </BarChart>
+      </ResponsiveContainer>
+    </div>
+  );
+}
+
 // ── Config indices ────────────────────────────────────────────────────────────
 
 const INDICES = [
@@ -288,6 +673,10 @@ export default function HeatmapPage() {
   const containerRef = useRef<HTMLDivElement>(null);
   const [dims, setDims] = useState({ w: 1000, h: 620 });
 
+  // Historique prix pour monthly heatmap / FOMO
+  const [indexHistory,    setIndexHistory]    = useState<HistoricalPoint[]>([]);
+  const [loadingHistory,  setLoadingHistory]  = useState(false);
+
   // ResizeObserver
   useEffect(() => {
     const update = () => {
@@ -302,13 +691,28 @@ export default function HeatmapPage() {
     return () => ro.disconnect();
   }, []);
 
-  // Fetch
+  // Fetch heatmap data
   useEffect(() => {
     setLoading(true); setError(null); setData(null); setExpandedSector(null);
     fetch(`${API_BASE}/api/heatmap?index=${selIdx}`)
       .then(r => { if (!r.ok) throw new Error(`HTTP ${r.status}`); return r.json(); })
       .then((d: HeatmapResponse) => { setData(d); setLoading(false); })
       .catch(e => { setError(e.message); setLoading(false); });
+  }, [selIdx]);
+
+  // Fetch historical data for monthly returns / FOMO
+  useEffect(() => {
+    const etf = INDEX_ETF[selIdx];
+    if (!etf) return;
+    setLoadingHistory(true);
+    setIndexHistory([]);
+    fetch(`${API_BASE}/api/instruments/chart/${etf}?period=max&interval=1d`)
+      .then(r => r.ok ? r.json() : null)
+      .then((d: { data?: HistoricalPoint[] } | null) => {
+        setIndexHistory(d?.data ?? []);
+        setLoadingHistory(false);
+      })
+      .catch(() => setLoadingHistory(false));
   }, [selIdx]);
 
   // Sectors à afficher (limités ou expanded)
@@ -332,6 +736,14 @@ export default function HeatmapPage() {
   }, [displaySectors, dims, expandedSector]);
 
   const totalDisplayed = displaySectors.reduce((s, sec) => s + sec.stocks.length, 0);
+
+  // ── Retours mensuels / FOMO ───────────────────────────────────────────────
+  const monthlyData = useMemo(() => computeMonthlyReturns(indexHistory), [indexHistory]);
+  const fomoResult  = useMemo(
+    () => data ? computeIndexFomo(indexHistory, data.sectors) : null,
+    [indexHistory, data],
+  );
+  const etfLabel = INDEX_ETF_LABEL[selIdx] ?? selIdx.toUpperCase();
 
   // ── Analytics: top holdings & sector breakdown ────────────────────────────
   const topHoldings = useMemo(() => {
@@ -716,6 +1128,26 @@ export default function HeatmapPage() {
             </div>
 
           </div>
+        )}
+
+        {/* ── FOMO + Performances annuelles ────────────────────────── */}
+        {(loadingHistory || fomoResult || monthlyData.years.length > 0) && (
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+            <IndexFomoCard result={fomoResult} loading={loadingHistory && !fomoResult} />
+            <AnnualPerfChart monthly={monthlyData} etfLabel={etfLabel} />
+          </div>
+        )}
+
+        {/* ── Monthly Returns Heatmap ───────────────────────────────── */}
+        {(loadingHistory || monthlyData.years.length > 0) && (
+          loadingHistory && !monthlyData.years.length ? (
+            <div className="bg-terminal-surface border border-terminal-border rounded-xl p-5 flex items-center gap-3">
+              <div className="w-5 h-5 border-2 border-terminal-cyan border-t-transparent rounded-full animate-spin shrink-0" />
+              <span className="text-sm text-terminal-textMuted">Chargement des données historiques ({etfLabel})…</span>
+            </div>
+          ) : (
+            <MonthlyHeatmap monthly={monthlyData} etfLabel={etfLabel} />
+          )
         )}
 
       </div>
