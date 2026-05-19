@@ -30,6 +30,73 @@ from typing import Any, Dict, List, Optional
 BASE_URL    = "https://financialmodelingprep.com/api/v3"
 FMP_V4_BASE = "https://financialmodelingprep.com/api/v4"
 
+# ── CAC 40 constituents (hardcoded — FMP free tier has no /cac40_constituent) ──
+_CAC40_STOCKS: list = [
+    ("AIR.PA",  "Airbus Group",           "Industrials"),
+    ("AI.PA",   "Air Liquide",            "Basic Materials"),
+    ("ACA.PA",  "Crédit Agricole",        "Financials"),
+    ("ALO.PA",  "Alstom",                 "Industrials"),
+    ("MT",      "ArcelorMittal",          "Basic Materials"),
+    ("CS.PA",   "AXA",                    "Financials"),
+    ("BNP.PA",  "BNP Paribas",            "Financials"),
+    ("EN.PA",   "Bouygues",               "Industrials"),
+    ("CAP.PA",  "Capgemini",              "Technology"),
+    ("CA.PA",   "Carrefour",              "Consumer Defensive"),
+    ("BN.PA",   "Danone",                 "Consumer Defensive"),
+    ("DSY.PA",  "Dassault Systèmes",      "Technology"),
+    ("ENGI.PA", "Engie",                  "Utilities"),
+    ("EL.PA",   "EssilorLuxottica",       "Healthcare"),
+    ("RMS.PA",  "Hermès",                 "Consumer Cyclical"),
+    ("KER.PA",  "Kering",                 "Consumer Cyclical"),
+    ("OR.PA",   "L'Oréal",               "Consumer Defensive"),
+    ("LR.PA",   "Legrand",                "Industrials"),
+    ("MC.PA",   "LVMH",                   "Consumer Cyclical"),
+    ("ML.PA",   "Michelin",               "Consumer Cyclical"),
+    ("ORA.PA",  "Orange",                 "Communication Services"),
+    ("RI.PA",   "Pernod Ricard",          "Consumer Defensive"),
+    ("PUB.PA",  "Publicis Groupe",        "Communication Services"),
+    ("RNO.PA",  "Renault",                "Consumer Cyclical"),
+    ("SAF.PA",  "Safran",                 "Industrials"),
+    ("SAN.PA",  "Sanofi",                 "Healthcare"),
+    ("SGO.PA",  "Saint-Gobain",           "Basic Materials"),
+    ("SU.PA",   "Schneider Electric",     "Technology"),
+    ("GLE.PA",  "Société Générale",       "Financials"),
+    ("STM",     "STMicroelectronics",     "Technology"),
+    ("STLA",    "Stellantis",             "Consumer Cyclical"),
+    ("TTE.PA",  "TotalEnergies",          "Energy"),
+    ("VIE.PA",  "Veolia",                 "Utilities"),
+    ("DG.PA",   "Vinci",                  "Industrials"),
+    ("HO.PA",   "Thales",                 "Industrials"),
+    ("WLN.PA",  "Worldline",              "Technology"),
+    ("ERF.PA",  "Eurofins Scientific",    "Healthcare"),
+    ("URW.AS",  "Unibail-Rodamco",        "Real Estate"),
+    ("SEB.PA",  "SEB",                    "Consumer Cyclical"),
+    ("VIV.PA",  "Vivendi",                "Communication Services"),
+]
+
+# ── Commodity ETF proxies (hardcoded weights in USD bn for treemap sizing) ──
+_COMMODITY_STOCKS: list = [
+    # (ticker, name, sector, approx_weight_usd_bn)
+    ("GLD",  "Gold",                    "Precious Metals",   70),
+    ("GDX",  "Gold Miners",             "Precious Metals",   12),
+    ("SLV",  "Silver",                  "Precious Metals",   14),
+    ("PALL", "Palladium",               "Precious Metals",    1),
+    ("PPLT", "Platinum",                "Precious Metals",    1),
+    ("USO",  "Crude Oil (WTI)",         "Energy",            25),
+    ("XLE",  "Energy Stocks",           "Energy",            40),
+    ("UNG",  "Natural Gas",             "Energy",             5),
+    ("BNO",  "Crude Oil (Brent)",       "Energy",             3),
+    ("CORN", "Corn",                    "Agriculture",        1),
+    ("WEAT", "Wheat",                   "Agriculture",        2),
+    ("SOYB", "Soybeans",                "Agriculture",        1),
+    ("JO",   "Coffee",                  "Agriculture",        1),
+    ("NIB",  "Cocoa",                   "Agriculture",        1),
+    ("BAL",  "Cotton",                  "Agriculture",        1),
+    ("CPER", "Copper",                  "Industrial Metals",  2),
+    ("DBB",  "Base Metals",             "Industrial Metals",  2),
+    ("PDBC", "Diversified Commodities", "Diversified",        8),
+]
+
 # Map analyst grade strings → our internal bucket
 _GRADE_MAP: Dict[str, str] = {
     "strong buy":           "strong_buy",
@@ -78,11 +145,12 @@ def get_fmp_provider() -> "FMPProvider":
 class FMPProvider:
     """Financial Modeling Prep API client with in-memory cache."""
 
-    CACHE_TTL      = timedelta(hours=24)
-    FINANCIALS_TTL = timedelta(hours=72)   # IS/BS/CF barely change
+    CACHE_TTL       = timedelta(hours=24)
+    FINANCIALS_TTL  = timedelta(hours=72)   # IS/BS/CF barely change
     BATCH_QUOTE_TTL = timedelta(hours=1)
     NEWS_TTL        = timedelta(minutes=30)
     SCREENER_TTL    = timedelta(hours=12)   # 503 tickers × 1 TD credit × 2/day ≈ 1006 credits
+    HEATMAP_TTL     = timedelta(hours=1)    # Heatmap batch-quotes refresh
 
     def __init__(self, api_key: Optional[str] = None) -> None:
         self._api_key = api_key or os.getenv("FMP_API_KEY", "")
@@ -499,10 +567,14 @@ class FMPProvider:
                 if not sym:
                     continue
                 try:
+                    mc_raw = row.get("marketCap")
                     result[sym] = {
                         "price":      round(float(row["price"]), 4),
                         "change_pct": round(float(row.get("changesPercentage") or 0), 3),
                         "volume":     int(row["volume"]) if row.get("volume") is not None else None,
+                        "market_cap": int(float(mc_raw)) if mc_raw not in (None, "", 0, "0") else None,
+                        "name":       row.get("name") or "",
+                        "sector":     row.get("sector") or "",
                     }
                 except (KeyError, TypeError, ValueError):
                     continue
@@ -833,6 +905,109 @@ class FMPProvider:
             result.append(s)
 
         return result[:limit]
+
+    # ─────────────────────────────────────────────────────────────────
+    # Public: Heatmap data (Phase 18)
+    # ─────────────────────────────────────────────────────────────────
+
+    async def get_heatmap_data(self, index: str) -> List[Dict[str, Any]]:
+        """
+        Return [{ticker, name, sector, price, change_pct, market_cap}] for a given index.
+
+        Supported:
+          sp500      — S&P 500 (503 stocks via GitHub CSV + FMP batch quotes)
+          nasdaq100  — Nasdaq 100 (FMP /nasdaq_constituent + batch quotes)
+          dowjones   — Dow Jones 30 (FMP /dowjones_constituent + batch quotes)
+          cac40      — CAC 40 (hardcoded ticker list + FMP batch quotes)
+          commodities — Commodity ETF proxies (hardcoded weights, live prices)
+
+        Cache: 1 h (HEATMAP_TTL). Falls back gracefully when FMP has no market cap.
+        """
+        idx = index.lower().strip()
+        cache_key = f"heatmap_data:{idx}"
+        cached = self._get_cache(cache_key, ttl=self.HEATMAP_TTL)
+        if cached is not None:
+            return cached
+
+        # ── Build ticker / sector / name maps ─────────────────────────────────
+        tickers:      List[str]       = []
+        name_map:     Dict[str, str]  = {}
+        sector_map:   Dict[str, str]  = {}
+        weight_map:   Dict[str, float] = {}  # commodity fallback weights
+
+        if idx == "sp500":
+            from services.indices.csv_provider import CsvProvider
+            constituents = await CsvProvider().get_constituents("SP500")
+            for c in constituents:
+                t = c.get("ticker", "").strip()
+                if not t:
+                    continue
+                tickers.append(t)
+                name_map[t]   = c.get("name", "")
+                gics          = c.get("sector", "")
+                sector_map[t] = self._GICS_SECTOR_MAP.get(gics, gics) or "Other"
+
+        elif idx in ("nasdaq100", "dowjones"):
+            fmp_key  = {"nasdaq100": "NDX", "dowjones": "DJI"}[idx]
+            consts   = await self.get_index_constituents(fmp_key)
+            for c in consts:
+                t = c.get("ticker", "").strip()
+                if not t:
+                    continue
+                tickers.append(t)
+                name_map[t]   = c.get("name", "")
+                raw_sec       = c.get("sector", "")
+                sector_map[t] = self._GICS_SECTOR_MAP.get(raw_sec, raw_sec) or "Other"
+
+        elif idx == "cac40":
+            for t, name, sector in _CAC40_STOCKS:
+                tickers.append(t)
+                name_map[t]   = name
+                sector_map[t] = sector
+
+        elif idx == "commodities":
+            for t, name, sector, weight in _COMMODITY_STOCKS:
+                tickers.append(t)
+                name_map[t]    = name
+                sector_map[t]  = sector
+                weight_map[t]  = float(weight) * 1e9   # convert bn → units
+
+        else:
+            print(f"[Heatmap] Unknown index: {idx!r}")
+            return []
+
+        if not tickers:
+            return []
+
+        # ── Fetch live quotes (price + change_pct + market_cap) ───────────────
+        quotes = await self.get_batch_quotes(
+            tickers, cache_key=f"heatmap_{idx}"
+        )
+
+        # ── Merge ─────────────────────────────────────────────────────────────
+        result: List[Dict[str, Any]] = []
+        for ticker in tickers:
+            q  = quotes.get(ticker, {})
+            mc = q.get("market_cap")
+            # Commodity fallback: use hardcoded weight if FMP marketCap unavailable
+            if mc is None and idx == "commodities":
+                mc = weight_map.get(ticker, 1e9)
+
+            result.append({
+                "ticker":     ticker,
+                "name":       name_map.get(ticker) or q.get("name", ticker),
+                "sector":     sector_map.get(ticker) or q.get("sector") or "Other",
+                "price":      q.get("price"),
+                "change_pct": q.get("change_pct"),
+                "market_cap": mc,
+            })
+
+        prices_found = sum(1 for r in result if r["price"] is not None)
+        print(f"[Heatmap:{idx}] {len(result)} stocks, {prices_found} with prices")
+
+        if result and prices_found > 0:
+            self._set_cache(cache_key, result)
+        return result
 
     # ─────────────────────────────────────────────────────────────────
     # Internal: HTTP + cache
