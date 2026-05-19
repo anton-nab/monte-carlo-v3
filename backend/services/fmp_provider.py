@@ -280,6 +280,55 @@ _COMMODITY_STOCKS: list = [
     ("PDBC", "Diversified Commodities", "Diversified",        8),
 ]
 
+# ── Hardcoded ETF weights (fallback when FMP free-tier returns nothing) ──────
+# Source: approximate Q1-2025 ETF holdings.
+# Only top holdings are listed; remaining tickers share the leftover weight equally.
+
+_SPY_TOP_WEIGHTS: Dict[str, float] = {
+    # ~65 % of the S&P 500 index
+    "NVDA": 6.52,  "AAPL": 6.31,  "MSFT": 6.05,  "AMZN": 3.71,  "META": 2.82,
+    "GOOGL": 2.12, "GOOG": 1.78,  "BRK-B": 1.74, "AVGO": 1.73,  "TSLA": 1.54,
+    "JPM":  1.45,  "LLY":  1.39,  "V":    1.26,  "UNH":  1.21,  "XOM":  1.12,
+    "COST": 1.05,  "MA":   1.04,  "NFLX": 1.00,  "WMT":  0.97,  "JNJ":  0.88,
+    "PG":   0.83,  "HD":   0.78,  "ORCL": 0.75,  "BAC":  0.72,  "CRM":  0.70,
+    "CVX":  0.65,  "ABBV": 0.64,  "AMD":  0.62,  "KO":   0.61,  "MRK":  0.60,
+    "PEP":  0.58,  "CSCO": 0.57,  "LIN":  0.56,  "ACN":  0.55,  "NOW":  0.54,
+    "TMO":  0.52,  "MCD":  0.51,  "IBM":  0.50,  "GE":   0.49,  "ISRG": 0.49,
+    "INTU": 0.48,  "GS":   0.47,  "CAT":  0.46,  "TXN":  0.46,  "BKNG": 0.45,
+    "UBER": 0.44,  "SPGI": 0.43,  "RTX":  0.42,  "T":    0.41,  "QCOM": 0.41,
+    "AMGN": 0.40,  "LOW":  0.40,  "PFE":  0.38,  "VRTX": 0.37,  "MS":   0.37,
+    "PANW": 0.36,  "ADI":  0.35,  "BLK":  0.34,  "SBUX": 0.34,  "AXP":  0.33,
+}
+
+_QQQ_TOP_WEIGHTS: Dict[str, float] = {
+    # ~78 % of the Nasdaq 100 index
+    "NVDA": 8.72,  "AAPL": 8.12,  "MSFT": 7.82,  "AMZN": 5.12,  "META": 3.84,
+    "TSLA": 3.29,  "GOOGL": 2.83, "GOOG": 2.38,  "AVGO": 2.31,  "COST": 1.40,
+    "NFLX": 1.34,  "AMD":  1.04,  "QCOM": 1.00,  "TMUS": 0.97,  "INTU": 0.93,
+    "LIN":  0.87,  "AMGN": 0.85,  "CSCO": 0.82,  "TXN":  0.79,  "ISRG": 0.73,
+    "BKNG": 0.71,  "ADP":  0.68,  "PANW": 0.63,  "SBUX": 0.61,  "GILD": 0.58,
+    "MDLZ": 0.56,  "LRCX": 0.54,  "ADI":  0.54,  "KLAC": 0.52,  "MRVL": 0.51,
+    "REGN": 0.50,  "MU":   0.49,  "VRTX": 0.48,  "CRWD": 0.46,  "FTNT": 0.45,
+    "ON":   0.43,  "CDNS": 0.43,  "SNPS": 0.42,  "MELI": 0.41,  "CEG":  0.40,
+}
+
+_DIA_WEIGHTS: Dict[str, float] = {
+    # All 30 Dow Jones stocks (price-weighted, DIA)
+    "UNH":  9.28,  "GS":   7.83,  "MSFT": 6.59,  "HD":   6.34,  "CAT":  5.62,
+    "AMGN": 5.37,  "MCD":  5.02,  "V":    4.73,  "TRV":  4.34,  "SHW":  4.24,
+    "AXP":  4.09,  "CRM":  3.60,  "IBM":  3.23,  "HON":  2.87,  "JPM":  2.67,
+    "BA":   2.53,  "JNJ":  2.34,  "NKE":  1.85,  "MMM":  1.79,  "WMT":  1.70,
+    "DIS":  1.60,  "PG":   1.46,  "CVX":  1.42,  "MRK":  1.34,  "KO":   1.16,
+    "CSCO": 0.93,  "AAPL": 0.88,  "VZ":   0.78,  "INTC": 0.57,  "DOW":  0.51,
+}
+
+# Convenience lookup
+_HARDCODED_WEIGHTS: Dict[str, Dict[str, float]] = {
+    "SPY": _SPY_TOP_WEIGHTS,
+    "QQQ": _QQQ_TOP_WEIGHTS,
+    "DIA": _DIA_WEIGHTS,
+}
+
 # Map analyst grade strings → our internal bucket
 _GRADE_MAP: Dict[str, str] = {
     "strong buy":           "strong_buy",
@@ -1229,11 +1278,32 @@ class FMPProvider:
         #    These weights ARE the stock's share in the index — exactly what we
         #    need for proportional tile sizing.  NVDA ~5 % in SPY = 100× a 0.05 % stock.
         if idx in _ETF_MAP:
-            etf_weights = await self.get_etf_weights(_ETF_MAP[idx])
+            etf_ticker  = _ETF_MAP[idx]
+            etf_weights = await self.get_etf_weights(etf_ticker)
+
+            # Free-tier FMP often returns empty / all-zero weights → fall back to
+            # hardcoded reference weights so tile sizes stay meaningful.
+            if len(etf_weights) < 20:
+                etf_weights = _HARDCODED_WEIGHTS.get(etf_ticker, {})
+                print(f"[Heatmap:{idx}] FMP etf-holder empty → hardcoded weights ({len(etf_weights)} entries)")
+
+            # Compute a realistic proportional fallback for tickers not in the dict.
+            # Remaining weight is shared equally among unknown tickers so their
+            # tiles are small but proportional (not all the same 0.05 %).
+            known_w = sum(
+                etf_weights.get(t) or etf_weights.get(t.replace(".", "-")) or 0
+                for t in tickers
+            )
+            known_n = sum(
+                1 for t in tickers
+                if etf_weights.get(t) or etf_weights.get(t.replace(".", "-"))
+            )
+            unknown_n  = max(1, len(tickers) - known_n)
+            fallback_w = max(0.01, (100 - known_w) / unknown_n)
+
             for t in tickers:
-                # Try direct match, then BRK.B → BRK-B normalisation
                 w = etf_weights.get(t) or etf_weights.get(t.replace(".", "-"))
-                size_map[t] = w if w else 0.05   # 0.05 % fallback for missing tickers
+                size_map[t] = w if w else fallback_w
 
         # ── 3. Prices + change_pct via yfinance (primary — no API key needed) ─
         loop      = asyncio.get_event_loop()

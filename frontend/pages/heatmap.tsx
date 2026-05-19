@@ -10,8 +10,40 @@
 import { useState, useEffect, useRef, useMemo } from 'react';
 import Head from 'next/head';
 import Link from 'next/link';
+import { PieChart, Pie, Cell, Tooltip } from 'recharts';
 import { API_BASE } from '../lib/api';
 import { Header } from '@/components/Header';
+
+// ── Couleurs secteurs (identiques à instrument/[ticker].tsx) ─────────────────
+const SECTOR_COLORS: Record<string, string> = {
+  'Technology':              '#00d9ff',
+  'Healthcare':              '#26a69a',
+  'Financials':              '#f9a825',
+  'Financial Services':      '#f9a825',
+  'Consumer Cyclical':       '#ef6c00',
+  'Consumer Discretionary':  '#ef6c00',
+  'Consumer Defensive':      '#4caf50',
+  'Consumer Staples':        '#4caf50',
+  'Industrials':             '#2196f3',
+  'Communication Services':  '#9c27b0',
+  'Energy':                  '#ff5722',
+  'Utilities':               '#607d8b',
+  'Real Estate':             '#795548',
+  'Basic Materials':         '#8bc34a',
+  'Materials':               '#8bc34a',
+  'Precious Metals':         '#ffd700',
+  'Industrial Metals':       '#90a4ae',
+  'Agriculture':             '#66bb6a',
+  'Diversified':             '#ab47bc',
+};
+const PIE_PALETTE = [
+  '#00d9ff','#26a69a','#f9a825','#ef6c00','#4caf50',
+  '#2196f3','#9c27b0','#ff5722','#607d8b','#8bc34a',
+  '#e91e63','#00bcd4','#ff9800','#3f51b5','#009688',
+];
+function sectorColor(name: string, i: number): string {
+  return SECTOR_COLORS[name] ?? PIE_PALETTE[i % PIE_PALETTE.length];
+}
 
 // ── Types API ─────────────────────────────────────────────────────────────────
 
@@ -328,8 +360,6 @@ export default function HeatmapPage() {
       .sort((a, b) => b.weight - a.weight);
   }, [data]);
 
-  const maxSectorWeight = sectorBreakdown.length ? sectorBreakdown[0].weight : 1;
-
   return (
     <>
       <Head>
@@ -626,53 +656,62 @@ export default function HeatmapPage() {
                 </span>
               </div>
 
-              <div className="px-4 py-3 space-y-2.5">
-                {sectorBreakdown.map(sec => {
-                  const barW = (sec.weight / maxSectorWeight) * 100;
-                  const isPos = (sec.avg_change ?? 0) > 0.05;
-                  const isNeg = (sec.avg_change ?? 0) < -0.05;
-                  const barColor = isPos
-                    ? 'rgba(74,222,128,0.55)'
-                    : isNeg
-                    ? 'rgba(248,113,113,0.55)'
-                    : 'rgba(156,163,175,0.35)';
-                  return (
-                    <div key={sec.name} className="flex items-center gap-3">
-                      {/* Nom secteur */}
-                      <div className="w-28 shrink-0 text-[11px] text-terminal-textMuted truncate text-right">
-                        {sec.name}
-                      </div>
-                      {/* Barre */}
-                      <div className="flex-1 relative h-5 bg-terminal-surfaceHi rounded overflow-hidden">
-                        <div
-                          className="h-full rounded transition-all duration-500"
-                          style={{ width: `${barW}%`, background: barColor }}
-                        />
-                        <span className="absolute right-2 top-0 h-full flex items-center text-[10px] font-mono text-terminal-textMuted">
-                          {sec.weight.toFixed(1)}%
-                        </span>
-                      </div>
-                      {/* Variation */}
-                      <div className="w-14 shrink-0 text-right font-mono text-[11px] font-semibold"
-                        style={{ color: changeColor(sec.avg_change) }}>
-                        {fmt(sec.avg_change)}
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
+              {/* Camembert + liste */}
+              <div className="flex flex-col sm:flex-row gap-0 items-start px-4 py-4">
 
-              {/* Légende couleurs barres */}
-              <div className="px-4 pb-3 pt-1 flex items-center gap-3 border-t border-terminal-border/40">
-                <span className="text-[10px] text-terminal-textDim">Barres colorées par variation du jour :</span>
-                <span className="flex items-center gap-1 text-[10px]">
-                  <span className="w-3 h-2 rounded-sm inline-block" style={{ background: 'rgba(74,222,128,0.55)' }} />
-                  <span className="text-green-400/70">hausse</span>
-                </span>
-                <span className="flex items-center gap-1 text-[10px]">
-                  <span className="w-3 h-2 rounded-sm inline-block" style={{ background: 'rgba(248,113,113,0.55)' }} />
-                  <span className="text-red-400/70">baisse</span>
-                </span>
+                {/* Pie chart */}
+                <div className="shrink-0 flex items-center justify-center sm:justify-start w-full sm:w-auto">
+                  <PieChart width={170} height={170}>
+                    <Pie
+                      data={sectorBreakdown.map((s, i) => ({
+                        name:  s.name,
+                        value: parseFloat(s.weight.toFixed(1)),
+                        color: sectorColor(s.name, i),
+                      }))}
+                      cx={82} cy={82}
+                      innerRadius={44} outerRadius={74}
+                      dataKey="value"
+                      paddingAngle={1}
+                    >
+                      {sectorBreakdown.map((s, i) => (
+                        <Cell key={s.name} fill={sectorColor(s.name, i)} />
+                      ))}
+                    </Pie>
+                    <Tooltip
+                      contentStyle={{ background: '#1a2035', border: '1px solid #2a3040', borderRadius: 4, fontSize: 11 }}
+                      formatter={(v: unknown) => [`${typeof v === 'number' ? v.toFixed(1) : v}%`]}
+                    />
+                  </PieChart>
+                </div>
+
+                {/* Liste secteurs : nom + variation (pas de barre) */}
+                <div className="flex-1 space-y-1 min-w-0 sm:pl-3">
+                  {sectorBreakdown.map((sec, i) => (
+                    <div key={sec.name} className="flex items-center gap-2 py-0.5">
+                      {/* Pastille couleur */}
+                      <span
+                        className="w-2.5 h-2.5 rounded-sm shrink-0"
+                        style={{ background: sectorColor(sec.name, i) }}
+                      />
+                      {/* Nom secteur */}
+                      <span className="text-[11px] text-terminal-textMuted flex-1 truncate">
+                        {sec.name}
+                      </span>
+                      {/* Poids */}
+                      <span className="text-[10px] font-mono text-terminal-textDim shrink-0">
+                        {sec.weight.toFixed(1)}%
+                      </span>
+                      {/* Variation */}
+                      <span
+                        className="text-[11px] font-mono font-semibold shrink-0 w-14 text-right"
+                        style={{ color: changeColor(sec.avg_change) }}
+                      >
+                        {fmt(sec.avg_change)}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+
               </div>
             </div>
 
