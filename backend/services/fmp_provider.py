@@ -74,6 +74,51 @@ _CAC40_STOCKS: list = [
     ("VIV.PA",  "Vivendi",                "Communication Services"),
 ]
 
+# ── CAC 40 index weights (approximate %, used for treemap tile sizing) ─────────
+# Source: Euronext CAC 40 composition weights (Q1 2025 approx.)
+_CAC40_WEIGHTS: Dict[str, float] = {
+    "MC.PA":   9.4,   # LVMH          ~320 B€
+    "RMS.PA":  7.3,   # Hermès        ~220 B€
+    "OR.PA":   6.7,   # L'Oréal       ~200 B€
+    "TTE.PA":  4.5,   # TotalEnergies ~145 B€
+    "AIR.PA":  4.4,   # Airbus        ~140 B€
+    "SU.PA":   3.8,   # Schneider     ~120 B€
+    "SAN.PA":  3.7,   # Sanofi        ~115 B€
+    "EL.PA":   3.1,   # EssilorLuxottica ~95 B€
+    "AI.PA":   2.7,   # Air Liquide    ~85 B€
+    "CS.PA":   2.2,   # AXA            ~70 B€
+    "BNP.PA":  2.1,   # BNP Paribas    ~65 B€
+    "DG.PA":   1.9,   # Vinci          ~62 B€
+    "SAF.PA":  1.9,   # Safran         ~60 B€
+    "STLA":    1.8,   # Stellantis     ~55 B€
+    "DSY.PA":  1.3,   # Dassault Systèmes ~40 B€
+    "RI.PA":   1.1,   # Pernod Ricard  ~35 B€
+    "KER.PA":  1.1,   # Kering         ~35 B€
+    "LR.PA":   1.1,   # Legrand        ~35 B€
+    "ERF.PA":  0.9,   # Eurofins       ~28 B€
+    "ENGI.PA": 0.9,   # Engie          ~28 B€
+    "CAP.PA":  0.9,   # Capgemini      ~28 B€
+    "ACA.PA":  0.9,   # Crédit Agricole ~28 B€
+    "HO.PA":   0.8,   # Thales         ~25 B€
+    "STM":     0.8,   # STMicro        ~25 B€
+    "PUB.PA":  0.7,   # Publicis       ~23 B€
+    "GLE.PA":  0.7,   # Société Générale ~22 B€
+    "ML.PA":   0.6,   # Michelin       ~19 B€
+    "SGO.PA":  0.6,   # Saint-Gobain   ~18 B€
+    "MT":      0.6,   # ArcelorMittal  ~18 B€
+    "ORA.PA":  0.6,   # Orange         ~18 B€
+    "BN.PA":   0.6,   # Danone         ~17 B€
+    "VIE.PA":  0.4,   # Veolia         ~12 B€
+    "CA.PA":   0.4,   # Carrefour      ~12 B€
+    "URW.AS":  0.4,   # Unibail        ~12 B€
+    "EN.PA":   0.3,   # Bouygues       ~10 B€
+    "RNO.PA":  0.3,   # Renault         ~8 B€
+    "SEB.PA":  0.2,   # SEB             ~7 B€
+    "VIV.PA":  0.2,   # Vivendi         ~6 B€
+    "ALO.PA":  0.2,   # Alstom          ~5 B€
+    "WLN.PA":  0.1,   # Worldline       ~3 B€
+}
+
 # ── Nasdaq 100 constituents (hardcoded fallback — FMP constituent may fail) ────
 _NASDAQ100_STOCKS: list = [
     # (ticker, name, sector)
@@ -1045,6 +1090,46 @@ class FMPProvider:
         return result[:limit]
 
     # ─────────────────────────────────────────────────────────────────
+    # Public: ETF full holdings (all weights, no 25-item cap)
+    # ─────────────────────────────────────────────────────────────────
+
+    async def get_etf_weights(self, ticker: str) -> Dict[str, float]:
+        """
+        Return {symbol: weight_pct} for ALL holdings of an ETF (no top-25 cap).
+        weight_pct is in percentage points, e.g. 7.02 for 7.02% of the index.
+
+        Used to size heatmap tiles proportionally to their actual index weight:
+          SPY → S&P 500 weights
+          QQQ → Nasdaq 100 weights
+          DIA → Dow Jones 30 weights
+
+        Cache: 24 h (weights change daily but slowly).
+        Falls back gracefully to empty dict if FMP is unavailable.
+        """
+        t         = ticker.upper()
+        cache_key = f"etf_weights_all:{t}"
+        cached    = self._get_cache(cache_key)
+        if cached is not None:
+            return cached
+
+        raw    = await self._get(f"/etf-holder/{t}")
+        result: Dict[str, float] = {}
+        for item in raw:
+            sym = (item.get("asset") or "").strip()
+            if not sym:
+                continue
+            raw_pct = float(item.get("weightPercentage") or 0)
+            # FMP uses 0–1 scale (0.0702 = 7.02 %) OR 0–100 scale (7.02 = 7.02 %)
+            weight_pct = round(raw_pct * 100, 4) if raw_pct <= 1 else round(raw_pct, 4)
+            if weight_pct > 0:
+                result[sym] = weight_pct
+
+        print(f"[ETF weights:{t}] {len(result)} holdings")
+        if result:
+            self._set_cache(cache_key, result)
+        return result
+
+    # ─────────────────────────────────────────────────────────────────
     # Public: Heatmap data (Phase 18)
     # ─────────────────────────────────────────────────────────────────
 
@@ -1074,7 +1159,10 @@ class FMPProvider:
         tickers:    List[str]        = []
         name_map:   Dict[str, str]   = {}
         sector_map: Dict[str, str]   = {}
-        weight_map: Dict[str, float] = {}   # commodity fallback market-cap weights
+        size_map:   Dict[str, float] = {}   # index-weight for treemap tile sizing
+
+        # ── ETF ticker → provides accurate index weights (tile sizes) ─────────
+        _ETF_MAP = {"sp500": "SPY", "nasdaq100": "QQQ", "dowjones": "DIA"}
 
         if idx == "sp500":
             from services.indices.csv_provider import CsvProvider
@@ -1089,7 +1177,7 @@ class FMPProvider:
                 sector_map[t] = self._GICS_SECTOR_MAP.get(gics, gics) or "Other"
 
         elif idx in ("nasdaq100", "dowjones"):
-            # Try FMP constituent endpoint first; fall back to hardcoded list
+            # Try FMP constituent endpoint; fall back to hardcoded list
             fmp_key   = {"nasdaq100": "NDX", "dowjones": "DJI"}[idx]
             hardcoded = _NASDAQ100_STOCKS if idx == "nasdaq100" else _DOW30_STOCKS
             fmp_consts: List[Dict] = []
@@ -1107,26 +1195,28 @@ class FMPProvider:
                     name_map[t]   = c.get("name", "")
                     raw_sec       = c.get("sector", "")
                     sector_map[t] = self._GICS_SECTOR_MAP.get(raw_sec, raw_sec) or raw_sec or "Other"
-                print(f"[Heatmap:{idx}] using FMP constituents ({len(tickers)} tickers)")
+                print(f"[Heatmap:{idx}] FMP constituents ({len(tickers)} tickers)")
             else:
                 for t, name, sector in hardcoded:
                     tickers.append(t)
                     name_map[t]   = name
                     sector_map[t] = sector
-                print(f"[Heatmap:{idx}] using hardcoded list ({len(tickers)} tickers)")
+                print(f"[Heatmap:{idx}] hardcoded list ({len(tickers)} tickers)")
 
         elif idx == "cac40":
             for t, name, sector in _CAC40_STOCKS:
                 tickers.append(t)
                 name_map[t]   = name
                 sector_map[t] = sector
+            # Use hardcoded index weights for CAC 40
+            size_map = dict(_CAC40_WEIGHTS)
 
         elif idx == "commodities":
             for t, name, sector, weight in _COMMODITY_STOCKS:
                 tickers.append(t)
                 name_map[t]    = name
                 sector_map[t]  = sector
-                weight_map[t]  = float(weight) * 1e9
+                size_map[t]    = float(weight)   # relative AUM weight
 
         else:
             print(f"[Heatmap] Unknown index: {idx!r}")
@@ -1135,35 +1225,42 @@ class FMPProvider:
         if not tickers:
             return []
 
-        # ── 2. Prices + change_pct via yfinance (primary — no API key needed) ─
+        # ── 2. For US indices: fetch ETF weights (SPY / QQQ / DIA) ───────────
+        #    These weights ARE the stock's share in the index — exactly what we
+        #    need for proportional tile sizing.  NVDA ~5 % in SPY = 100× a 0.05 % stock.
+        if idx in _ETF_MAP:
+            etf_weights = await self.get_etf_weights(_ETF_MAP[idx])
+            for t in tickers:
+                # Try direct match, then BRK.B → BRK-B normalisation
+                w = etf_weights.get(t) or etf_weights.get(t.replace(".", "-"))
+                size_map[t] = w if w else 0.05   # 0.05 % fallback for missing tickers
+
+        # ── 3. Prices + change_pct via yfinance (primary — no API key needed) ─
         loop      = asyncio.get_event_loop()
         yf_quotes = await loop.run_in_executor(None, self._yf_bulk_quotes, tickers)
 
-        # ── 3. Market cap via FMP batch quotes (optional, used only for sizing) ─
-        fmp_quotes = await self.get_batch_quotes(tickers, cache_key=f"hm_mc_{idx}")
+        # ── 4. FMP batch quotes (optional — only used for price fallback) ─────
+        fmp_quotes = await self.get_batch_quotes(tickers, cache_key=f"hm_px_{idx}")
 
-        # ── 4. Merge ──────────────────────────────────────────────────────────
+        # ── 5. Merge ──────────────────────────────────────────────────────────
         result: List[Dict[str, Any]] = []
         for ticker in tickers:
             yf  = yf_quotes.get(ticker, {})
             fmp = fmp_quotes.get(ticker, {})
-
-            mc = fmp.get("market_cap")
-            if mc is None and idx == "commodities":
-                mc = weight_map.get(ticker, 1e9)
 
             result.append({
                 "ticker":     ticker,
                 "name":       name_map.get(ticker) or fmp.get("name", "") or ticker,
                 "sector":     sector_map.get(ticker) or "Other",
                 "price":      yf.get("price")      or fmp.get("price"),
-                "change_pct": yf.get("change_pct"),   # yfinance is primary source
-                "market_cap": mc,
+                "change_pct": yf.get("change_pct"),          # yfinance primary
+                "market_cap": size_map.get(ticker, 0.05),    # index weight % (or commodity AUM)
             })
 
         prices_found = sum(1 for r in result if r["price"]      is not None)
         chg_found    = sum(1 for r in result if r["change_pct"] is not None)
-        print(f"[Heatmap:{idx}] {len(result)} stocks | {prices_found} prices | {chg_found} changes")
+        print(f"[Heatmap:{idx}] {len(result)} stocks | {prices_found} prices | {chg_found} changes | "
+              f"weights: {sum(1 for r in result if r['market_cap'] > 0.05)} explicit")
 
         if result and prices_found > 0:
             self._set_cache(cache_key, result)

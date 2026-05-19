@@ -240,7 +240,7 @@ const INDICES = [
   { key: 'commodities', label: 'Matières 1ères', sub: 'Or · Pétrole · Agri' },
 ];
 
-const TOP_N = 15; // titres affichés par secteur en vue globale
+const TOP_N = 10; // top 10 titres par secteur en vue globale (les plus influents)
 
 // ── Page ──────────────────────────────────────────────────────────────────────
 
@@ -366,7 +366,7 @@ export default function HeatmapPage() {
           ) : (
             !loading && data && (
               <span className="text-[11px] text-terminal-textDim">
-                {totalDisplayed} / {data.total} titres · cliquer un secteur pour tout afficher
+                Top {TOP_N} par secteur ({totalDisplayed} affiché / {data.total} total) · cliquer un secteur = voir tous
               </span>
             )
           )}
@@ -417,20 +417,31 @@ export default function HeatmapPage() {
                 >
                   {tile.w >= 40 && tile.h >= 26 && (
                     <span className="absolute inset-0 flex flex-col items-center justify-center"
-                      style={{ padding: '2px 3px', gap: 0 }}>
+                      style={{ padding: '3px 4px', gap: 0 }}>
+                      {/* Ticker */}
                       <span
                         className="text-white font-bold leading-none text-center w-full truncate"
-                        style={{ fontSize: Math.min(13, Math.max(8, Math.min(tile.w / 5, tile.h / 3))) }}
+                        style={{ fontSize: Math.min(14, Math.max(9, Math.min(tile.w / 4.5, tile.h / 3.5))) }}
                       >
                         {tile.ticker}
                       </span>
+                      {/* Nom entreprise — grandes tuiles seulement */}
+                      {tile.h >= 62 && tile.w >= 70 && (
+                        <span
+                          className="text-white/60 leading-none text-center w-full truncate"
+                          style={{ fontSize: Math.min(10, Math.max(7, tile.w / 9)), marginTop: 2 }}
+                        >
+                          {tile.name}
+                        </span>
+                      )}
+                      {/* Variation % */}
                       {tile.h >= 42 && tile.w >= 46 && (
                         <span
-                          className="font-mono leading-none"
+                          className="font-mono font-semibold leading-none text-center"
                           style={{
-                            fontSize: Math.min(11, Math.max(7, Math.min(tile.w / 6.5, tile.h / 4))),
-                            color: changeColor(tile.change_pct),
-                            marginTop: 1,
+                            fontSize: Math.min(12, Math.max(8, Math.min(tile.w / 6, tile.h / 4.5))),
+                            color:    changeColor(tile.change_pct),
+                            marginTop: 2,
                           }}
                         >
                           {fmt(tile.change_pct)}
