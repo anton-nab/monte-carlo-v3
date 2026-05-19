@@ -88,6 +88,16 @@ const IconWatchlist = () => (
   </svg>
 );
 
+const IconHeatmap = () => (
+  <svg width="14" height="14" viewBox="0 0 24 24" fill="none"
+    stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <rect x="3"  y="3"  width="7" height="7" rx="1" />
+    <rect x="14" y="3"  width="7" height="7" rx="1" />
+    <rect x="3"  y="14" width="7" height="7" rx="1" />
+    <rect x="14" y="14" width="7" height="7" rx="1" />
+  </svg>
+);
+
 const IconMenu = () => (
   <svg width="20" height="20" viewBox="0 0 24 24" fill="none"
     stroke="currentColor" strokeWidth="2" strokeLinecap="round">
@@ -116,6 +126,7 @@ const NAV_ITEMS: NavItem[] = [
   { href: '/screener',  label: 'Screener',  icon: <IconScreener />  },
   { href: '/watchlist', label: 'Watchlist', icon: <IconWatchlist /> },
   { href: '/calendar',  label: 'Calendar',  icon: <IconCalendar />  },
+  { href: '/heatmap',   label: 'Heatmap',   icon: <IconHeatmap />   },
 ];
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -172,7 +183,7 @@ export function Header() {
           </div>
 
           {/* Desktop nav */}
-          <nav className="hidden lg:flex items-center gap-0.5 text-sm shrink-0">
+          <nav className="hidden xl:flex items-center gap-0.5 text-sm shrink-0">
             {NAV_ITEMS.map((item) => (
               <Link
                 key={item.href}
@@ -194,7 +205,7 @@ export function Header() {
 
           {/* Mobile hamburger */}
           <button
-            className="lg:hidden shrink-0 p-1.5 rounded text-terminal-textMuted hover:text-terminal-text hover:bg-terminal-surfaceHi transition"
+            className="xl:hidden shrink-0 p-1.5 rounded text-terminal-textMuted hover:text-terminal-text hover:bg-terminal-surfaceHi transition"
             onClick={() => setDrawerOpen(true)}
             aria-label="Ouvrir le menu"
           >
@@ -209,7 +220,7 @@ export function Header() {
 
       {/* Backdrop */}
       <div
-        className={`fixed inset-0 z-40 bg-black/50 backdrop-blur-sm lg:hidden transition-opacity duration-300 ${
+        className={`fixed inset-0 z-40 bg-black/50 backdrop-blur-sm xl:hidden transition-opacity duration-300 ${
           drawerOpen ? 'opacity-100 pointer-events-auto' : 'opacity-0 pointer-events-none'
         }`}
         onClick={() => setDrawerOpen(false)}
@@ -218,7 +229,7 @@ export function Header() {
 
       {/* Drawer panel */}
       <div
-        className={`fixed right-0 top-0 h-full w-72 z-50 lg:hidden flex flex-col
+        className={`fixed right-0 top-0 h-full w-72 z-50 xl:hidden flex flex-col
           bg-terminal-surface border-l border-terminal-border shadow-2xl
           transition-transform duration-300 ease-in-out
           ${drawerOpen ? 'translate-x-0' : 'translate-x-full'}`}
