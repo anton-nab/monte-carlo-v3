@@ -37,6 +37,9 @@ html5lib>=1.1                 # Fallback HTML parser (required when lxml fails o
 # PHASE 7: Real-Time Streaming
 websockets>=13.0              # WebSocket client (Twelve Data WS connection)
 
+# PHASE 17: AI Analysis Layer
+openai>=1.54.0                # OpenAI Python SDK (GPT-4o mini simulation summaries)
+
 # ===================================================================
 # NOTES
 # ===================================================================

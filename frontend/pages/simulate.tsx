@@ -316,6 +316,10 @@ export default function SimulatePage() {
   const [running, setRunning]         = useState(false);
   const [runError, setRunError]       = useState<string | null>(null);
 
+  // ── Analyse IA (Phase 17) ─────────────────────────────────────────────────
+  const [aiResult,  setAiResult]  = useState<{ summary: string; has_key: boolean } | null>(null);
+  const [aiLoading, setAiLoading] = useState(false);
+
   // ── Lire ?ticker= depuis l'URL (venant du screener ou d'une fiche) ─────────
   useEffect(() => {
     const t = router.query.ticker;
@@ -375,6 +379,49 @@ export default function SimulatePage() {
       setRunning(false);
     }
   }, [tickerInput, model, nSims, horizonDays, muOverride, sigmaOverride, lambdaPoisson, jumpMean, jumpStd, kappa, sigmaV, rho]);
+
+  // Reset analyse IA à chaque nouvelle simulation
+  useEffect(() => { setAiResult(null); }, [result]);
+
+  // ── Analyse IA — appel GPT-4o mini ───────────────────────────────────────
+  const fetchAiSummary = useCallback(async () => {
+    if (!result) return;
+    const metrics = result.metrics;
+    setAiLoading(true);
+    try {
+      const body = {
+        ticker:           result.ticker,
+        model:            result.model,
+        horizon_days:     result.simulation.horizon_days,
+        S0:               result.S0,
+        mu_pct:           result.calibration.mu_pct,
+        sigma_pct:        result.calibration.sigma_pct,
+        n_sims:           result.simulation.n_sims,
+        median_price:     metrics.median_price,
+        expected_price:   metrics.expected_price,
+        p5:               metrics.p5,
+        p95:              metrics.p95,
+        expected_return:  metrics.expected_return,
+        var_95:           metrics.var_95,
+        es_95:            metrics.es_95,
+        prob_loss:        metrics.prob_loss,
+        prob_gain_10pct:  metrics.prob_gain_10pct,
+        avg_max_drawdown: metrics.avg_max_drawdown,
+      };
+      const data = await apiFetch<{ summary: string; has_key: boolean }>(
+        '/api/ai/summarize',
+        { method: 'POST', body: JSON.stringify(body) },
+      );
+      setAiResult(data);
+    } catch (e: unknown) {
+      setAiResult({
+        summary: e instanceof Error ? e.message : 'Erreur lors de l\'analyse IA.',
+        has_key: true,
+      });
+    } finally {
+      setAiLoading(false);
+    }
+  }, [result]);
 
   // ── Dérivés ──────────────────────────────────────────────────────────────
   const stackedFan = result ? toStackedFan(result.fan_chart) : [];
@@ -867,6 +914,61 @@ export default function SimulatePage() {
                 </div>
               </div>
             </div>
+
+            {/* ── Analyse IA ────────────────────────────────────────────── */}
+            <div className="bg-terminal-surface border border-terminal-border rounded-lg p-5">
+              <div className="flex items-center justify-between mb-4">
+                <h2 className="text-xs font-semibold text-terminal-textDim uppercase tracking-widest">
+                  ✦ Analyse IA — GPT-4o mini
+                </h2>
+                <button
+                  onClick={fetchAiSummary}
+                  disabled={aiLoading}
+                  className="flex items-center gap-1.5 px-3 py-1.5 text-xs rounded border
+                             border-terminal-cyan text-terminal-cyan hover:bg-terminal-cyan/10
+                             transition-colors disabled:opacity-40 disabled:cursor-not-allowed shrink-0"
+                >
+                  {aiLoading ? (
+                    <><span className="inline-block animate-spin leading-none">⟳</span>&nbsp;Génération…</>
+                  ) : (
+                    aiResult ? '↺ Relancer' : '▶ Analyser'
+                  )}
+                </button>
+              </div>
+
+              {!aiResult && !aiLoading && (
+                <p className="text-xs text-terminal-textDim italic">
+                  Générez une lecture qualitative de cette simulation (orientation, risques, insight) par GPT-4o mini.
+                </p>
+              )}
+
+              {aiLoading && (
+                <div className="space-y-2 animate-pulse">
+                  <div className="h-3 bg-terminal-border rounded w-full" />
+                  <div className="h-3 bg-terminal-border rounded w-5/6" />
+                  <div className="h-3 bg-terminal-border rounded w-4/6" />
+                </div>
+              )}
+
+              {aiResult && !aiLoading && (
+                <div className="space-y-3">
+                  {aiResult.summary
+                    .split('\n')
+                    .filter((s) => s.trim())
+                    .map((line, i) => (
+                      <p key={i} className="text-sm text-terminal-textMuted leading-relaxed">
+                        {line.trim()}
+                      </p>
+                    ))}
+                  {!aiResult.has_key && (
+                    <p className="text-xs text-yellow-500 mt-2 border border-yellow-500/30 bg-yellow-500/5 rounded px-2 py-1.5">
+                      ⚠ Ajoutez <code className="text-terminal-cyan font-mono">OPENAI_API_KEY</code> dans les variables Railway pour activer l&apos;IA.
+                    </p>
+                  )}
+                </div>
+              )}
+            </div>
+
           </>
         )}
 

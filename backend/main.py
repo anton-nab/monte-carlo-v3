@@ -43,6 +43,7 @@ from api.ws import router as ws_router           # Phase 7: WebSocket
 from api.backtest  import router as backtest_router   # Phase 9: Backtesting
 from api.calendar  import router as calendar_router   # Phase 10: Calendar
 from api.screener  import router as screener_router   # Phase 11: Screener
+from api.ai        import router as ai_router         # Phase 17: AI Analysis
 
 # ===========================================================================
 # 1. CRÉER L'APPLICATION FASTAPI
@@ -94,6 +95,7 @@ app.include_router(ws_router)             # /ws/quotes           (Phase 7)
 app.include_router(backtest_router)       # /api/backtest        (Phase 9)
 app.include_router(calendar_router)       # /api/calendar        (Phase 10)
 app.include_router(screener_router)       # /api/screener        (Phase 11)
+app.include_router(ai_router)             # /api/ai/*            (Phase 17)
 
 # ===========================================================================
 # 3. ROUTES (Endpoints API)
