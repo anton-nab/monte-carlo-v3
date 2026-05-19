@@ -136,13 +136,27 @@ const pct  = (v: number, d = 1) => `${(v * 100).toFixed(d)}%`;
 const fmt  = (v: number, d = 2) => v.toLocaleString('en-US', { minimumFractionDigits: d, maximumFractionDigits: d });
 const sign = (v: number)        => (v >= 0 ? '+' : '');
 
+/** Badge "i" avec tooltip — hover desktop, tap mobile */
 function InfoBadge({ text }: { text: string }) {
+  const [open, setOpen] = useState(false);
   return (
-    <span
-      title={text}
-      className="inline-flex items-center justify-center w-3.5 h-3.5 rounded-full border border-terminal-textDim text-terminal-textDim text-[9px] cursor-help ml-1 select-none hover:border-terminal-cyan hover:text-terminal-cyan transition-colors"
-    >
-      i
+    <span className="relative inline-flex group ml-1 align-middle">
+      <span
+        onClick={(e) => { e.stopPropagation(); setOpen(o => !o); }}
+        className="inline-flex items-center justify-center w-3.5 h-3.5 rounded-full border border-terminal-textDim text-terminal-textDim text-[9px] cursor-help select-none hover:border-terminal-cyan hover:text-terminal-cyan transition-colors"
+      >
+        i
+      </span>
+      <span className={`absolute bottom-full left-1/2 -translate-x-1/2 mb-1.5
+                       w-56 bg-terminal-bg border border-terminal-border rounded-lg
+                       px-2.5 py-2 text-xs text-terminal-textMuted leading-relaxed
+                       shadow-xl z-50 whitespace-normal text-left font-normal
+                       transition-opacity duration-150
+                       ${open
+                         ? 'opacity-100 pointer-events-auto'
+                         : 'opacity-0 pointer-events-none group-hover:opacity-100'}`}>
+        {text}
+      </span>
     </span>
   );
 }

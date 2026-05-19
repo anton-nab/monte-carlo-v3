@@ -154,24 +154,28 @@ const pct = (v: number, digits = 1) => `${(v * 100).toFixed(digits)}%`;
 const fmt = (v: number, digits = 2) =>
   v.toLocaleString('en-US', { minimumFractionDigits: digits, maximumFractionDigits: digits });
 
-/** Badge "?" avec tooltip personnalisé visible au survol */
+/** Badge "?" avec tooltip — hover desktop, tap mobile */
 function InfoBadge({ text }: { text: string }) {
+  const [open, setOpen] = useState(false);
   return (
     <span className="relative inline-flex group ml-1" style={{ verticalAlign: 'middle' }}>
-      <span className="inline-flex items-center justify-center w-4 h-4 rounded-full
-                       border border-terminal-textDim text-terminal-textDim text-[9px]
-                       cursor-help select-none
-                       group-hover:border-terminal-cyan group-hover:text-terminal-cyan
-                       transition-colors">
+      <span
+        onClick={(e) => { e.stopPropagation(); setOpen(o => !o); }}
+        className="inline-flex items-center justify-center w-4 h-4 rounded-full
+                   border border-terminal-textDim text-terminal-textDim text-[9px]
+                   cursor-help select-none
+                   group-hover:border-terminal-cyan group-hover:text-terminal-cyan
+                   transition-colors">
         ?
       </span>
-      <span className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2
+      <span className={`absolute bottom-full left-1/2 -translate-x-1/2 mb-2
                        w-64 bg-terminal-bg border border-terminal-border rounded-lg
                        px-3 py-2 text-xs text-terminal-textMuted leading-relaxed
-                       shadow-xl z-50
-                       opacity-0 pointer-events-none group-hover:opacity-100
-                       transition-opacity duration-150
-                       whitespace-normal text-left font-normal">
+                       shadow-xl z-50 transition-opacity duration-150
+                       whitespace-normal text-left font-normal
+                       ${open
+                         ? 'opacity-100 pointer-events-auto'
+                         : 'opacity-0 pointer-events-none group-hover:opacity-100'}`}>
         {text}
       </span>
     </span>

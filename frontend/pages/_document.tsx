@@ -8,7 +8,10 @@ import { Html, Head, Main, NextScript } from 'next/document';
 export default function Document() {
   return (
     <Html>
-      <Head />
+      <Head>
+        {/* Viewport explicite : layout responsive, pas de zoom-image, safe area iOS */}
+        <meta name="viewport" content="width=device-width, initial-scale=1, minimum-scale=1, viewport-fit=cover" />
+      </Head>
       <body>
         {/*
           Anti-flash: read theme preference from localStorage and apply

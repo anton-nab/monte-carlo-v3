@@ -358,12 +358,18 @@ function EventRow({
       <span className="num text-xs text-terminal-textDim w-16 shrink-0 tabular-nums">
         {ev.time !== '—' ? ev.time : '—'}
       </span>
-      <span className="text-base w-6 text-center shrink-0">{ev.flag}</span>
+      {/* Flag + country code — emoji seul sur mobile, + badge texte sur desktop */}
+      <div className="flex items-center gap-1 shrink-0 w-14">
+        <span className="text-base leading-none w-6 text-center">{ev.flag}</span>
+        <span className="hidden sm:block text-[10px] font-mono font-semibold text-terminal-textMuted uppercase tracking-wide">
+          {ev.country.length <= 3 ? ev.country : ev.country.slice(0, 2)}
+        </span>
+      </div>
       <div className="flex-1 min-w-0">
         <span className="text-sm font-medium text-terminal-text truncate block">
           {ev.title}
         </span>
-        <span className="text-xs text-terminal-textDim">{ev.country}</span>
+        <span className="text-xs text-terminal-textDim sm:hidden">{ev.country}</span>
       </div>
       <TypeChip type={ev.type} />
       <ImpactBadge impact={ev.impact} />
