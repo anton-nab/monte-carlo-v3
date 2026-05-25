@@ -799,14 +799,24 @@ class FMPProvider:
                 if not sym:
                     continue
                 try:
-                    mc_raw = row.get("marketCap")
+                    mc_raw      = row.get("marketCap")
+                    price       = float(row["price"])
+                    prev_close  = float(row.get("previousClose") or 0)
+                    # Compute change_pct from price/previousClose so it is
+                    # accurate at any time of day (FMP changesPercentage = 0
+                    # outside market hours).
+                    if prev_close > 0:
+                        chg_pct = round((price - prev_close) / prev_close * 100, 3)
+                    else:
+                        chg_pct = round(float(row.get("changesPercentage") or 0), 3)
                     result[sym] = {
-                        "price":      round(float(row["price"]), 4),
-                        "change_pct": round(float(row.get("changesPercentage") or 0), 3),
-                        "volume":     int(row["volume"]) if row.get("volume") is not None else None,
-                        "market_cap": int(float(mc_raw)) if mc_raw not in (None, "", 0, "0") else None,
-                        "name":       row.get("name") or "",
-                        "sector":     row.get("sector") or "",
+                        "price":         round(price, 4),
+                        "change_pct":    chg_pct,
+                        "previous_close": round(prev_close, 4) if prev_close > 0 else None,
+                        "volume":        int(row["volume"]) if row.get("volume") is not None else None,
+                        "market_cap":    int(float(mc_raw)) if mc_raw not in (None, "", 0, "0") else None,
+                        "name":          row.get("name") or "",
+                        "sector":        row.get("sector") or "",
                     }
                 except (KeyError, TypeError, ValueError):
                     continue
@@ -1305,31 +1315,30 @@ class FMPProvider:
                 w = etf_weights.get(t) or etf_weights.get(t.replace(".", "-"))
                 size_map[t] = w if w else fallback_w
 
-        # ── 3. Prices + change_pct via yfinance (primary — no API key needed) ─
-        loop      = asyncio.get_event_loop()
-        yf_quotes = await loop.run_in_executor(None, self._yf_bulk_quotes, tickers)
-
-        # ── 4. FMP batch quotes (optional — only used for price fallback) ─────
+        # ── 3. Prices + change_pct via FMP batch quotes ───────────────────────
+        #    FMP /v3/quote returns price + previousClose — we compute change_pct
+        #    as (price - previousClose) / previousClose * 100, which is accurate
+        #    at any time of day (unlike changesPercentage which is 0 after market
+        #    hours).  This eliminates the yfinance dependency in the heatmap.
         fmp_quotes = await self.get_batch_quotes(tickers, cache_key=f"hm_px_{idx}")
 
-        # ── 5. Merge ──────────────────────────────────────────────────────────
+        # ── 4. Merge ──────────────────────────────────────────────────────────
         result: List[Dict[str, Any]] = []
         for ticker in tickers:
-            yf  = yf_quotes.get(ticker, {})
             fmp = fmp_quotes.get(ticker, {})
 
             result.append({
                 "ticker":     ticker,
                 "name":       name_map.get(ticker) or fmp.get("name", "") or ticker,
                 "sector":     sector_map.get(ticker) or "Other",
-                "price":      yf.get("price")      or fmp.get("price"),
-                "change_pct": yf.get("change_pct"),          # yfinance primary
+                "price":      fmp.get("price"),
+                "change_pct": fmp.get("change_pct"),    # computed from price/previousClose
                 "market_cap": size_map.get(ticker, 0.05),    # index weight % (or commodity AUM)
             })
 
         prices_found = sum(1 for r in result if r["price"]      is not None)
         chg_found    = sum(1 for r in result if r["change_pct"] is not None)
-        print(f"[Heatmap:{idx}] {len(result)} stocks | {prices_found} prices | {chg_found} changes | "
+        print(f"[Heatmap:{idx}] {len(result)} stocks | {prices_found} prices | {chg_found} changes (FMP) | "
               f"weights: {sum(1 for r in result if r['market_cap'] > 0.05)} explicit")
 
         if result and prices_found > 0:
