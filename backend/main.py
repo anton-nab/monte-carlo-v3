@@ -45,6 +45,7 @@ from api.calendar  import router as calendar_router   # Phase 10: Calendar
 from api.screener  import router as screener_router   # Phase 11: Screener
 from api.ai        import router as ai_router         # Phase 17: AI Analysis
 from api.heatmap   import router as heatmap_router    # Phase 18: Heatmap
+from api.options   import router as options_router    # Phase 19: Options Pricing
 
 # ===========================================================================
 # 1. CRÉER L'APPLICATION FASTAPI
@@ -98,6 +99,7 @@ app.include_router(calendar_router)       # /api/calendar        (Phase 10)
 app.include_router(screener_router)       # /api/screener        (Phase 11)
 app.include_router(ai_router)             # /api/ai/*            (Phase 17)
 app.include_router(heatmap_router)        # /api/heatmap         (Phase 18)
+app.include_router(options_router)       # /api/options/*       (Phase 19)
 
 # ===========================================================================
 # 3. ROUTES (Endpoints API)

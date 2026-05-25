@@ -88,6 +88,16 @@ const IconWatchlist = () => (
   </svg>
 );
 
+const IconOptions = () => (
+  <svg width="14" height="14" viewBox="0 0 24 24" fill="none"
+    stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    {/* Payoff diagram shape: flat left, then rising right (call payoff hockey stick) */}
+    <polyline points="2 16 9 16 14 8 22 8" />
+    <circle cx="9" cy="16" r="1.5" fill="currentColor" stroke="none" />
+    <line x1="9" y1="4" x2="9" y2="20" strokeWidth="1" strokeDasharray="2 2" />
+  </svg>
+);
+
 const IconHeatmap = () => (
   <svg width="14" height="14" viewBox="0 0 24 24" fill="none"
     stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -121,6 +131,7 @@ const NAV_ITEMS: NavItem[] = [
   { href: '/markets',   label: 'Markets',   icon: <IconHome />      },
   { href: '/simulate',  label: 'Simulate',  icon: <IconSimulate />  },
   { href: '/compare',   label: 'Compare',   icon: <IconCompare />   },
+  { href: '/options',   label: 'Options',   icon: <IconOptions />   },
   { href: '/portfolio', label: 'Portfolio', icon: <IconPortfolio /> },
   { href: '/backtest',  label: 'Backtest',  icon: <IconBacktest />  },
   { href: '/screener',  label: 'Screener',  icon: <IconScreener />  },
