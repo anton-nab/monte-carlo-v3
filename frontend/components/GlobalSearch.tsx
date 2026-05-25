@@ -30,7 +30,13 @@ function isIndexTicker(ticker: string): boolean {
   return ticker.startsWith('^');
 }
 
-export function GlobalSearch() {
+interface GlobalSearchProps {
+  autoFocus?:  boolean;
+  onNavigate?: () => void;
+  placeholder?: string;
+}
+
+export function GlobalSearch({ autoFocus = false, onNavigate, placeholder }: GlobalSearchProps = {}) {
   const router = useRouter();
   const [query, setQuery] = useState('');
   const [suggestions, setSuggestions] = useState<Suggestion[]>([]);
@@ -39,6 +45,14 @@ export function GlobalSearch() {
   const [isLoading, setIsLoading] = useState(false);
   const debounceTimer = useRef<NodeJS.Timeout>();
   const inputRef = useRef<HTMLInputElement>(null);
+
+  // Auto-focus when used in overlay mode
+  useEffect(() => {
+    if (autoFocus) {
+      const t = setTimeout(() => inputRef.current?.focus(), 60);
+      return () => clearTimeout(t);
+    }
+  }, [autoFocus]);
 
   // Debounced search
   useEffect(() => {
@@ -81,6 +95,7 @@ export function GlobalSearch() {
       if (e.key === 'Enter' && query.trim()) {
         const sym = query.trim().toUpperCase();
         router.push(isIndexTicker(sym) ? `/indices/${sym}` : `/instrument/${sym}`);
+        onNavigate?.();
       }
       return;
     }
@@ -120,6 +135,7 @@ export function GlobalSearch() {
     setQuery('');
     setIsOpen(false);
     setSuggestions([]);
+    onNavigate?.();
   };
 
   return (
@@ -132,7 +148,7 @@ export function GlobalSearch() {
           onChange={(e) => setQuery(e.target.value)}
           onKeyDown={handleKeyDown}
           onFocus={() => query && suggestions.length > 0 && setIsOpen(true)}
-          placeholder="Search ticker, name, ISIN…"
+          placeholder={placeholder ?? "Search ticker, name, ISIN…"}
           className="w-full bg-terminal-bg border border-terminal-border rounded px-3 py-1.5 text-sm text-terminal-text placeholder:text-terminal-textDim focus:outline-none focus:border-terminal-cyan focus:ring-1 focus:ring-terminal-cyan/30 transition num"
         />
         {isLoading && (

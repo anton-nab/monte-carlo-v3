@@ -5,7 +5,7 @@
  * Mobile  : hamburger → drawer slide-in depuis la droite.
  */
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/router';
 import { GlobalSearch } from './GlobalSearch';
@@ -108,6 +108,14 @@ const IconHeatmap = () => (
   </svg>
 );
 
+const IconSearch = () => (
+  <svg width="17" height="17" viewBox="0 0 24 24" fill="none"
+    stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <circle cx="11" cy="11" r="8" />
+    <line x1="21" y1="21" x2="16.65" y2="16.65" />
+  </svg>
+);
+
 const IconMenu = () => (
   <svg width="20" height="20" viewBox="0 0 24 24" fill="none"
     stroke="currentColor" strokeWidth="2" strokeLinecap="round">
@@ -144,7 +152,18 @@ const NAV_ITEMS: NavItem[] = [
 
 export function Header() {
   const router = useRouter();
-  const [drawerOpen, setDrawerOpen] = useState(false);
+  const [drawerOpen,  setDrawerOpen]  = useState(false);
+  const [searchOpen,  setSearchOpen]  = useState(false);
+
+  const closeSearch = useCallback(() => setSearchOpen(false), []);
+
+  // Close search overlay on Escape key
+  useEffect(() => {
+    if (!searchOpen) return;
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') closeSearch(); };
+    document.addEventListener('keydown', onKey);
+    return () => document.removeEventListener('keydown', onKey);
+  }, [searchOpen, closeSearch]);
 
   // Fermer le drawer lors d'un changement de route
   useEffect(() => {
@@ -188,10 +207,8 @@ export function Header() {
             <span className="sm:hidden font-serif text-sm text-terminal-text">MC</span>
           </Link>
 
-          {/* Search — flex-1 */}
-          <div className="flex-1 min-w-0">
-            <GlobalSearch />
-          </div>
+          {/* Spacer — pousse le nav vers la droite sur desktop */}
+          <div className="flex-1" />
 
           {/* Desktop nav */}
           <nav className="hidden xl:flex items-center gap-0.5 text-sm shrink-0">
@@ -211,6 +228,16 @@ export function Header() {
             ))}
           </nav>
 
+          {/* Search icon */}
+          <button
+            onClick={() => setSearchOpen(true)}
+            className="shrink-0 p-1.5 rounded text-terminal-textMuted hover:text-terminal-text hover:bg-terminal-surfaceHi transition"
+            aria-label="Rechercher"
+            title="Rechercher (Ctrl+K)"
+          >
+            <IconSearch />
+          </button>
+
           {/* Theme toggle */}
           <ThemeToggle />
 
@@ -224,6 +251,41 @@ export function Header() {
           </button>
         </div>
       </header>
+
+      {/* ── Search overlay ────────────────────────────────────────────
+           Plein écran, backdrop blur, s'ouvre au clic sur la loupe.
+           GlobalSearch auto-focus + onNavigate ferme l'overlay.        */}
+      {searchOpen && (
+        <>
+          {/* Backdrop */}
+          <div
+            className="fixed inset-0 z-[70] bg-black/60 backdrop-blur-sm"
+            onClick={closeSearch}
+            aria-hidden="true"
+          />
+          {/* Search panel */}
+          <div className="fixed inset-x-0 top-0 z-[80] flex justify-center px-4 pt-[72px]">
+            <div className="w-full max-w-2xl">
+              {/* Input wrapper with icon */}
+              <div className="relative flex items-center">
+                <span className="absolute left-4 text-terminal-textMuted pointer-events-none">
+                  <IconSearch />
+                </span>
+                <div className="w-full pl-10">
+                  <GlobalSearch
+                    autoFocus
+                    onNavigate={closeSearch}
+                    placeholder="Chercher un ticker, nom, ISIN…"
+                  />
+                </div>
+              </div>
+              <p className="mt-2 text-center text-xs text-[#7a8294]">
+                Appuyer sur <kbd className="px-1.5 py-0.5 rounded border border-[#2a3040] bg-[#1a2030] text-[#e8e9ed] font-mono text-[10px]">Esc</kbd> pour fermer
+              </p>
+            </div>
+          </div>
+        </>
+      )}
 
       {/* ── Mobile drawer ─────────────────────────────────────────────
            Toujours rendu dans le DOM pour la transition CSS.
@@ -264,6 +326,15 @@ export function Header() {
             <IconClose />
           </button>
         </div>
+
+        {/* Search button in drawer */}
+        <button
+          onClick={() => { setDrawerOpen(false); setTimeout(() => setSearchOpen(true), 150); }}
+          className="mx-2 mt-2 mb-0 flex items-center gap-3 px-3 py-3 rounded-lg text-terminal-textMuted hover:text-terminal-text hover:bg-terminal-surfaceHi transition"
+        >
+          <IconSearch />
+          <span className="text-sm font-medium">Rechercher…</span>
+        </button>
 
         {/* Nav items */}
         <nav className="flex-1 overflow-y-auto py-2 px-2">
