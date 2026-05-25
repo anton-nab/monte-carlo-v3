@@ -12,6 +12,7 @@
 
 import { useState, useCallback } from 'react';
 import Head from 'next/head';
+import { useSession } from 'next-auth/react';
 import {
   ComposedChart,
   Area,
@@ -593,6 +594,50 @@ export default function PortfolioPage() {
   const [spinning,     setSpinning]     = useState(false);
   const [activeTemplate, setActiveTemplate] = useState<string | null>(null);
 
+  // ── Save portfolio (Phase 8) ──────────────────────────────────────────────
+  const { data: session } = useSession();
+  const [saveName,  setSaveName]  = useState('');
+  const [saving,    setSaving]    = useState(false);
+  const [saveMsg,   setSaveMsg]   = useState<{ ok: boolean; text: string } | null>(null);
+
+  const handleSave = useCallback(async () => {
+    if (!result || !session) return;
+    setSaving(true);
+    setSaveMsg(null);
+    try {
+      const r = await fetch('/api/saves/portfolios', {
+        method:  'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body:    JSON.stringify({
+          name:    saveName.trim() || `${result.tickers.join(' · ')} · ${new Date().toISOString().slice(0, 10)}`,
+          tickers: result.tickers,
+          params: {
+            period:             result.calibration.period,
+            n_sims:             result.simulation.n_sims,
+            initial_investment: result.calibration.initial_investment,
+            risk_free_rate:     result.calibration.risk_free_rate,
+          },
+          summary: {
+            optimal_sharpe: result.optimal_sharpe,
+            min_volatility: result.min_volatility,
+            metrics:        result.metrics,
+          },
+        }),
+      });
+      if (r.ok) {
+        setSaveMsg({ ok: true, text: 'Portfolio enregistré ✓' });
+        setSaveName('');
+      } else {
+        const d = await r.json().catch(() => ({}));
+        setSaveMsg({ ok: false, text: d.error ?? 'Erreur lors de la sauvegarde' });
+      }
+    } catch {
+      setSaveMsg({ ok: false, text: 'Erreur réseau' });
+    } finally {
+      setSaving(false);
+    }
+  }, [result, session, saveName]);
+
   // ── Load template ────────────────────────────────────────────────────────
   const loadTemplate = useCallback((tpl: PortfolioTemplate) => {
     setActiveTemplate(tpl.id);
@@ -996,6 +1041,34 @@ export default function PortfolioPage() {
 
         {result && m && (
           <>
+            {/* ── Save portfolio (Phase 8) ─────────────────────────── */}
+            {session && (
+              <div className="flex flex-wrap items-center gap-2">
+                <input
+                  type="text"
+                  value={saveName}
+                  onChange={(e) => { setSaveName(e.target.value); setSaveMsg(null); }}
+                  placeholder={`${result.tickers.join(' · ')} · ${new Date().toISOString().slice(0, 10)}`}
+                  className="flex-1 min-w-[220px] bg-terminal-bg border border-terminal-border rounded px-3 py-1.5
+                             text-xs text-terminal-text placeholder:text-terminal-textDim
+                             focus:outline-none focus:border-terminal-cyan transition-colors"
+                />
+                <button
+                  onClick={handleSave}
+                  disabled={saving}
+                  className="px-3 py-1.5 rounded text-xs font-semibold transition-colors shrink-0
+                             bg-terminal-cyan text-terminal-bg hover:opacity-90 disabled:opacity-40"
+                >
+                  {saving ? 'Enregistrement…' : '💾 Enregistrer'}
+                </button>
+                {saveMsg && (
+                  <span className={`text-xs ${saveMsg.ok ? 'text-bull' : 'text-bear'}`}>
+                    {saveMsg.text}
+                  </span>
+                )}
+              </div>
+            )}
+
             {/* ── 1. Comparison cards ───────────────────────────────── */}
             <div>
               <SectionTitle>Comparaison des portefeuilles</SectionTitle>

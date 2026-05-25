@@ -12,6 +12,7 @@
  */
 
 import type { AppProps } from 'next/app';
+import { SessionProvider } from 'next-auth/react';
 import { DM_Sans, DM_Serif_Display, JetBrains_Mono } from 'next/font/google';
 import '../styles/globals.css';
 
@@ -36,10 +37,12 @@ const jetbrainsMono = JetBrains_Mono({
   display:  'swap',
 });
 
-export default function App({ Component, pageProps }: AppProps) {
+export default function App({ Component, pageProps: { session, ...pageProps } }: AppProps) {
   return (
-    <main className={`${dmSans.variable} ${dmSerif.variable} ${jetbrainsMono.variable} font-sans`}>
-      <Component {...pageProps} />
-    </main>
+    <SessionProvider session={session}>
+      <main className={`${dmSans.variable} ${dmSerif.variable} ${jetbrainsMono.variable} font-sans`}>
+        <Component {...pageProps} />
+      </main>
+    </SessionProvider>
   );
 }

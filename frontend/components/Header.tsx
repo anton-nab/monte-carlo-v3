@@ -10,6 +10,7 @@ import Link from 'next/link';
 import { useRouter } from 'next/router';
 import { GlobalSearch } from './GlobalSearch';
 import { ThemeToggle } from './ThemeToggle';
+import { UserMenu } from './UserMenu';
 
 interface NavItem {
   href:  string;
@@ -241,6 +242,9 @@ export function Header() {
           {/* Theme toggle */}
           <ThemeToggle />
 
+          {/* User menu (login / avatar) */}
+          <UserMenu />
+
           {/* Mobile hamburger */}
           <button
             className="xl:hidden shrink-0 p-1.5 rounded text-terminal-textMuted hover:text-terminal-text hover:bg-terminal-surfaceHi transition"
@@ -363,10 +367,15 @@ export function Header() {
         </nav>
 
         {/* Drawer footer */}
-        <div className="shrink-0 px-4 py-3 border-t border-terminal-border">
+        <div className="shrink-0 px-4 py-3 border-t border-terminal-border space-y-2">
+          {/* User account */}
+          <div className="flex items-center gap-2">
+            <UserMenu />
+            <span className="text-xs text-terminal-textDim truncate">Mon compte</span>
+          </div>
           <div className="flex items-center justify-between">
             <span className="text-xs text-terminal-textDim font-mono">
-              Monte Carlo · FastAPI + Next.js
+              Monte Carlo · v3
             </span>
             <ThemeToggle />
           </div>
