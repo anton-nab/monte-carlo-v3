@@ -83,6 +83,55 @@ function fmtPct(n: number): string {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// Frontend Black-Scholes (pour Strike Ladder + Delta Profile — pas d'appel API)
+// Abramowitz & Stegun approximation, précision ~7 décimales
+// ─────────────────────────────────────────────────────────────────────────────
+
+function _ncdf(x: number): number {
+  if (x < -8) return 0;
+  if (x >  8) return 1;
+  const t    = 1 / (1 + 0.2316419 * Math.abs(x));
+  const poly = t * (0.319381530 + t * (-0.356563782 + t * (1.781477937 + t * (-1.821255978 + t * 1.330274429))));
+  const pdf  = Math.exp(-0.5 * x * x) / Math.sqrt(2 * Math.PI);
+  const cdf  = 1 - pdf * poly;
+  return x >= 0 ? cdf : 1 - cdf;
+}
+
+function _npdf(x: number): number {
+  return Math.exp(-0.5 * x * x) / Math.sqrt(2 * Math.PI);
+}
+
+interface BSRow {
+  price: number; delta: number; gamma: number; theta: number; vega: number;
+}
+
+function bsFull(S: number, K: number, T: number, r: number, sigma: number, type: 'call' | 'put'): BSRow {
+  if (T <= 0 || sigma <= 0) {
+    const itm = type === 'call' ? S > K : S < K;
+    return { price: Math.max(type === 'call' ? S - K : K - S, 0), delta: itm ? (type === 'call' ? 1 : -1) : 0, gamma: 0, theta: 0, vega: 0 };
+  }
+  const sqT  = Math.sqrt(T);
+  const d1   = (Math.log(S / K) + (r + 0.5 * sigma * sigma) * T) / (sigma * sqT);
+  const d2   = d1 - sigma * sqT;
+  const disc = Math.exp(-r * T);
+  const nd1  = _npdf(d1);
+  const price = type === 'call'
+    ? S * _ncdf(d1) - K * disc * _ncdf(d2)
+    : K * disc * _ncdf(-d2) - S * _ncdf(-d1);
+  const delta = type === 'call' ? _ncdf(d1) : _ncdf(d1) - 1;
+  const gamma = nd1 / (S * sigma * sqT);
+  const theta = (-(S * nd1 * sigma) / (2 * sqT) + (type === 'call' ? -r * K * disc * _ncdf(d2) : r * K * disc * _ncdf(-d2))) / 365;
+  const vega  = S * nd1 * sqT / 100;
+  return { price, delta, gamma, theta, vega };
+}
+
+/** Normalise v dans [lo, hi] → opacité [0, 1] pour le coloriage heatmap */
+function heatAlpha(v: number, lo: number, hi: number): number {
+  if (hi <= lo) return 0;
+  return Math.min(Math.max((v - lo) / (hi - lo), 0), 1);
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // GreekCard with hover tooltip
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -334,6 +383,62 @@ export default function OptionsPage() {
     })),
     [payoffData]
   );
+
+  // ── Sensitivity table : Greeks par niveau de cours (S variable, K fixe) ─────
+  const sensitivityTable = useMemo(() => {
+    if (!result) return [];
+    const S_ref = parseFloat(spotInput);
+    const K     = parseFloat(strikeInput);
+    const r     = parseFloat(rateInput)  / 100;
+    const sigma = parseFloat(volInput)   / 100;
+    if (!S_ref || !K || !sigma || T <= 0) return [];
+    // 21 niveaux : -20% → +20%, pas de 2%
+    return Array.from({ length: 21 }, (_, i) => {
+      const pct = (i - 10) * 2;             // -20, -18, ..., 0, ..., +20
+      const S   = S_ref * (1 + pct / 100);
+      const m   = bsFull(S, K, T, r, sigma, optionType);
+      return { S: Math.round(S * 100) / 100, pct, isRef: pct === 0, ...m };
+    });
+  }, [result, spotInput, strikeInput, T, rateInput, volInput, optionType]);
+
+  // Plages min/max pour la normalisation heatmap
+  const tableRanges = useMemo(() => {
+    if (!sensitivityTable.length) return { price:[0,1], delta:[0,1], gamma:[0,1], theta:[0,1], vega:[0,1] };
+    const ps = sensitivityTable.map(r => r.price);
+    const gs = sensitivityTable.map(r => r.gamma);
+    const ts = sensitivityTable.map(r => Math.abs(r.theta));
+    const vs = sensitivityTable.map(r => r.vega);
+    const ds = sensitivityTable.map(r => Math.abs(r.delta));
+    return {
+      price: [Math.min(...ps), Math.max(...ps)],
+      delta: [0, Math.max(...ds)],
+      gamma: [0, Math.max(...gs)],
+      theta: [0, Math.max(...ts)],
+      vega:  [0, Math.max(...vs)],
+    };
+  }, [sensitivityTable]);
+
+  // ── Delta profile : delta_call + delta_put en fonction de S ─────────────────
+  const deltaProfile = useMemo(() => {
+    if (!result) return [];
+    const K     = parseFloat(strikeInput);
+    const r     = parseFloat(rateInput) / 100;
+    const sigma = parseFloat(volInput)  / 100;
+    const S_ref = parseFloat(spotInput);
+    if (!K || !sigma || T <= 0) return [];
+    const lo = S_ref * 0.60, hi = S_ref * 1.40, n = 80;
+    return Array.from({ length: n + 1 }, (_, i) => {
+      const S  = lo + (hi - lo) * i / n;
+      const c  = bsFull(S, K, T, r, sigma, 'call');
+      const p  = bsFull(S, K, T, r, sigma, 'put');
+      return {
+        S:          Math.round(S * 100) / 100,
+        delta_call: Math.round(c.delta  * 10000) / 10000,
+        delta_put:  Math.round(p.delta  * 10000) / 10000,
+        gamma:      Math.round(c.gamma  * 100000) / 100000,
+      };
+    });
+  }, [result, spotInput, strikeInput, T, rateInput, volInput]);
 
   // ── Moneyness ───────────────────────────────────────────────────────────────
   const moneyness = useMemo(() => {
@@ -753,6 +858,226 @@ export default function OptionsPage() {
                     />
                   </ComposedChart>
                 </ResponsiveContainer>
+              </div>
+            </div>
+          )}
+
+          {/* ── Profil de Sensibilité (Delta Profile + Strike Heatmap) ───── */}
+          {result && sensitivityTable.length > 0 && (
+            <div className="mt-6 bg-terminal-surface border border-terminal-border rounded-xl p-5">
+              <div className="flex items-center justify-between mb-1">
+                <h2 className="text-sm font-semibold text-terminal-text uppercase tracking-wider">
+                  Profil de Sensibilité
+                </h2>
+                <span className="text-xs text-terminal-textDim">
+                  K fixe = ${fmt(parseFloat(strikeInput), 2)} · {optionType.toUpperCase()} · T = {fmt(T, 4)} an
+                </span>
+              </div>
+              <p className="text-xs text-terminal-textDim mb-5">
+                Greeks en fonction du cours du sous-jacent — chaque ligne = un niveau de prix (comme les niveaux VWAP)
+              </p>
+
+              {/* ── Delta Profile chart ─────────────────────────────────── */}
+              <div className="mb-6">
+                <div className="flex items-center gap-4 mb-3">
+                  <span className="text-xs font-semibold text-terminal-textMuted uppercase tracking-wider">Profil Delta</span>
+                  <span className="flex items-center gap-1.5 text-xs text-terminal-textDim">
+                    <span className="w-6 h-0.5 bg-[#22c55e] inline-block rounded" />Δ Call
+                  </span>
+                  <span className="flex items-center gap-1.5 text-xs text-terminal-textDim">
+                    <span className="w-6 h-0.5 bg-[#f87171] inline-block rounded" />Δ Put
+                  </span>
+                  <span className="flex items-center gap-1.5 text-xs text-terminal-textDim">
+                    <span className="w-6 h-0.5 border-t border-dashed border-[#f59e0b] inline-block" />Γ Gamma (×200, axe droit)
+                  </span>
+                </div>
+                <div className="h-56">
+                  <ResponsiveContainer width="100%" height="100%">
+                    <ComposedChart data={deltaProfile} margin={{ top: 5, right: 50, left: 8, bottom: 5 }}>
+                      <CartesianGrid strokeDasharray="3 3" stroke={chartGridColor} />
+                      <XAxis
+                        dataKey="S"
+                        tickFormatter={v => `$${Number(v).toFixed(0)}`}
+                        tick={{ fill: chartTextColor, fontSize: 11 }}
+                        axisLine={{ stroke: chartBorderColor }}
+                        tickLine={false}
+                      />
+                      {/* Y gauche : delta [-1, 1] */}
+                      <YAxis
+                        yAxisId="delta"
+                        domain={[-1, 1]}
+                        tickFormatter={v => Number(v).toFixed(2)}
+                        tick={{ fill: chartTextColor, fontSize: 11 }}
+                        axisLine={{ stroke: chartBorderColor }}
+                        tickLine={false}
+                        width={42}
+                      />
+                      {/* Y droite : gamma normalisé */}
+                      <YAxis
+                        yAxisId="gamma"
+                        orientation="right"
+                        tickFormatter={v => Number(v).toFixed(3)}
+                        tick={{ fill: chartTextColor, fontSize: 10 }}
+                        axisLine={false}
+                        tickLine={false}
+                        width={44}
+                      />
+                      <Tooltip
+                        content={({ active, payload, label }: any) => {
+                          if (!active || !payload?.length) return null;
+                          const dc = payload.find((p: any) => p.dataKey === 'delta_call')?.value;
+                          const dp = payload.find((p: any) => p.dataKey === 'delta_put')?.value;
+                          const gm = payload.find((p: any) => p.dataKey === 'gamma')?.value;
+                          return (
+                            <div style={{ background:'#0f1522', border:'1px solid #2a3040', color:'#e8e9ed', borderRadius:8, padding:'8px 12px', fontSize:12 }}>
+                              <div className="font-mono font-bold mb-1">${Number(label).toFixed(2)}</div>
+                              {dc !== undefined && <div style={{ color:'#22c55e' }}>Δ call {Number(dc).toFixed(4)}</div>}
+                              {dp !== undefined && <div style={{ color:'#f87171' }}>Δ put  {Number(dp).toFixed(4)}</div>}
+                              {gm !== undefined && <div style={{ color:'#f59e0b' }}>Γ      {Number(gm).toFixed(5)}</div>}
+                            </div>
+                          );
+                        }}
+                      />
+                      {/* Delta = 0 */}
+                      <ReferenceLine yAxisId="delta" y={0} stroke={chartBorderColor} strokeWidth={1} />
+                      {/* Delta 0.25 / 0.50 / 0.75 */}
+                      {[0.25, 0.50, 0.75].map(d => (
+                        <ReferenceLine key={d} yAxisId="delta" y={d}
+                          stroke="#22c55e" strokeOpacity={0.25} strokeDasharray="3 3" strokeWidth={1}
+                          label={{ value: `${d}`, fill: '#22c55e', fontSize: 9, position: 'right' }}
+                        />
+                      ))}
+                      {[-0.25, -0.50, -0.75].map(d => (
+                        <ReferenceLine key={d} yAxisId="delta" y={d}
+                          stroke="#f87171" strokeOpacity={0.25} strokeDasharray="3 3" strokeWidth={1}
+                          label={{ value: `${d}`, fill: '#f87171', fontSize: 9, position: 'right' }}
+                        />
+                      ))}
+                      {/* Strike K */}
+                      <ReferenceLine yAxisId="delta" x={parseFloat(strikeInput)}
+                        stroke={chartCyan} strokeDasharray="4 2" strokeWidth={1.5}
+                        label={{ value: `K $${parseFloat(strikeInput).toFixed(0)}`, fill: chartCyan, fontSize: 10, position: 'insideTopLeft' }}
+                      />
+                      {/* Spot S */}
+                      <ReferenceLine yAxisId="delta" x={parseFloat(spotInput)}
+                        stroke={chartTextColor} strokeDasharray="3 3" strokeWidth={1}
+                        label={{ value: `S $${parseFloat(spotInput).toFixed(0)}`, fill: chartTextColor, fontSize: 10, position: 'insideTopRight' }}
+                      />
+                      <Line yAxisId="delta" dataKey="delta_call" type="monotone" dot={false} strokeWidth={2} stroke="#22c55e" isAnimationActive={false} />
+                      <Line yAxisId="delta" dataKey="delta_put"  type="monotone" dot={false} strokeWidth={2} stroke="#f87171" isAnimationActive={false} />
+                      <Line yAxisId="gamma" dataKey="gamma"      type="monotone" dot={false} strokeWidth={1.5} stroke="#f59e0b" strokeDasharray="4 2" isAnimationActive={false} />
+                    </ComposedChart>
+                  </ResponsiveContainer>
+                </div>
+              </div>
+
+              {/* ── Heatmap table ───────────────────────────────────────── */}
+              <div>
+                <span className="text-xs font-semibold text-terminal-textMuted uppercase tracking-wider block mb-3">
+                  Grille de sensibilité — Greeks par niveau de cours
+                </span>
+                <div className="overflow-x-auto">
+                  <table className="w-full text-xs font-mono border-collapse">
+                    <thead>
+                      <tr className="text-terminal-textDim uppercase tracking-wider text-[10px]">
+                        <th className="text-left py-2 pr-3 font-medium whitespace-nowrap">Cours S</th>
+                        <th className="text-right py-2 px-2 font-medium">Δ%</th>
+                        <th className="text-right py-2 px-2 font-medium">Prix BS</th>
+                        <th className="text-right py-2 px-3 font-medium">Δ Delta</th>
+                        <th className="text-right py-2 px-3 font-medium">Γ Gamma</th>
+                        <th className="text-right py-2 px-3 font-medium">Θ Theta/j</th>
+                        <th className="text-right py-2 pl-3 font-medium">ν Vega</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {sensitivityTable.map((row, idx) => {
+                        const aDelta = Math.abs(row.delta);
+                        const bgPrice = heatAlpha(row.price, tableRanges.price[0], tableRanges.price[1]);
+                        const bgDelta = heatAlpha(aDelta,    tableRanges.delta[0], tableRanges.delta[1]);
+                        const bgGamma = heatAlpha(row.gamma, tableRanges.gamma[0], tableRanges.gamma[1]);
+                        const bgTheta = heatAlpha(Math.abs(row.theta), tableRanges.theta[0], tableRanges.theta[1]);
+                        const bgVega  = heatAlpha(row.vega,  tableRanges.vega[0],  tableRanges.vega[1]);
+
+                        const isRef  = row.isRef;
+                        const rowBg  = isRef
+                          ? 'bg-terminal-surfaceHi border-y border-terminal-border'
+                          : idx % 2 === 0 ? 'bg-terminal-bg/30' : '';
+
+                        return (
+                          <tr key={row.S} className={`${rowBg} transition-colors hover:bg-terminal-surfaceHi/50`}>
+                            {/* S level */}
+                            <td className="py-1.5 pr-3 whitespace-nowrap">
+                              <span className={isRef ? 'text-terminal-cyan font-bold' : 'text-terminal-text'}>
+                                ${row.S.toFixed(2)}
+                              </span>
+                              {isRef && <span className="ml-1.5 text-[9px] text-terminal-cyan">← actuel</span>}
+                            </td>
+                            {/* % change */}
+                            <td className={`text-right py-1.5 px-2 ${row.pct > 0 ? 'text-[#22c55e]' : row.pct < 0 ? 'text-[#f87171]' : 'text-terminal-textMuted'}`}>
+                              {row.pct > 0 ? '+' : ''}{row.pct}%
+                            </td>
+                            {/* Price */}
+                            <td className="text-right py-1.5 px-2">
+                              <span className="rounded px-1.5 py-0.5"
+                                style={{ background: `rgba(0,175,171,${bgPrice * 0.25})`, color: isRef ? '#00afab' : 'inherit' }}>
+                                ${row.price.toFixed(3)}
+                              </span>
+                            </td>
+                            {/* Delta */}
+                            <td className="text-right py-1.5 px-3">
+                              <span className="rounded px-1.5 py-0.5"
+                                style={{ background: optionType === 'call'
+                                  ? `rgba(34,197,94,${bgDelta * 0.35})`
+                                  : `rgba(248,113,113,${bgDelta * 0.35})` }}>
+                                {row.delta.toFixed(4)}
+                              </span>
+                            </td>
+                            {/* Gamma */}
+                            <td className="text-right py-1.5 px-3">
+                              <span className="rounded px-1.5 py-0.5"
+                                style={{ background: `rgba(251,191,36,${bgGamma * 0.40})` }}>
+                                {row.gamma.toFixed(5)}
+                              </span>
+                            </td>
+                            {/* Theta */}
+                            <td className="text-right py-1.5 px-3">
+                              <span className="rounded px-1.5 py-0.5"
+                                style={{ background: `rgba(239,68,68,${bgTheta * 0.35})` }}>
+                                {row.theta.toFixed(4)}
+                              </span>
+                            </td>
+                            {/* Vega */}
+                            <td className="text-right py-1.5 pl-3">
+                              <span className="rounded px-1.5 py-0.5"
+                                style={{ background: `rgba(167,139,250,${bgVega * 0.35})` }}>
+                                {row.vega.toFixed(4)}
+                              </span>
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+                {/* Légende couleurs */}
+                <div className="flex flex-wrap gap-4 mt-3 text-[11px] text-terminal-textDim">
+                  <span className="flex items-center gap-1.5">
+                    <span className="w-3 h-3 rounded inline-block" style={{ background: 'rgba(0,175,171,0.4)' }} />Prix
+                  </span>
+                  <span className="flex items-center gap-1.5">
+                    <span className="w-3 h-3 rounded inline-block" style={{ background: 'rgba(34,197,94,0.4)' }} />Δ Delta
+                  </span>
+                  <span className="flex items-center gap-1.5">
+                    <span className="w-3 h-3 rounded inline-block" style={{ background: 'rgba(251,191,36,0.5)' }} />Γ Gamma
+                  </span>
+                  <span className="flex items-center gap-1.5">
+                    <span className="w-3 h-3 rounded inline-block" style={{ background: 'rgba(239,68,68,0.4)' }} />Θ Theta
+                  </span>
+                  <span className="flex items-center gap-1.5">
+                    <span className="w-3 h-3 rounded inline-block" style={{ background: 'rgba(167,139,250,0.5)' }} />ν Vega
+                  </span>
+                  <span className="ml-auto text-terminal-textDim italic">Intensité = valeur relative dans la colonne</span>
+                </div>
               </div>
             </div>
           )}
