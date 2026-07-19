@@ -82,10 +82,26 @@ _CACHE_TTL   = 300  # 5 minutes
 # Twelve Data helpers (primary when key is available)
 # ─────────────────────────────────────────────────────────────────────────────
 
+_TD_BATCH_SIZE = 8  # TD free plan: 8 credits/minute max
+
+async def _td_batch_all(tickers: list[str]) -> dict:
+    """Fetch quotes in chunks of 8 to stay within TD rate limit."""
+    assert _td is not None
+    combined: dict = {}
+    for i in range(0, len(tickers), _TD_BATCH_SIZE):
+        chunk = tickers[i : i + _TD_BATCH_SIZE]
+        try:
+            chunk_quotes = await _td.get_batch_quotes(chunk)
+            combined.update(chunk_quotes)
+        except Exception as e:
+            print(f"[home] TD chunk {i//8} failed: {e}")
+    return combined
+
+
 async def _td_fetch_tape(tickers: list[str]) -> list[dict]:
     assert _td is not None
     try:
-        quotes = await _td.get_batch_quotes(tickers)
+        quotes = await _td_batch_all(tickers)
         result = []
         for sym in tickers:
             q = quotes.get(sym, {})
@@ -106,7 +122,7 @@ async def _td_fetch_tape(tickers: list[str]) -> list[dict]:
 async def _td_fetch_movers(tickers: list[str]) -> tuple[list[dict], list[dict]]:
     assert _td is not None
     try:
-        quotes = await _td.get_batch_quotes(tickers)
+        quotes = await _td_batch_all(tickers)
         rows = []
         for sym in tickers:
             q = quotes.get(sym, {})
@@ -262,8 +278,10 @@ async def get_market_data():
     global _cache
     now = time.time()
     if _cache["data"] is None or (now - _cache["ts"]) > _CACHE_TTL:
-        data   = await _build_market_data_async()
-        _cache = {"ts": now, "data": data}
+        data = await _build_market_data_async()
+        # Only cache for full TTL if we got real data; retry in 30s otherwise
+        has_data = bool(data.get("tape"))
+        _cache = {"ts": now if has_data else now - _CACHE_TTL + 30, "data": data}
     return _cache["data"]
 
 
