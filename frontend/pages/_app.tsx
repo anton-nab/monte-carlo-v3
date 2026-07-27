@@ -14,6 +14,7 @@
 import type { AppProps } from 'next/app';
 import { SessionProvider } from 'next-auth/react';
 import { DM_Sans, DM_Serif_Display, JetBrains_Mono } from 'next/font/google';
+import { Analytics } from '@vercel/analytics/next';
 import '../styles/globals.css';
 
 const dmSans = DM_Sans({
@@ -42,6 +43,7 @@ export default function App({ Component, pageProps: { session, ...pageProps } }:
     <SessionProvider session={session}>
       <main className={`${dmSans.variable} ${dmSerif.variable} ${jetbrainsMono.variable} font-sans`}>
         <Component {...pageProps} />
+        <Analytics />
       </main>
     </SessionProvider>
   );
